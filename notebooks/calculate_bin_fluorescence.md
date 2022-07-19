@@ -1,41 +1,33 @@
----
-title: "Calculate bin fluorescence"
-author: "Jaeda Patton"
-date: "7/19/2022"
-output: github_document
----
+Calculate bin fluorescence
+================
+Jaeda Patton
+7/19/2022
 
-```{r setup, include=FALSE, message=FALSE}
-require("knitr")
-knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(fig.width=5, fig.height=5)
+This notebook reads in flow cytometry data from the binned sorting
+experiments and calculates the mean fluorescence for each sort bin and
+sample, for both libraries and isogenic control samples. It also
+calculates the overall mean fluorescence for each sample from flow
+cytometry data.
 
-# check for packages and install any that are missing
-packages <- c("flowCore")
-installed_packages <- packages %in% rownames(installed.packages())
-if(any(installed_packages == F)) {
-  install.packages(packages[!installed_packages])
-}
-# load packages
-invisible(lapply(packages, library, character.only=TRUE))
-
-# make output directory
-if(!dir.exists(file.path("..", "results", "sort_bin_fluorescence"))) {
-  dir.create(file.path("..", "results", "sort_bin_fluorescence"))
-}
-```
-
-
-This notebook reads in flow cytometry data from the binned sorting experiments and calculates the mean fluorescence for each sort bin and sample, for both libraries and isogenic control samples. It also calculates the overall mean fluorescence for each sample from flow cytometry data. 
-
-FCS files for each sample were exported from FACSDiva after sorting and analyzed in FlowJo. Gates were drawn in FlowJo based on recorded bin boundary coordinates to replicate the gates used for sorting. In addition to the sort gates, we included gates selecting for homogenous cell populations, single cells, and DBD plasmid retention, as shown in sorting worksheets. Sort bin populations were then exported as FCS files for analysis here.
-
+FCS files for each sample were exported from FACSDiva after sorting and
+analyzed in FlowJo. Gates were drawn in FlowJo based on recorded bin
+boundary coordinates to replicate the gates used for sorting. In
+addition to the sort gates, we included gates selecting for homogenous
+cell populations, single cells, and DBD plasmid retention, as shown in
+sorting worksheets. Sort bin populations were then exported as FCS files
+for analysis here.
 
 ## Functions
 
-First, we create a function to extract normalized GFP fluorescence values from FCS files. GFP fluorescence is recorded in the FITC channel. We assume FSC-A to be proportional to the area of the cross section of a cell, and normalize GFP by cell volume by taking $\textrm{FITC-A} / \textrm{FSC-A}^{1.5}$. We then take the log-10 of this value as the fluorescence measurement.
+First, we create a function to extract normalized GFP fluorescence
+values from FCS files. GFP fluorescence is recorded in the FITC channel.
+We assume FSC-A to be proportional to the area of the cross section of a
+cell, and normalize GFP by cell volume by taking ![\\textrm{FITC-A} /
+\\textrm{FSC-A}^{1.5}](https://latex.codecogs.com/png.image?%5Cdpi%7B110%7D&space;%5Cbg_white&space;%5Ctextrm%7BFITC-A%7D%20%2F%20%5Ctextrm%7BFSC-A%7D%5E%7B1.5%7D
+"\\textrm{FITC-A} / \\textrm{FSC-A}^{1.5}"). We then take the log-10 of
+this value as the fluorescence measurement.
 
-```{r}
+``` r
 extract_GFP <- function(fcs_dir, GFPfluor = 'FITC', norm_method = 1.5) {
   
   # extract FCS data
@@ -60,12 +52,12 @@ extract_GFP <- function(fcs_dir, GFPfluor = 'FITC', norm_method = 1.5) {
 }
 ```
 
-
 ## Reading in data
 
-We will now read in the flow cytometry data from the sort bin populations.
+We will now read in the flow cytometry data from the sort bin
+populations.
 
-```{r}
+``` r
 # read in FCS files for sort rep 1
 # paths to FCS files
 fcs_dir <- list.files(file.path("..", "data", "flow_cytometry", "binned_sort_rep1"), 
@@ -78,12 +70,13 @@ fcs_names <- gsub('_[[:digit:]]+', '', fcs_names)
 fcs_names <- gsub('.fcs', '', fcs_names)
 ```
 
-
 ## Calculating mean fluorescence
 
-We will now calculate the mean fluorescence for each sort bin and sample, as well as the mean fluorescence for each sample across sort bins. These will be stored in a data frame.
+We will now calculate the mean fluorescence for each sort bin and
+sample, as well as the mean fluorescence for each sample across sort
+bins. These will be stored in a data frame.
 
-```{r}
+``` r
 # calculate mean fluorescence for each bin and sample
 # first, define sample names
 samples <- sapply(fcs_names, strsplit, '_bin ')
@@ -117,12 +110,12 @@ for(i in 1:length(samples)) {
 write.table(mean_F, file.path("..", "results", "sort_bin_fluorescence", "binned_sort_rep_1_FACS_fluorescence.txt"), sep='\t')
 ```
 
-
 ## QC checks
 
-We'll check the mean library fluorescence over the course of the sorting experiment to check for fluorescence drift.
+We’ll check the mean library fluorescence over the course of the sorting
+experiment to check for fluorescence drift.
 
-```{r}
+``` r
 # rep 1
 
 # mean GFP of library samples
@@ -135,5 +128,7 @@ sat_mean_F <- mean_F[grepl('sat', rownames(mean_F)), 5]
 plot(x=1:5, y=full_lib_mean_F, xlab='hr', ylab='mean library fluorescence', ylim=c(null_mean_F, sat_mean_F))
 ```
 
-Looks like library fluorescence decreased slightly over the course of sorting, but very little compared to the dynamic range.
+![](calculate_bin_fluorescence_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
+Looks like library fluorescence decreased slightly over the course of
+sorting, but very little compared to the dynamic range.
