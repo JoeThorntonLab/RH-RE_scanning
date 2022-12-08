@@ -9,13 +9,13 @@ and replicate, for both libraries and isogenic control samples. It also
 calculates the overall mean fluorescence for each sample from flow
 cytometry data.
 
-FCS files for each sample were exported from FACSDiva after sorting and
-analyzed in FlowJo. Gates were drawn in FlowJo based on recorded bin
-boundary coordinates to replicate the gates used for sorting. In
-addition to the sort gates, we included gates selecting for homogenous
-cell populations, single cells, and DBD plasmid retention, as shown in
-the gating plots. Sort bin populations were then exported as FCS files
-for analysis here.
+FCS files for each sample (libraries and isogenic strains) were exported
+from FACSDiva after sorting. Gates were drawn in FlowJo based on bin
+boundary coordinates recorded during sorting. These coordinates were
+identical across sorting replicates. In addition to the sort gates, we
+included upstream gates selecting for homogenous cell populations,
+single cells, and DBD plasmid retention, as shown in the gating plots.
+Sort bin populations were then exported as FCS files for analysis here.
 
 ## Setup
 
@@ -75,14 +75,14 @@ extract_GFP <- function(fcs_dir, GFPfluor = 'FITC', norm_method = 1.5) {
 
 ## Calculating mean fluorescence
 
-We will now calculate the mean fluorescence for each sort bin and
-sample, as well as the mean fluorescence for each sample across sort
-bins. These will be stored in a data frame.
+For each replicate, we calculate the mean fluorescence for each sort bin
+and sample, as well as the mean fluorescence across all sort bins for
+each sample. These are written to a file.
 
 ``` r
-fcs_files <- list()  # list to store file names for each replicate
+fcs_files <- list()  # to store file names for each replicate
 
-for(i in 1:4) {
+for(i in 1:4) {  # for each sorting replicate
   #list fcs files
   dir <- paste0(file.path("..", "data", "flow_cytometry", "binned_sort_rep"), i)
   fcs_files[[i]] <- list.files(dir, full.names = TRUE)
@@ -149,7 +149,7 @@ write.table(meanF, file.path("..", "results", "sort_bin_fluorescence",
 
 ## QC checks
 
-We’ll check the mean library fluorescence over the course of the sorting
+Let’s plot the mean library fluorescence over the course of the sorting
 experiment to check for fluorescence drift.
 
 ``` r
