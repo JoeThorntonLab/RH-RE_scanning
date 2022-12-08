@@ -1,7 +1,7 @@
 Calculate bin fluorescence
 ================
 Jaeda Patton
-7/19/2022
+12/8/2022
 
 This notebook reads in flow cytometry data from the binned sorting
 experiments and calculates the mean fluorescence for each bin, sample,
