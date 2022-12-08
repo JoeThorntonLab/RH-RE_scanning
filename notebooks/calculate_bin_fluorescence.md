@@ -4,8 +4,8 @@ Jaeda Patton
 7/19/2022
 
 This notebook reads in flow cytometry data from the binned sorting
-experiments and calculates the mean fluorescence for each sort bin and
-sample, for both libraries and isogenic control samples. It also
+experiments and calculates the mean fluorescence for each bin, sample,
+and replicate, for both libraries and isogenic control samples. It also
 calculates the overall mean fluorescence for each sample from flow
 cytometry data.
 
@@ -14,7 +14,7 @@ analyzed in FlowJo. Gates were drawn in FlowJo based on recorded bin
 boundary coordinates to replicate the gates used for sorting. In
 addition to the sort gates, we included gates selecting for homogenous
 cell populations, single cells, and DBD plasmid retention, as shown in
-sorting worksheets. Sort bin populations were then exported as FCS files
+the gating plots. Sort bin populations were then exported as FCS files
 for analysis here.
 
 ## Functions
@@ -22,10 +22,9 @@ for analysis here.
 First, we create a function to extract normalized GFP fluorescence
 values from FCS files. GFP fluorescence is recorded in the FITC channel.
 We assume FSC-A to be proportional to the area of the cross section of a
-cell, and normalize GFP by cell volume by taking ![\\textrm{FITC-A} /
-\\textrm{FSC-A}^{1.5}](https://latex.codecogs.com/png.image?%5Cdpi%7B110%7D&space;%5Cbg_white&space;%5Ctextrm%7BFITC-A%7D%20%2F%20%5Ctextrm%7BFSC-A%7D%5E%7B1.5%7D
-"\\textrm{FITC-A} / \\textrm{FSC-A}^{1.5}"). We then take the log-10 of
-this value as the fluorescence measurement.
+cell. We normalize GFP by cell volume by taking
+![\textrm{FITC-A} / \textrm{FSC-A}^{1.5}](https://latex.codecogs.com/png.image?%5Cdpi%7B110%7D&space;%5Cbg_white&space;%5Ctextrm%7BFITC-A%7D%20%2F%20%5Ctextrm%7BFSC-A%7D%5E%7B1.5%7D "\textrm{FITC-A} / \textrm{FSC-A}^{1.5}").
+The log-10 of this value our measure of fluorescence.
 
 ``` r
 extract_GFP <- function(fcs_dir, GFPfluor = 'FITC', norm_method = 1.5) {
@@ -52,24 +51,6 @@ extract_GFP <- function(fcs_dir, GFPfluor = 'FITC', norm_method = 1.5) {
 }
 ```
 
-## Reading in data
-
-We will now read in the flow cytometry data from the sort bin
-populations.
-
-``` r
-# read in FCS files for sort rep 1
-# paths to FCS files
-fcs_dir <- list.files(file.path("..", "data", "flow_cytometry", "binned_sort_rep1"), 
-                      pattern='.+\\.fcs', full.names=TRUE)
-
-# sample/bin names
-fcs_names <- gsub(paste0(file.path("..", "data", "flow_cytometry", "binned_sort_rep1"), "[/\\\\]"), "", fcs_dir)
-fcs_names <- gsub("export_Sample_", "", fcs_names)
-fcs_names <- gsub('_[[:digit:]]+', '', fcs_names)
-fcs_names <- gsub('.fcs', '', fcs_names)
-```
-
 ## Calculating mean fluorescence
 
 We will now calculate the mean fluorescence for each sort bin and
@@ -77,37 +58,71 @@ sample, as well as the mean fluorescence for each sample across sort
 bins. These will be stored in a data frame.
 
 ``` r
-# calculate mean fluorescence for each bin and sample
-# first, define sample names
-samples <- sapply(fcs_names, strsplit, '_bin ')
-samples <- sapply(samples, `[`, 1)
-samples <- unique(samples)
+fcs_files <- list()  # list to store file names for each replicate
 
-# Create data frame to store mean fluorescence values.
-# Rows are samples. The first four columns are the mean fluorescence for each
-# sort bin; the last column ("total") is the mean fluorescence across all sort bins.
-mean_F <- as.data.frame(matrix(rep(NA, length(samples)*5), nrow=length(samples), ncol=5))
-rownames(mean_F) <- samples
-colnames(mean_F) <- c(1:4, 'total')
-
-for(i in 1:length(fcs_dir)) {
-  sample_bin <- unlist(strsplit(fcs_names[i], '_bin '))
-  GFP <- extract_GFP(fcs_dir[i])
-  mean_F[rownames(mean_F)==sample_bin[1], sample_bin[2]] <- mean(GFP)
+for(i in 1:4) {
+  #list fcs files
+  dir <- paste0(file.path("..", "data", "flow_cytometry", "binned_sort_rep"), i)
+  fcs_files[[i]] <- list.files(dir, full.names = TRUE)
+  
+  # sample names
+  names(fcs_files[[i]]) <- gsub(dir, "", fcs_files[[i]])
+  names(fcs_files[[i]]) <- gsub("[/\\\\]export_Sample_", "", 
+                                names(fcs_files[[i]]))
+  names(fcs_files[[i]]) <- gsub("_[[:digit:]]+", "", 
+                                names(fcs_files[[i]]))
+  names(fcs_files[[i]]) <- gsub("\\.fcs", "", 
+                                names(fcs_files[[i]]))
 }
 
-# calculate mean fluorescence for each sample
-for(i in 1:length(samples)) {
-  fcs_dir_sample <- fcs_dir[grepl(samples[i], fcs_names, fixed=TRUE)]
-  GFP <- c()
-  for(j in 1:length(fcs_dir_sample)) {
-    GFP <- c(GFP, extract_GFP(fcs_dir_sample[j]))
+# calculate mean fluorescence for each sample, bin, and replicate
+meanF <- list()
+for(i in 1:4) {
+  
+  # sample names
+  samples <- sapply(names(fcs_files[[i]]), strsplit, "_bin ")
+  samples <- sapply(samples, `[`, 1)
+  samples <- unique(samples)
+  
+  # create data frame to store values
+  meanF[[i]] <- data.frame(sample = samples,
+                           bin1 = NA,
+                           bin2 = NA,
+                           bin3 = NA,
+                           bin4 = NA, 
+                           total = NA)
+  
+  # calculate meanF from each fcs file
+  for(j in 1:length(fcs_files[[i]])) {
+    
+    # extract sample name and bin for fcs file
+    sample_bin <- unlist(strsplit(names(fcs_files[[i]])[j], "_bin "))
+    
+    # extract normalized GFP values
+    GFP <- extract_GFP(fcs_files[[i]][j])
+    
+    # concatenate GFP values for current sample
+    if(sample_bin[2] == "1") GFP_total <- GFP
+    else GFP_total <- c(GFP_total, GFP)
+    
+    # add mean bin GFP to data frame
+    meanF[[i]][meanF[[i]]$sample == sample_bin[1], 
+               paste0("bin", sample_bin[2])] <- mean(GFP)
+    
+    # add mean GFP across bins to data frame
+    if(sample_bin[2] == 4) meanF[[i]][meanF[[i]]$sample == sample_bin[1], 
+                                      "total"] <- mean(GFP_total)
   }
-  mean_F[rownames(mean_F)==samples[i], 5] <- mean(GFP)
 }
+
+# create data frame from list with column for replicate
+meanF <- bind_rows(meanF, .id = "replicate")
+
 
 # write results to a table
-write.table(mean_F, file.path("..", "results", "sort_bin_fluorescence", "binned_sort_rep_1_FACS_fluorescence.txt"), sep='\t')
+write.table(meanF, file.path("..", "results", "sort_bin_fluorescence", 
+                             "binned_sort_FACS_fluorescence.txt"), 
+            sep='\t', row.names = FALSE)
 ```
 
 ## QC checks
@@ -116,19 +131,20 @@ We’ll check the mean library fluorescence over the course of the sorting
 experiment to check for fluorescence drift.
 
 ``` r
-# rep 1
-
-# mean GFP of library samples
-full_lib_mean_F <- mean_F[grepl('full_lib', rownames(mean_F)), 5]
+full_lib_meanF <- meanF %>% filter(grepl("full_lib", sample))
+full_lib_meanF <- full_lib_meanF %>% 
+  mutate(hour = sub("full_lib_hr", "", sample))
 
 # use GFP-null and GFP-saturated isogenic strains to bound the y-axis of the plot
-null_mean_F <- mean_F[grepl('null', rownames(mean_F)), 5]
-sat_mean_F <- mean_F[grepl('sat', rownames(mean_F)), 5]
+null_meanF <- meanF %>% filter(grepl("null", sample)) %>% pull(total)
+sat_meanF <- meanF %>% filter(grepl("sat", sample)) %>% pull(total) %>% mean()
 
-plot(x=1:5, y=full_lib_mean_F, xlab='hr', ylab='mean library fluorescence', ylim=c(null_mean_F, sat_mean_F))
+ggplot(full_lib_meanF, aes(x = hour, y = total, color = replicate)) + 
+  geom_point() +
+  ylim(null_meanF, sat_meanF)
 ```
 
-![](calculate_bin_fluorescence_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+![](calculate_bin_fluorescence_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
 Looks like library fluorescence decreased slightly over the course of
 sorting, but very little compared to the dynamic range.
