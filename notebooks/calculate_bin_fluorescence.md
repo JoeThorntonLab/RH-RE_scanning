@@ -89,12 +89,9 @@ for(i in 1:4) {  # for each sorting replicate
   
   # sample names
   names(fcs_files[[i]]) <- gsub(dir, "", fcs_files[[i]])
-  names(fcs_files[[i]]) <- gsub("[/\\\\]export_Sample_", "", 
-                                names(fcs_files[[i]]))
-  names(fcs_files[[i]]) <- gsub("_[[:digit:]]+", "", 
-                                names(fcs_files[[i]]))
-  names(fcs_files[[i]]) <- gsub("\\.fcs", "", 
-                                names(fcs_files[[i]]))
+  names(fcs_files[[i]]) <- gsub("[/\\\\]export_Sample_", "",  names(fcs_files[[i]]))
+  names(fcs_files[[i]]) <- gsub("_[[:digit:]]+", "", names(fcs_files[[i]]))
+  names(fcs_files[[i]]) <- gsub("\\.fcs", "", names(fcs_files[[i]]))
 }
 
 # calculate mean fluorescence for each sample, bin, and replicate
@@ -107,12 +104,7 @@ for(i in 1:4) {
   samples <- unique(samples)
   
   # create data frame to store values
-  meanF[[i]] <- data.frame(sample = samples,
-                           bin1 = NA,
-                           bin2 = NA,
-                           bin3 = NA,
-                           bin4 = NA, 
-                           total = NA)
+  meanF[[i]] <- data.frame(sample = samples, bin1 = NA, bin2 = NA, bin3 = NA, bin4 = NA, total = NA)
   
   # calculate meanF from each fcs file
   for(j in 1:length(fcs_files[[i]])) {
@@ -128,12 +120,10 @@ for(i in 1:4) {
     else GFP_total <- c(GFP_total, GFP)
     
     # add mean bin GFP to data frame
-    meanF[[i]][meanF[[i]]$sample == sample_bin[1], 
-               paste0("bin", sample_bin[2])] <- mean(GFP)
+    meanF[[i]][meanF[[i]]$sample == sample_bin[1], paste0("bin", sample_bin[2])] <- mean(GFP)
     
     # add mean GFP across bins to data frame
-    if(sample_bin[2] == 4) meanF[[i]][meanF[[i]]$sample == sample_bin[1], 
-                                      "total"] <- mean(GFP_total)
+    if(sample_bin[2] == 4) meanF[[i]][meanF[[i]]$sample == sample_bin[1], "total"] <- mean(GFP_total)
   }
 }
 
@@ -142,8 +132,7 @@ meanF <- bind_rows(meanF, .id = "replicate")
 
 
 # write results to a table
-write.table(meanF, file.path("..", "results", "sort_bin_fluorescence", 
-                             "binned_sort_FACS_fluorescence.txt"), 
+write.table(meanF, file.path("..", "results", "sort_bin_fluorescence", "binned_sort_FACS_fluorescence.txt"), 
             sep='\t', row.names = FALSE)
 ```
 
@@ -162,7 +151,7 @@ null_meanF <- meanF %>% filter(grepl("null", sample)) %>% pull(total)
 sat_meanF <- meanF %>% filter(grepl("sat", sample)) %>% pull(total) %>% mean()
 
 ggplot(full_lib_meanF, aes(x = hour, y = total, color = replicate)) + 
-  geom_point() +
+  geom_point() + 
   ylim(null_meanF, sat_meanF)
 ```
 
