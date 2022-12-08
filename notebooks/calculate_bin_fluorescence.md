@@ -17,6 +17,28 @@ cell populations, single cells, and DBD plasmid retention, as shown in
 the gating plots. Sort bin populations were then exported as FCS files
 for analysis here.
 
+## Setup
+
+``` r
+require("knitr")
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=5, fig.height=5)
+
+# check for packages and install any that are missing
+packages <- c("flowCore", "dplyr", "ggplot2")
+installed_packages <- packages %in% rownames(installed.packages())
+if(any(installed_packages == F)) {
+  install.packages(packages[!installed_packages])
+}
+# load packages
+invisible(lapply(packages, library, character.only=TRUE))
+
+# make output directory
+if(!dir.exists(file.path("..", "results", "sort_bin_fluorescence"))) {
+  dir.create(file.path("..", "results", "sort_bin_fluorescence"))
+}
+```
+
 ## Functions
 
 First, we create a function to extract normalized GFP fluorescence
