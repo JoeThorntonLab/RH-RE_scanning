@@ -85,7 +85,7 @@ fcs_files <- list()  # to store file names for each replicate
 for(i in 1:4) {  # for each sorting replicate
   #list fcs files
   dir <- paste0(file.path("..", "data", "flow_cytometry", "binned_sort_rep"), i)
-  fcs_files[[i]] <- list.files(dir, full.names = TRUE)
+  fcs_files[[i]] <- list.files(dir, full.names = TRUE, pattern = ".+fcs$")
   
   # sample names
   names(fcs_files[[i]]) <- gsub(dir, "", fcs_files[[i]])
