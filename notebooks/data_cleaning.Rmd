@@ -36,6 +36,7 @@ invisible(lapply(packages, library, character.only=TRUE))
 Any functions that we want to define
 
 ```{r functions}
+# make factors with different levels for ordering of REs in plotting
 REs <- list()
 REs[[1]] <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", 
                      "AG", "AT", "CA", "CC", 
@@ -46,6 +47,7 @@ REs[[1]] <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC",
                             "CG", "CT","GC", "GG", 
                             "TA", "TC", "TG", "TT"))
 
+# convert REBC (RE barcode) to RE variant
 REBC_to_RE <- function(REBC, levels=1) {
   if(is.character(REBC)) {
     bc <- str_extract(REBC, "\\d+")
@@ -62,6 +64,7 @@ REBC_to_RE <- function(REBC, levels=1) {
 
 ```{r readdata}
 if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
+  #### need to update file paths once we find a permanent place to store the data
   untar(file.path("..", "data", "meanF", "meanF_NovaSeq_data.tar.gz"), 
         exdir = file.path("..", "data", "meanF"))
   datafiles <- untar(file.path("..", "data", "meanF", "meanF_NovaSeq_data.tar.gz"), list = TRUE)
@@ -99,6 +102,7 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   save(meanF_data, file = file.path("..", "data", "meanF", "meanF_data.rda"))
   save(debulk_data, file = file.path("..", "data", "meanF", "debulk_data.rda"))
 } else {
+  # load R data frames if already created
   load(file.path("..", "data", "meanF", "meanF_data.rda"))
   load(file.path("..", "data", "meanF", "debulk_data.rda"))
 }
