@@ -1,0 +1,141 @@
+---
+title: "Data cleaning"
+author: "Jaeda Patton"
+date: "2023-03-14"
+output: github_document
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE, message=FALSE, purl = TRUE}
+require("knitr")
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=5, fig.height=5)
+
+# check for packages and install any that are missing
+packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble", 
+              "dplyr")
+installed_packages <- packages %in% rownames(installed.packages())
+
+if(any(installed_packages == F)) {
+  install.packages(packages[!installed_packages])
+}
+
+# load packages
+invisible(lapply(packages, library, character.only=TRUE))
+
+# make output directories
+# if(!dir.exists(file.path("..", "results"))) {
+#   dir.create(file.path("..", "results"))
+# }
+```
+
+
+## Functions
+
+Any functions that we want to define
+
+```{r functions}
+REs <- list()
+REs[[1]] <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", 
+                     "AG", "AT", "CA", "CC", 
+                     "CG", "CT", "GC", "GG", 
+                     "TA", "TC", "TG", "TT"), 
+                   levels=c("ERE (GT)", "SRE1 (AA)", "SRE2 (GA)", "AC", 
+                            "AG", "AT", "CA", "CC", 
+                            "CG", "CT","GC", "GG", 
+                            "TA", "TC", "TG", "TT"))
+
+REBC_to_RE <- function(REBC, levels=1) {
+  if(is.character(REBC)) {
+    bc <- str_extract(REBC, "\\d+")
+    bc <- as.integer(bc)
+  }
+  RE <- REs[[levels]][bc]
+  return(RE)
+}
+```
+
+
+
+## Reading in data
+
+```{r readdata}
+if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
+  untar(file.path("..", "data", "meanF", "meanF_NovaSeq_data.tar.gz"), 
+        exdir = file.path("..", "data", "meanF"))
+  datafiles <- untar(file.path("..", "data", "meanF", "meanF_NovaSeq_data.tar.gz"), list = TRUE)
+  meanF_data <- list()
+  
+  for(i in 1:length(datafiles)) {
+    # read mean fluorescence data for variants detected in binned sort experiment
+    if(grepl("DMS_meanF", datafiles[i])) {
+      rep <- str_extract(datafiles[i], "rep.")
+      meanF_data[[rep]] <- read.csv(file.path("..", "data", "meanF", datafiles[i]), 
+                                    stringsAsFactors = TRUE)
+      # add column for total cell count
+      meanF_data[[rep]] <- meanF_data[[rep]] %>%
+        mutate(cellCount_total = cellCount_b1 + cellCount_b2 + cellCount_b3 + cellCount_b4)
+      # add columns for protein background and RE
+      meanF_data[[rep]] <- meanF_data[[rep]] %>%
+        separate(REBC, into = c("bg", "RE"), sep = "_", remove = F, extra = "merge") %>%
+        mutate(bg = str_replace(factor(bg), "^SR", "AncSR"),
+               RE = str_replace(RE, "REBC\\d+", as.character(REBC_to_RE(RE))))
+      # sort rows by REBC and AA_var
+      meanF_data[[rep]] <- meanF_data[[rep]] %>% arrange(REBC, AA_var)
+    } 
+    
+    # read in data from debulk sort experiment
+    else if(grepl("Debulk", datafiles[i])) {
+      debulk_data <- read.csv(file.path("..", "data", "meanF", datafiles[i]), 
+                              stringsAsFactors = TRUE)
+    }
+  }
+  
+  # unlist meanF data
+  meanF_data <- rbind(meanF_data$rep1, meanF_data$rep2, meanF_data$rep3, meanF_data$rep4)
+  
+  # save data files for faster loading
+  save(meanF_data, file = file.path("..", "data", "meanF", "meanF_data.rda"))
+  save(debulk_data, file = file.path("..", "data", "meanF", "debulk_data.rda"))
+} else {
+  load(file.path("..", "data", "meanF", "meanF_data.rda"))
+  load(file.path("..", "data", "meanF", "debulk_data.rda"))
+}
+```
+
+
+## Filtering binned sort data
+
+```{r filterbinned}
+
+```
+
+
+Show correlation between replicates
+
+
+## Correcting nonlinearity between replicates
+
+```{r splinefit}
+
+```
+
+
+
+Show new correlation between replicates
+
+
+## Filtering by standard error
+
+```{r filterse}
+
+```
+
+
+## Filtering debulk sort data
+
+```{r filterdebulk}
+
+```
+
