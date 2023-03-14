@@ -1,0 +1,909 @@
+---
+title: "Jaeda rep 1 preliminary analyses"
+author: "Jaeda Patton"
+date: "11/1/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+require("knitr")
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=5, fig.height=5)
+
+# check for packages and install any that are missing
+packages <- c("dplyr", "tidyr", "MASS", "ggplot2", "ggseqlogo", "ggupset",
+              "igraph", "Biostrings", "grid", "ggplotify", "lemon")
+installed_packages <- packages %in% rownames(installed.packages())
+if(any(installed_packages == F)) {
+  install.packages(packages[!installed_packages])
+}
+
+# load packages
+invisible(lapply(packages, library, character.only=TRUE))
+
+
+# make output directories
+if(!dir.exists(file.path("..", "results", "rep1_Jaeda_prelim_analyses"))) {
+  dir.create(file.path("..", "results","rep1_Jaeda_prelim_analyses"))
+}
+
+if(!dir.exists(file.path("..", "results", "rep1_Jaeda_prelim_analyses", 
+                         "networks"))) {
+  dir.create(file.path("..", "results","rep1_Jaeda_prelim_analyses", 
+                       "networks"))
+}
+
+if(!dir.exists(file.path("..", "figures", "rep1_Jaeda_prelim_analyses"))) {
+  dir.create(file.path("..", "figures","rep1_Jaeda_prelim_analyses"))
+}
+
+figures.output <- file.path("..", "figures", "rep1_Jaeda_prelim_analyses")
+networks.output <- file.path("..", "results", "rep1_Jaeda_prelim_analyses", 
+                             "networks")
+```
+
+This notebook performs some preliminary analyses on the initial rep 1 sorting data.
+
+
+## Defining functions
+
+```{r}
+# read in mean fluorescence data, add in column for total estimated cell count
+# (default), filter variants that have at least minreads
+read_data <- function(file, cellcounttotal = FALSE, gz = TRUE, minreads = 30) {
+  if(gz) data <- read.csv(gzfile(file))
+  else data <- read.csv(file)
+  
+  if(!cellcounttotal) 
+    data$cellCount_total <- rowSums(data[,grepl("cellCount", colnames(data))])
+  
+  data <- data %>% filter(Count_total >= minreads)
+  return(data)
+}
+
+
+# convert REBC number to RE variant
+# make factors with different levels for ordering of REs in plotting
+REs1 <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", "AG", "AT", "CA", 
+                 "CC", "CG", "CT", "GC", "GG", "TA", "TC", "TG", "TT"), 
+           levels=c("ERE (GT)", "SRE1 (AA)", "SRE2 (GA)", "AC", "AG", "AT", 
+                    "CA", "CC", "CG", "CT","GC", "GG", "TA", "TC", "TG", "TT"))
+REs2 <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", "AG", "AT", "CA", 
+                 "CC", "CG", "CT",  "GC", "GG", "TA", "TC", "TG", "TT"), 
+           levels=c("SRE1 (AA)", "SRE2 (GA)", "AT", "ERE (GT)",
+                    "CA", "TA", "CT", "TT",
+                    "AC", "GC", "AG", "GG",
+                    "CC", "TC", "CG", "TG"))
+REs3 <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", "AG", "AT", "CA", 
+                 "CC", "CG", "CT",  "GC", "GG", "TA", "TC", "TG", "TT"), 
+           levels=c("SRE1 (AA)", "CA", "AC", "CC",
+                    "SRE2 (GA)", "TA", "GC", "TC",
+                    "AT", "CT", "AG", "CG",
+                    "ERE (GT)", "TT", "GG", "TG"))
+REs4 <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", "AG", "AT", "CA", 
+                 "CC", "CG", "CT", "GC", "GG", "TA", "TC", "TG", "TT"), 
+           levels=c("SRE1 (AA)", "CA", "AC", "CC",
+                    "TC", "GC", "TA", "SRE2 (GA)",
+                    "AT", "CT", "AG", "CG",
+                    "TG", "GG", "TT", "ERE (GT)"))
+REs5 <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", "AG", "AT", "CA", 
+                 "CC", "CG", "CT", "GC", "GG", "TA", "TC", "TG", "TT"), 
+           levels=c("SRE1 (AA)", "SRE2 (GA)", "TA", "CA",
+                    "CC", "TC", "GC", "AC",
+                    "ERE (GT)", "TT", "CT", "AT",
+                    "TG", "GG", "AG", "CG"))
+REBC_to_RE <- function(REBC, levels=1) {
+  REBC <- as.integer(REBC)
+  if(levels==1) {
+    RE <- REs1[REBC]
+  } else if(levels==2) {
+    RE <- REs2[REBC]
+  } else if(levels==3) {
+    RE <- REs3[REBC]
+  } else if(levels==4) {
+    RE <- REs4[REBC]
+  } else if(levels==5) {
+    RE <- REs5[REBC]
+  }
+  return(RE)
+}
+
+
+# extract non-stop codon variants from a particular library
+get_nonstop <- function(data, lib) {
+  nonstop <- data %>% filter(REBC==lib & !grepl("\\*", AA_var)) %>% 
+    pull(AA_var) %>% as.character()
+  return(nonstop)
+}
+
+
+# extract stop codon variants from a particular library
+get_stop <- function(data, lib) {
+  stop <- data %>% filter(REBC==lib & grepl("\\*", AA_var)) %>% 
+    pull(AA_var) %>% as.character()
+  return(stop)
+}
+
+
+# extract GFP+ variants, i.e. non-stop variants whose fluorescence is 
+# significantly greater than stop variants from the same library
+get_GFPpos <- function(data, lib, alpha_fdr = 0.01, minreadsstop = 30) {
+  nonstop_data <- data %>% filter(REBC==lib & 
+                                    AA_var %in% get_nonstop(data, lib) & 
+                                    Count_total >= minreadsstop)
+  stop_data <- data %>% filter(REBC==lib & 
+                                 AA_var %in% get_stop(data, lib) & 
+                                 Count_total >= minreadsstop)
+  
+  if(nrow(stop_data) >= 3) {
+    # Fit a normal distribution to the fluorescence of stop codon variants
+    stop_fit <- fitdistr(stop_data$meanF, "normal")$estimate
+    
+    # Compute a p-value for each non-stop variant by calculating the proportion 
+    # of the fitted stop codon distribution that is greater than the test 
+    # variant fluorescence.
+    p <- sapply(nonstop_data$meanF, pnorm, mean=stop_fit[1], sd=stop_fit[2], 
+                lower.tail=FALSE)
+    
+    # Compute adjusted p-values for Benjamini-Hochberg correction
+    p.adj <- p.adjust(p, method="fdr")
+  } else {
+    # assign all p-values to 1 if fewer than 3 stop codon variants
+    p.adj <- rep(1, nrow(nonstop_data))
+  }
+  
+  GFPpos <- as.character(nonstop_data$AA_var[p.adj <= alpha_fdr])
+  return(GFPpos)
+}
+
+
+# extract nonstop variants that have fluorescence greater than some threshold
+get_above_thresh <- function(data, lib, thresh = -4) {
+  abovethresh <- data %>% filter(REBC==lib & 
+                                   AA_var %in% get_nonstop(data, lib) & 
+                                   meanF >= thresh) %>% 
+    pull(AA_var) %>% as.character()
+  return(abovethresh)
+}
+
+
+# determine whether two amino acid sequences can be connected by a single 
+# nucleotide change given the genetic code
+connected <- function(seqs) {
+  seq1 <- unlist(strsplit(seqs[1], ""))
+  seq2 <- unlist(strsplit(seqs[2], ""))
+  
+  if(sum(seq1 != seq2) == 1) {
+    i <- which(seq1 != seq2)
+    codons1 <- names(GENETIC_CODE[GENETIC_CODE==seq1[i]])
+    codons2 <- names(GENETIC_CODE[GENETIC_CODE==seq2[i]])
+    pairs <- expand.grid(list(codons1, codons2), stringsAsFactors=FALSE)
+    connected <- apply(pairs, 1, function(x) 
+      sum(do.call("!=", strsplit(as.character(x), ""))) == 1)
+    return(sum(connected) > 0)
+  } else return(FALSE)
+}
+
+
+# determine whether two REs differ by a single nucleotide
+connected_RE <- function(REs) {
+  REs[REs=="ERE (GT)"] <- "GT"
+  REs[REs=="SRE1 (AA)"] <- "AA"
+  REs[REs=="SRE2 (GA)"] <- "GA"
+  
+  RE1 <- unlist(strsplit(REs[1], ""))
+  RE2 <- unlist(strsplit(REs[2], ""))
+  
+  diff <- sum(RE1 != RE2)
+  if(diff==1) return(TRUE)
+  else return(FALSE)
+}
+```
+
+
+## Creating color palette for plotting
+
+```{r}
+rotate <- function(x) t(apply(x, 2, rev))
+n <- 4
+mm <- tcrossprod(seq(1,0,length.out = n))
+
+# generate palettes for REs
+
+# tmp1 <- sapply(col2rgb("#70ef20")/255, function(x) 1-mm*(1-x))
+# tmp2 <- sapply(col2rgb("#20d8ef")/255, function(x) 1-rotate(mm)*(1-x))
+# tmp3 <- sapply(col2rgb("#ef3720")/255, function(x) 1-rotate(rotate(mm))*(1-x))
+# tmp4 <- sapply(col2rgb("#a020f0")/255, function(x) 1-rotate(rotate(rotate(mm)))*(1-x))
+
+# tmp1 <- sapply(col2rgb("#70ef20")/255, function(x) 1-mm*(1-x))
+# tmp2 <- sapply(col2rgb("#ef3720")/255, function(x) 1-rotate(mm)*(1-x))
+# tmp3 <- sapply(col2rgb("#20d8ef")/255, function(x) 1-rotate(rotate(mm))*(1-x))
+# tmp4 <- sapply(col2rgb("#a020f0")/255, function(x) 1-rotate(rotate(rotate(mm)))*(1-x))
+
+# tmp1 <- sapply(col2rgb("#9bec0d")/255, function(x) 1-mm*(1-x))
+# tmp2 <- sapply(col2rgb("#0deccd")/255, function(x) 1-rotate(mm)*(1-x))
+# tmp3 <- sapply(col2rgb("#ec0d2b")/255, function(x) 1-rotate(rotate(mm))*(1-x))
+# tmp4 <- sapply(col2rgb("#5e0dec")/255, function(x) 1-rotate(rotate(rotate(mm)))*(1-x))
+
+tmp1 <- sapply(col2rgb("#9bec0d")/255, function(x) 1-mm*(1-x))
+tmp2 <- sapply(col2rgb("#ec0d2b")/255, function(x) 1-rotate(mm)*(1-x))
+tmp3 <- sapply(col2rgb("#0deccd")/255, function(x) 1-rotate(rotate(mm))*(1-x))
+tmp4 <- sapply(col2rgb("#5e0dec")/255, function(x) 1-rotate(rotate(rotate(mm)))*(1-x))
+
+# tmp1 <- sapply(col2rgb("#0dec13")/255, function(x) 1-mm*(1-x))
+# tmp2 <- sapply(col2rgb("#0d76ec")/255, function(x) 1-rotate(mm)*(1-x))
+# tmp3 <- sapply(col2rgb("#ec830d")/255, function(x) 1-rotate(rotate(mm))*(1-x))
+# tmp4 <- sapply(col2rgb("#ec0de5")/255, function(x) 1-rotate(rotate(rotate(mm)))*(1-x))
+# 
+# tmp1 <- sapply(col2rgb("#76ec0d")/255, function(x) 1-mm*(1-x))
+# tmp2 <- sapply(col2rgb("#0d76ec")/255, function(x) 1-rotate(mm)*(1-x))
+# tmp3 <- sapply(col2rgb("#ec830d")/255, function(x) 1-rotate(rotate(mm))*(1-x))
+# tmp4 <- sapply(col2rgb("#820dec")/255, function(x) 1-rotate(rotate(rotate(mm)))*(1-x))
+
+tmp <- (tmp1*tmp2*tmp3*tmp4)
+RE_palette <- matrix(rgb(tmp), nrow = n)
+RE_palette_legend <- matrix(c("SRE1 (AA)", "CA", "AC", "CC", 
+                              "SRE2 (GA)", "TA", "GC", "TC", 
+                              "AT", "CT","AG", "CG", 
+                              "ERE (GT)", "TT", "GG", "TG"), 
+                            nrow = n, byrow = TRUE)
+grid.newpage()
+grid.raster(RE_palette, interpolate=FALSE)
+# RE_palette <- rasterGrob(matrix(rgb(tmp), nrow = n), interpolate = FALSE)
+# RE_palette <- as.grob(grid.raster(matrix(rgb(tmp), nrow = n), interpolate = FALSE))
+# ggsave(file.path("..", "figures", "networks", "RE_palette.pdf"), RE_palette,
+#        device="pdf")
+
+print(RE_palette)
+print(RE_palette_legend)
+
+# generate gradient for promiscuous genotypes
+promiscuity_palette <- matrix(rgb(seq(1, 0, length.out=15), seq(1, 0, length.out=15), 
+                       seq(1, 0, length.out=15)), nrow = 1)
+grid.newpage()
+grid.raster(promiscuity_palette, interpolate=FALSE)
+print(promiscuity_palette)
+
+
+# generate intermediate SRE1/2 color
+n <- 3
+mm <- as.matrix(seq(1,0,length.out = n), ncol = n)
+
+tmp1 <- sapply(col2rgb("#9bec0d")/255, function(x) 1-mm*(1-x))
+tmp2 <- sapply(col2rgb("#95a65b")/255, function(x) 1-rotate(mm)*(1-x))
+
+tmp <- (tmp1*tmp2)
+SRE_palette <- matrix(rgb(tmp), nrow = n)
+grid.newpage()
+grid.raster(SRE_palette, interpolate=FALSE)
+print(SRE_palette)
+```
+
+
+## Reading in data
+
+First let's read in the data from the first NextSeq run (sort rep 1) and extract the GFP+ variants from each library. We'll try defining GFP+ in three ways: the first is variants with fluorescence significantly greater than the distribution of stop codon variants for that library, the second is variants with fluorescence greater than -4.0, and the third is variants with fluorescence greater than AncSR2 on SRE1.
+
+```{r}
+data <- read_data(file.path("..", "data", "meanF", "DMS_meanF_rep1.csv.gz"))
+libs <- levels(data$REBC)
+nlibs <- length(libs)
+
+# GFP+ variants defined by significance criterion
+GFPpos <- list()
+for(i in 1:nlibs) {
+  GFPpos[[i]] <- get_GFPpos(data, libs[i])
+}
+names(GFPpos) <- libs
+
+# GFP variants with fluorescence greater than -4.0
+abovethresh <- list()
+for(i in 1:nlibs) {
+  abovethresh[[i]] <- get_above_thresh(data, libs[i])
+}
+names(abovethresh) <- libs
+abovethresh_AncSR1 <- abovethresh[grepl("AncSR1", names(abovethresh))]
+abovethresh_AncSR2 <- abovethresh[grepl("AncSR2", names(abovethresh))]
+
+# GFP variants with fluorescence greater than AncSR2 on SRE1
+aboveAncSR2 <- list()
+AncSR2_SRE1_meanF <- data %>% filter(REBC=="AncSR2_REBC1" & AA_var=="GSKV") %>%
+  pull("meanF")
+for(i in 1:nlibs) {
+  aboveAncSR2[[i]] <- get_above_thresh(data, libs[i], thresh = AncSR2_SRE1_meanF)
+}
+names(aboveAncSR2) <- libs
+
+# get mean fluorescence for reference genotypes (AncSR1/ERE, AncSR2/SRE1)
+AncSR1_ERE_F <- read_data(file.path("..", "data", "meanF", "DMS_meanF_rep1.csv.gz"),
+                          minreads=10) %>%
+  filter(REBC=="AncSR1_REBC3", AA_var == "EGKA") %>% 
+  pull(meanF)
+AncSR2_SRE1_F <- data %>% 
+  filter(REBC=="AncSR2_REBC1", AA_var == "GSKV") %>%
+  pull(meanF)
+```
+
+
+## Analysis
+
+Let's plot the mean fluorescence distribution across REs for each background, using the fluorescence cutoff greater than -4.0.
+
+```{r, fig.width=6}
+# stacked histograms
+gg_RE_palette <- RE_palette[match(levels(REs3), RE_palette_legend)]
+names(gg_RE_palette) <- RE_palette_legend[match(levels(REs3), RE_palette_legend)]
+
+fontsize <- 24
+
+ggplot(data %>%
+         filter(grepl("AncSR1", REBC), meanF >= -4) %>% 
+         mutate(RE=REBC_to_RE(sub("AncSR1_REBC", "", REBC), levels=3)),
+       aes(x=meanF, fill=RE)) +
+  geom_histogram(binwidth=0.05, color="black") + 
+  geom_vline(xintercept = c(AncSR1_ERE_F, AncSR2_SRE1_F),
+             color = RE_palette[match(c("ERE", "SRE1"), RE_palette_legend)],
+             size = 2,
+             linetype = 2) +
+  geom_text(aes(x=AncSR1_ERE_F , y=27, label="AncSR1:ERE"), 
+            size=7, hjust=0, nudge_x=0.025) +
+  geom_text(aes(x=AncSR2_SRE1_F, y=27, label="AncSR2:SRE1"), 
+            size=7, hjust=0, nudge_x=0.025) +
+  scale_fill_manual(values=gg_RE_palette) +
+  theme_classic() + 
+  theme(text = element_text(size = fontsize),
+        legend.position = "none") + 
+  labs(title="AncSR1", x="fluorescence", y="# variants")
+
+ggsave(file.path(figures.output, "AncSR1_rep1_fluorescence_distribution.png"), 
+       device="png")
+
+ggplot(data %>%
+         filter(grepl("AncSR2", REBC), meanF >= -4) %>% 
+         mutate(RE=REBC_to_RE(sub("AncSR2_REBC", "", REBC), levels=3)),
+       aes(x=meanF, fill=RE)) +
+  geom_histogram(binwidth=0.05, color="black") + 
+  geom_vline(xintercept = c(AncSR1_ERE_F, AncSR2_SRE1_F),
+             color = RE_palette[match(c("ERE", "SRE1"), RE_palette_legend)],
+             size = 2,
+             linetype = 2) +
+  geom_text(aes(x=AncSR1_ERE_F , y=700, label="AncSR1:ERE"), 
+            size=7, hjust=0, nudge_x=0.025) +
+  geom_text(aes(x=AncSR2_SRE1_F, y=700, label="AncSR2:SRE1"), 
+            size=7, hjust=0, nudge_x=0.025) +
+  scale_fill_manual(values=gg_RE_palette) +
+  theme_classic() + 
+  theme(text = element_text(size = fontsize),
+        legend.position = "none") + 
+  labs(title="AncSR2", x="fluorescence", y="# variants")
+
+ggsave(file.path(figures.output, "AncSR2_rep1_fluorescence_distribution.png"),
+       device="png")
+
+
+# violin plots
+ggplot(data %>%
+         filter(meanF >= -4) %>% 
+         mutate(RE=REBC_to_RE(sub("AncSR._REBC", "", REBC), levels=1)) %>%
+         mutate(bg=sub("_REBC.+", "", REBC)) %>%
+         mutate(meanF_scaled=meanF - AncSR2_SRE1_F),
+       aes(x=RE, y=meanF_scaled, fill=bg)) +
+  geom_violin(scale="width", trim=FALSE) +
+  geom_hline(yintercept=0, linetype=2) +
+  facet_rep_grid(rows=vars(bg)) +
+  scale_fill_manual(values=c("#5E0DEC", "#A2CB5B")) +
+  theme_classic() + 
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text.y = element_blank(),
+        legend.position = "top") + 
+  labs(x="RE", y="binding") +
+  guides(x = guide_axis(angle = 45))
+
+ggsave(file.path(figures.output, "fluorescence_distribution_violin_rep1.png"), 
+       device="png",
+       width=12, height=7, units="in")
+```
+
+
+Make stacked bar plots to show the total number of variants active on each RE.
+
+```{r, fig.width=1}
+fontsize <- 24
+stacked_plot_data <- data %>%
+  filter(meanF >= -4) %>% 
+  mutate(RE=REBC_to_RE(sub("AncSR._REBC", "", REBC), levels=3)) %>%
+  mutate(bg=as.factor(sub("_REBC.+", "", REBC))) %>%
+  count(RE, bg)
+ggplot(stacked_plot_data, aes(x=bg, y=n, fill=RE)) +
+  geom_col(color="black", position = "fill") + 
+  scale_fill_manual(values=gg_RE_palette) +
+  theme_classic() + 
+  theme(text = element_text(size = fontsize),
+        legend.position = "none") + 
+  labs(x="", y="# variants / total") +
+  guides(x = guide_axis(angle = 45))
+
+ggsave(file.path(figures.output, "fraction_variants_per_bg.png"), 
+       device="png")
+```
+
+
+
+
+Let's create a bar plot to summarize the number of GFP+ variants per library.
+
+```{r, fig.width=8}
+barplotdata <- data.frame(bg = c(sub("_REBC.+", "", libs), rep("both", 16)), 
+                          RE = rep(REBC_to_RE(sub("AncSR._REBC", "", 
+                                                  libs[1:16])), 3),
+                          nvarthresh = c(sapply(abovethresh, length),
+                                         sapply(1:16, function(x) 
+                                           length(intersect(
+                                             abovethresh_AncSR1[[x]],
+                                             abovethresh_AncSR2[[x]])))))
+barplotdata$bg <- factor(barplotdata$bg, levels=c("AncSR1", "both", "AncSR2"))
+
+fontsize <- 16
+
+# plot number of active variants split by active on AncSR1, AncSR2, or both
+
+# ggplot(barplotdata %>% group_by(bg) %>% summarise(nvar=sum(nvarthresh)), 
+#        aes(x=bg, y=nvar, fill=bg, color=bg)) +
+#   geom_col(width=0.5, show.legend = FALSE) +
+#   geom_text(aes(label=nvar), vjust=-0.5, color="black", size=5) +
+#   scale_y_continuous(expand = expansion(mult = 0.1)) +
+#   scale_fill_manual(values=c("#5E0DEC", "deepskyblue", "#A2CB5B")) +
+#   scale_color_manual(values=c("#5E0DEC", "deepskyblue", "#A2CB5B")) +
+#   labs(x="Background", y="Frequency", title="Bound RH:RE variants") +
+#   theme_classic() +
+#   theme(text=element_text(size=fontsize),
+#       legend.title=element_blank(),
+#       plot.title=element_text(size=fontsize)) +
+#   guides(x=guide_axis(angle=45))
+
+fontsize <- 24
+
+ggplot(barplotdata %>% group_by(bg) %>% summarise(nvar=sum(nvarthresh)), 
+       aes(x=bg, y=nvar, fill=bg, color=bg)) +
+  geom_col(width=0.9) +
+  scale_y_continuous(expand = expansion(mult = 0.1)) +
+  scale_fill_manual(values=c("#5E0DEC", "deepskyblue", "#A2CB5B")) +
+  scale_color_manual(values=c("#5E0DEC", "deepskyblue", "#A2CB5B")) +
+  labs(x="Background", y="Bound RH:RE variants", title="") +
+  theme_classic() +
+  theme(text=element_text(size=fontsize),
+      legend.title=element_blank(),
+      legend.position="right",
+      plot.title=element_text(size=fontsize)) +
+  guides(x=guide_axis(angle=45))
+ggsave(file.path(figures.output, "variants_across_REs_rep1.png"),
+       device="png",
+       width=5, height=7, units="in")
+
+# plot number of active variants by RE and background
+
+fontsize <- 24
+
+ggplot(barplotdata %>% filter(bg %in% c("AncSR1", "AncSR2")),
+       aes(x=RE, y=nvarthresh, fill=bg, color=bg)) +
+  geom_col(width=0.9) +
+  geom_text(aes(label=nvarthresh), vjust=-0.5, color="black", size=5) +
+  scale_y_continuous(expand = expansion(mult = 0.1)) +
+  facet_grid(rows=vars(bg), scales="free") +
+  scale_fill_manual(values=c("#5E0DEC", "#A2CB5B")) +
+  scale_color_manual(values=c("#5E0DEC", "#A2CB5B")) +
+  labs(x="", y="GFP+ RH variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text.y = element_blank(),
+        legend.position = "top") +
+  guides(x = guide_axis(angle = 45))
+ggsave(file.path(figures.output, "variants_per_RE_rep1.png"),
+       device="png",
+       width=12, height=9, units="in")
+
+ggplot(barplotdata %>% filter(bg %in% c("AncSR1", "AncSR2")), 
+       aes(x=RE, y=nvarthresh, fill=bg)) + 
+  geom_col(width=0.9, position="dodge") + 
+  scale_fill_manual(values=c("#5E0DEC", "#A2CB5B")) +
+  labs(x="", y="Frequency", title="RH variants bound") +
+  theme_classic() + 
+  theme(text = element_text(size = fontsize),
+        legend.title = element_blank(),
+        legend.position = "right", 
+        plot.title=element_text(size=fontsize),
+        panel.grid.major.y = element_line(color="lightgray", size=0.5)) +
+  guides(x = guide_axis(angle = 45))
+ggsave(file.path(figures.output, "variants_per_RE_rep1_dodge.png"),
+       device="png",
+       width=11, height=7, units="in")
+
+# plot the relative increase in number of RH variants bound by RE
+# (not including REs with little data on AncSR1)
+barplotdataratio <- barplotdata %>% 
+  pivot_wider(names_from=bg, values_from=nvarthresh) %>%
+  mutate(ratio=AncSR2/AncSR1) %>%
+  filter(!RE %in% c("CG", "CT", "GC", "GG", "TA", "TC"))
+
+ggplot(barplotdataratio, aes(x=RE, y=ratio)) +
+  geom_col(width=0.9, fill="darkorchid", color="darkorchid") +
+  geom_hline(yintercept = 1, linetype = 2, color="black", size=1.5) +
+  labs(x="RE", y="Ratio bound RH variants\nAncSR2 / AncSR1", title = "") +
+  theme_classic() +
+  theme(text = element_text(size=fontsize),
+        plot.title=element_text(size=fontsize)) +
+  guides(x=guide_axis(angle=45))
+ggsave(file.path(figures.output, "variant_ratio_by_bg_rep1.png"),
+       device="png",
+       width=7, height=7, units="in")
+```
+
+
+Overall there are many more variants binding to all REs on the AncSR2 background vs. AncSR1. SRE1 has by far the most variants bound.
+
+Let's use the AncSR2 fluorescence threshold to count variants as GFP+ going forward. Note that AncSR1 CG through TC had very few reads in this experiment, which confounds their variant counts.
+
+
+Of the variants that bind to each RE, what proportion bind in each background?
+
+```{r, fig.height=5, fig.width=5}
+var_overlap_bg <- matrix(nrow=16, ncol=3)
+for(i in 1:16) {
+  sr1vars <- abovethresh[[i]]
+  sr2vars <- unlist(abovethresh[grepl(paste0(
+    sub("AncSR1", "AncSR2", libs[i]), "$"), libs)], use.names=F)
+  var_overlap_bg[i,] <- c(length(setdiff(sr1vars, sr2vars)),
+                          length(setdiff(sr2vars, sr1vars)),
+                          length(intersect(sr1vars, sr2vars)))
+}
+var_overlap_bg <- data.frame(RE = REBC_to_RE(sub(
+  "AncSR1_REBC", "", libs[1:16]), levels = 1), var_overlap_bg)
+colnames(var_overlap_bg)[2:4] <- c("AncSR1", "AncSR2", "both")
+var_overlap_bg <- var_overlap_bg %>% 
+  pivot_longer(cols=c(AncSR1, AncSR2, both),
+               names_to="background", values_to="variants")
+var_overlap_bg$background <- factor(var_overlap_bg$background, 
+                                    levels=c("AncSR1", "both", "AncSR2"))
+
+fontsize <- 24
+ggplot(var_overlap_bg, aes(x=RE, y=variants, fill=background)) +
+  geom_col(position="fill") +
+  scale_fill_manual(values=c("#5E0DEC", "deepskyblue", "#A2CB5B")) +
+  theme_classic() +
+  theme(text=element_text(size=fontsize),
+         legend.title=element_blank()) +
+  guides(x = guide_axis(angle = 45)) +
+  labs(x="RE", y="fraction RH variants")
+
+ggsave(file.path(figures.output, "variants_overlap_by_bg_rep1.png"),
+       device="png",
+       width=8, height=7, units="in")
+
+
+fontsize <- 24
+ggplot(var_overlap_bg %>% mutate(group=factor("all REs")), 
+       aes(x=group, y=variants, fill=background)) +
+  geom_col(position="fill") +
+  scale_fill_manual(values=c("#5E0DEC", "deepskyblue", "#A2CB5B")) +
+  theme_classic() +
+  theme(text=element_text(size=fontsize),
+         legend.title=element_blank()) +
+  guides(x = guide_axis(angle = 45)) +
+  labs(y="", x="")
+
+ggsave(file.path(figures.output, "variants_overlap_by_bg_all_REs_rep1.png"),
+       device="png",
+       width=3.5, height=7, units="in")
+```
+
+
+Now let's look at the overlap between active variants between REs.
+
+```{r, fig.width=10}
+## for each background, count the number of REs each variant is active on.
+aboveAncSR2_AncSR1 <- aboveAncSR2[grepl("AncSR1", names(aboveAncSR2))]
+aboveAncSR2_AncSR2 <- aboveAncSR2[grepl("AncSR2", names(aboveAncSR2))]
+
+# all active RH variants across REs for each background
+AncSR1_active <- aboveAncSR2_AncSR1 %>% unlist() %>% unique()
+AncSR2_active <- aboveAncSR2_AncSR2 %>% unlist() %>% unique()
+
+# tabulate which RE each variant is active on
+AncSR1_active_tab <- sapply(aboveAncSR2_AncSR1, 
+                            function(x) AncSR1_active %in% x)
+rownames(AncSR1_active_tab) <- AncSR1_active
+colnames(AncSR1_active_tab) <- REBC_to_RE(as.numeric(sub(
+  "AncSR1_REBC", "", colnames(AncSR1_active_tab))))
+AncSR2_active_tab <- sapply(aboveAncSR2_AncSR2, 
+                            function(x) AncSR2_active %in% x)
+rownames(AncSR2_active_tab) <- AncSR2_active
+colnames(AncSR2_active_tab) <- REBC_to_RE(as.numeric(sub(
+  "AncSR2_REBC", "", colnames(AncSR2_active_tab))))
+
+# count the number of REs each variant is active on
+AncSR1_nREs <- table(rowSums(AncSR1_active_tab))
+AncSR2_nREs <- table(rowSums(AncSR2_active_tab))
+
+
+# create upset plots to show number of variants that bind to each combination
+# of REs
+
+tidy_AncSR1_active <- AncSR1_active_tab %>%
+  as_tibble(rownames="variant") %>%
+  pivot_longer(-variant, names_to="lib", values_to="bind") %>%
+  filter(bind) %>%
+  dplyr::select(-bind) %>%
+  group_by(variant) %>%
+  summarize(libs=list(lib))
+
+tidy_AncSR1_active %>% ggplot(aes(x=libs)) + geom_bar() + scale_x_upset()
+
+tidy_AncSR2_active <- AncSR2_active_tab %>%
+  as_tibble(rownames="variant") %>%
+  pivot_longer(-variant, names_to="lib", values_to="bind") %>%
+  filter(bind) %>%
+  dplyr::select(-bind) %>%
+  group_by(variant) %>%
+  summarize(libs=list(lib))
+
+tidy_AncSR2_active %>% ggplot(aes(x=libs)) + 
+  geom_bar() + 
+  scale_x_upset(n_intersections=50) +
+  theme_combmatrix(combmatrix.panel.line.size=1, combmatrix.panel.point.size=2)
+
+
+# plot the number of REs each RH variant is active on
+fontsize <- 20
+
+ggplot(bind_rows(as.data.frame(AncSR1_nREs), 
+                 as.data.frame(AncSR2_nREs), .id="bg") %>%
+         mutate(bg=paste0("AncSR", bg)) %>%
+         group_by(bg) %>%
+         mutate(prop=paste0(round(Freq/sum(Freq), 3)*100, "%")), 
+       aes(x=Var1, y=Freq, fill=bg)) +
+  geom_col(width=0.9) +
+  geom_text(aes(label=prop), vjust=-0.5, color="black", size=5) +
+  scale_y_continuous(expand = expansion(mult = 0.1)) +
+  facet_grid(rows=vars(bg), scales="free") +
+  scale_fill_manual(values=c("#5E0DEC", "#A2CB5B")) +
+  labs(x="REs bound", y="RH variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text.y = element_blank(),
+        legend.position = "top")
+
+ggsave(file.path(figures.output, "nREs_rep1.png"),
+       device="png",
+       width=8, height=8, units="in")
+
+
+# plot which REs or RE combos each RE is active on for those that are active on
+# only one RE
+ggplot(bind_rows(tidy_AncSR1_active, tidy_AncSR2_active, .id="bg") %>%
+         mutate(bg=paste0("AncSR", bg)) %>%
+         rowwise() %>%
+         mutate(nbound=length(libs)) %>%
+         mutate(libs=list(as.list(libs))) %>%
+         mutate(libs=do.call(paste, libs)) %>%
+         group_by(bg, libs, nbound) %>%
+         tally() %>%
+         filter(nbound == 1) %>%
+         arrange(n),
+       aes(x=factor(bg), y=n, fill=bg, color=libs)) +
+  geom_bar(stat="identity", position="fill", width=0.9, color="black", 
+           show.legend = F) +
+  geom_text(aes(label=libs), position=position_fill(vjust=0.5), color="black", 
+            size=5) +
+  scale_fill_manual(values=c("#5E0DEC", "#A2CB5B")) +
+  labs(x="Background", y="RH variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        legend.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text.y = element_blank(),
+        legend.position = "top") +
+  guides(x=guide_axis(angle=45))
+
+ggsave(file.path(figures.output, "prop_RE_nbound1_rep1.pdf"),
+       device="pdf",
+       width=4, height=8, units="in")
+
+```
+
+
+Let's create some logo plots for different specificity/promiscuity profiles.
+
+```{r}
+# create logo plots for all binders on AncSR1 and AncSR2
+fontsize <- 20
+
+ggseqlogo(list(AncSR1=rownames(AncSR1_active_tab),
+               AncSR2=rownames(AncSR2_active_tab)), 
+          nrow=2,
+          method="bits") +
+  theme(text=element_text(size=fontsize)) +
+  labs(x="RH position", title="All binders")
+ggsave(file.path(figures.output, "all_binders_logo_plots_bits.png"),
+       device="png",
+       width=3, height=7, units="in")
+
+
+# create logo plots for RH genotypes that bind specifically to one RE
+AncSR1_binding_profiles <- list()
+for(i in 1:ncol(AncSR1_active_tab)) {
+  AncSR1_binding_profiles[[i]] <- 
+    rownames(AncSR1_active_tab)[AncSR1_active_tab[,i] == TRUE & 
+                                  rowSums(AncSR1_active_tab) == 1]
+}
+names(AncSR1_binding_profiles) <- colnames(AncSR1_active_tab)
+
+AncSR1_binding_profiles <- 
+  AncSR1_binding_profiles[lapply(AncSR1_binding_profiles, length) > 0]
+
+ggseqlogo(AncSR1_binding_profiles[c("SRE1 (AA)", "SRE2 (GA)", 
+                                    "ERE (GT)", "AC", "CA")], 
+          nrow = 1, method = "bits") +
+  theme(text=element_text(size=20)) + 
+  labs(x="RH position", title = "AncSR1")
+
+ggsave(file.path(figures.output, "AncSR1_logo_plots_bits.png"),
+       device="png",
+       width=10, height=4, units="in")
+
+
+AncSR2_binding_profiles <- list()
+for(i in 1:ncol(AncSR2_active_tab)) {
+  AncSR2_binding_profiles[[i]] <- 
+    rownames(AncSR2_active_tab)[AncSR2_active_tab[,i] == TRUE & 
+                                  rowSums(AncSR2_active_tab) == 1]
+}
+names(AncSR2_binding_profiles) <- colnames(AncSR2_active_tab)
+
+
+AncSR2_binding_profiles <- 
+  AncSR2_binding_profiles[lapply(AncSR2_binding_profiles, length) > 0]
+
+ggseqlogo(AncSR2_binding_profiles[c("SRE1 (AA)", "SRE2 (GA)", 
+                                    "ERE (GT)", "AC", "CA")], 
+          nrow = 1, method = "bits") +
+  theme(text=element_text(size=20)) + 
+  labs(x="RH position", title = "AncSR2")
+
+ggsave(file.path(figures.output, "AncSR2_logo_plots_bits.png"),
+       device="png",
+       width=10, height=4, units="in")
+```
+
+
+
+Let's try to construct some graphs now! First, we will construct maps where nodes are RH genotypes connected by single-step changes permissible by the genetic code. Nodes are associated with there RE binding profiles, and are included in the network if their mean fluorescence is greater than or equal to that of AncSR2 on SRE1.
+
+```{r}
+## AncSR1
+comb <- combn(AncSR1_active, 2)
+AncSR1_edges <- t(comb)
+AncSR1_connected <- apply(AncSR1_edges, 1, connected)
+AncSR1_connected <- AncSR1_edges[AncSR1_connected,]
+
+# create undirected graph where edges represent single step mutations between
+# RH genotypes permissible by the genetic code; node attributes are boolean
+# variables indicating binding to each RE, and one integer variable for number
+# of REs bound
+AncSR1_graph <- graph_from_data_frame(AncSR1_connected, directed=FALSE, 
+                                      vertices=AncSR1_active_tab %>% 
+                                        as.data.frame() %>% 
+                                        mutate(nbound=rowSums(.)) %>%
+                                        tibble::rownames_to_column(var="AA_var") %>%
+                                        left_join(y=data %>% 
+                                                    filter(grepl("AncSR1", REBC)) %>%
+                                                    group_by(AA_var) %>%
+                                                    summarise(maxF=max(meanF)),
+                                                  by="AA_var"))
+write_graph(AncSR1_graph, 
+            file.path(networks.output, "AncSR1_genetic_code.graphml"),
+            format="graphml")
+
+
+## AncSR2
+comb <- combn(AncSR2_active, 2)
+AncSR2_edges <- t(comb)
+AncSR2_connected <- apply(AncSR2_edges, 1, connected)
+AncSR2_connected <- AncSR2_edges[AncSR2_connected,]
+
+# create undirected graph where edges represent single step mutations between
+# RH genotypes permissible by the genetic code; node attributes are boolean
+# variables indicating binding to each RE, and one integer variable for number
+# of REs bound
+AncSR2_graph <- graph_from_data_frame(AncSR2_connected, directed=FALSE, 
+                                      vertices=AncSR2_active_tab %>% 
+                                        as.data.frame() %>% 
+                                        mutate(nbound=rowSums(.)) %>%
+                                        tibble::rownames_to_column(var="AA_var") %>%
+                                        left_join(y=data %>% 
+                                                    filter(grepl("AncSR2", REBC)) %>%
+                                                    group_by(AA_var) %>%
+                                                    summarise(maxF=max(meanF)),
+                                                  by="AA_var"))
+write_graph(AncSR2_graph, 
+            file.path(networks.output, "AncSR2_genetic_code.graphml"),
+            format="graphml")
+```
+
+
+
+Now let's construct some graphs of joint RH-RE sequence space. Each node will be a joint RH-RE genotype, and included in the network if the mean fluorescence is greater than or equal to that of AncSR2 on SRE1.
+
+```{r}
+AncSR1_RH_RE_edges <- paste(unlist(aboveAncSR2_AncSR1), 
+                            unlist(lapply(1:16, function(x) 
+                              rep(REBC_to_RE(sub("AncSR1_REBC", "", 
+                                                 names(aboveAncSR2_AncSR1)[x])), 
+                                  length(aboveAncSR2_AncSR1[[x]])))),
+                            sep = "_")
+AncSR1_RH_RE_edges <- combn(AncSR1_RH_RE_edges, 2)
+AncSR1_RH_RE_edges <- t(AncSR1_RH_RE_edges)
+AncSR1_RH_RE_connected <- apply(AncSR1_RH_RE_edges, 
+                                1, function(x) 
+                                  sum(connected(unlist(strsplit(x, "_"))[c(1,3)]),
+                                      connected_RE(unlist(strsplit(x, "_"))[c(2,4)])) 
+                                == 1)
+AncSR1_RH_RE_connected <- AncSR1_RH_RE_edges[AncSR1_RH_RE_connected,]
+AncSR1_RH_RE_vertices <- data.frame(var = unique(as.character(AncSR1_RH_RE_connected))) %>%
+  mutate(RE = sub(".+_", "", var)) %>%
+  mutate(meanF = data %>% 
+           filter(grepl("AncSR1", REBC)) %>%
+           mutate(vardata = paste(AA_var, REBC_to_RE(sub("AncSR1_REBC", "", REBC)), sep="_")) %>%
+           filter(vardata %in% var) %>%
+           arrange(match(vardata, var)) %>%
+           pull(meanF))
+
+AncSR1_RH_RE_graph <- graph_from_data_frame(AncSR1_RH_RE_connected, 
+                                            directed=FALSE, 
+                                            vertices=AncSR1_RH_RE_vertices)
+write_graph(AncSR1_RH_RE_graph, 
+            file.path(networks.output, "AncSR1_RH_RE_graph.graphml"),
+            format="graphml")
+
+
+AncSR2_RH_RE_edges <- paste(unlist(aboveAncSR2_AncSR2), 
+                            unlist(lapply(1:16, function(x) 
+                              rep(REBC_to_RE(sub("AncSR2_REBC", "", 
+                                                 names(aboveAncSR2_AncSR2)[x])), 
+                                  length(aboveAncSR2_AncSR2[[x]])))),
+                            sep = "_")
+AncSR2_RH_RE_edges <- combn(AncSR2_RH_RE_edges, 2)
+AncSR2_RH_RE_edges <- t(AncSR2_RH_RE_edges)
+AncSR2_RH_RE_connected <- apply(AncSR2_RH_RE_edges, 
+                                1, function(x) sum(connected(unlist(strsplit(x, "_"))[c(1,3)]),
+                                                   connected_RE(unlist(strsplit(x, "_"))[c(2,4)])) 
+                                == 1)
+AncSR2_RH_RE_connected <- AncSR2_RH_RE_edges[AncSR2_RH_RE_connected,]
+AncSR2_RH_RE_vertices <- data.frame(var = unique(as.character(AncSR2_RH_RE_connected))) %>%
+  mutate(RE = sub(".+_", "", var)) %>%
+  mutate(meanF = data %>% 
+           filter(grepl("AncSR2", REBC)) %>%
+           mutate(vardata = paste(AA_var, REBC_to_RE(sub("AncSR2_REBC", "", REBC)), sep="_")) %>%
+           filter(vardata %in% var) %>%
+           arrange(match(vardata, var)) %>%
+           pull(meanF))
+
+AncSR2_RH_RE_graph <- graph_from_data_frame(AncSR2_RH_RE_connected, 
+                                            directed=FALSE, 
+                                            vertices=AncSR2_RH_RE_vertices)
+write_graph(AncSR2_RH_RE_graph, 
+            file.path(networks.output, "AncSR2_RH_RE_graph.graphml"),
+            format="graphml")
+```
+
+
+
