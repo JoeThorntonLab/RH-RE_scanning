@@ -1,6 +1,6 @@
 ---
 title: "Data cleaning"
-author: "Jaeda Patton"
+author: "Jaeda Patton and Santiago Herrera"
 date: "2023-03-14"
 output: github_document
 editor_options:
@@ -14,7 +14,7 @@ knitr::opts_chunk$set(fig.width=5, fig.height=5)
 
 # check for packages and install any that are missing
 packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble", 
-              "dplyr")
+              "dplyr", "patchwork", "foreach", "doParallel", "ggpubr", "splines2","matrixStats")
 installed_packages <- packages %in% rownames(installed.packages())
 
 if(any(installed_packages == F)) {
@@ -56,6 +56,7 @@ REBC_to_RE <- function(REBC, levels=1) {
   RE <- REs[[levels]][bc]
   return(RE)
 }
+
 ```
 
 
@@ -95,9 +96,20 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
     }
   }
   
-  # unlist meanF data
-  meanF_data <- rbind(meanF_data$rep1, meanF_data$rep2, meanF_data$rep3, meanF_data$rep4)
-  
+  # unlist meanF data and calculate current SE(meanF) per variant and REBC
+  meanF_data <- rbind(meanF_data$rep1, meanF_data$rep2, meanF_data$rep3, meanF_data$rep4) %>% 
+    dplyr::select(AA_var,REBC,bg,RE,REP,meanF,Count_total,cellCount_total) %>% 
+    # Re-organize the dataframe: each row is a variant-REBC combo
+    pivot_wider(names_from = REP, values_from = c(meanF,Count_total,cellCount_total)) %>%
+    # Add summary statistics per varianr-REBC
+    mutate(avg_meanF = rowMeans(.[5:8], na.rm = TRUE), # meanF per var-REBC across replicates
+            n_reps = rowSums(!is.na(.[5:8])), # number of replicates in which var-REBC is found
+            sd_meanF = rowSds(as.matrix(.[5:8]),na.rm=TRUE),
+            se_meanF = sd_meanF / sqrt(n_reps), # standard error of average meanF
+            mean_read_count = rowMeans(.[9:12], na.rm = TRUE), # mean read count
+            min_read_count = rowMins(as.matrix(.[9:12]),na.rm=TRUE), #minmum read count across reps
+            type = ifelse(grepl(paste(c("minilib","SRE","ERE"),collapse = "|"),REBC), "control","exp")) # mark rows as "controls" or "experiments"
+    
   # save data files for faster loading
   save(meanF_data, file = file.path("..", "data", "meanF", "meanF_data.rda"))
   save(debulk_data, file = file.path("..", "data", "meanF", "debulk_data.rda"))
@@ -106,33 +118,291 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   load(file.path("..", "data", "meanF", "meanF_data.rda"))
   load(file.path("..", "data", "meanF", "debulk_data.rda"))
 }
+
 ```
 
 
 ## Filtering binned sort data
 
-```{r filterbinned}
+These plots show some general features of the dataset. 1) SE(meanF) decays with read depth, as expected. 2) Variants with a minimum read count of ~15
+have a SE(meanF) < 0.1, regardless of the number of replicates. 
+
+```{r exploratoryfigs}
+# SE(meanF) as a function of minimum read depth per variant
+meanF_data %>% filter(!is.na(se_meanF)) %>% filter(.,type != "control") %>%
+  ggplot(aes(x=min_read_count,y=se_meanF)) +
+  stat_bin2d(bins = 75) +
+  theme_bw() + xlim(0,2000) +
+  theme(axis.title.x = element_text(size=12,face="bold"), 
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size = 10),
+        axis.title=element_text(size=12,face="bold")) +
+  geom_hline(aes(yintercept = mean(se_meanF)),color="red",linetype="dashed") +
+  xlab("Min. read count") + ylab("SE(meanF)")
+
+# Gruop variants by Avg. Min Read Depth (RC) and plot SE(meanF) by n_reps. This shows that variants with a minimum read count of ~15
+# have a SE(meanF) < 0.1, regardless of the number of replicates. 
+meanF_data %>% filter(!(n_reps==1)) %>% 
+  mutate(RC = case_when(min_read_count >= 150 ~ ">150",
+                        min_read_count >= 50 & min_read_count < 150 ~ "50-150",
+                        min_read_count >= 20 & min_read_count < 50 ~  "20-50",
+                        min_read_count >= 10 & min_read_count < 20 ~  "10-20",
+                        min_read_count < 10 ~ "<10"),
+         Nreps = as_factor(n_reps),
+         RC = factor(RC,levels=c("<10", "10-20", "20-50", "50-150",">150"))) %>% 
+  ggline(., x = "RC", y = "se_meanF", color = "Nreps",
+         add = c("mean_ci",  error.plot = "pointrange"),
+         palette = c("#9d3dba","#00AFBB","#E7B800"),title="",xlab="Min Read Depth", ylab="SE (meanF)") +
+  geom_hline(yintercept = 0.1,color="gray",linetype="dashed",size=1.5)
+```
+
+DMS binned sort data is filtered based on two apporaches. First, we filter out variants with low read count (across replicates) to reduce the global standard error; second, we remove outlier variants based on SE(meanF) to further reduce reduce the standard error. 
+
+## Filtering data
+
+```{r filterdata}
+### First strategy: Choose a read count for which we maximize the fraction of retained variants, maximize the 
+### fraction of retined variants with SE(meanF) <= 0.1,and minimize the global SE(meanF).
+
+median_se <- median(meanF_data$se_meanF, na.rm = T) # global median SE(meanF)
+n_var <- dim(meanF_data)[1] # number of total variants
+choose_read_count <- function(r){
+  # r: is the read count (rc) threshold 
+  median_se_r <- meanF_data %>% filter(min_read_count >= r) %>% with(median(se_meanF,na.rm = T)) # global median SE(meanF) after rc filter
+  n_var_r <-  dim(meanF_data %>% filter(min_read_count >= r))[1] # variants retained after rc filtering
+  n_var_01_r <- dim(meanF_data %>% filter(min_read_count >= r & se_meanF <= 0.1))[1] # variants eith SE <= 0.1 retained after rc filtering
+  p <- n_var_r / n_var # fraction of variants retained
+  se <- ((median_se_r-median_se)/median_se)*100 # % change in global SE(meanF)
+  var_01 <- n_var_01_r /n_var_r # fraction of retained variants with SE(meanF) <= 0.1
+  return(data.frame(p=p,abs_se=median_se_r,se=se,var_01=var_01))
+}
+
+# parallel processing:
+cores=detectCores()
+cl <- parallel::makeCluster(cores[1]-1,"FORK",outfile="")
+doParallel::registerDoParallel(cl)
+outliers <- foreach(i = seq(0,100,1), .combine = 'rbind') %dopar% choose_read_count(i)
+stopCluster(cl)
+
+# plot results: A read count threhold of ~24 ensures that 95% of variants have SE <= 0.1, decreasing the global SE by ~30%, and we still retain a good fraction of variants.
+outliers$r <- seq(0,100,1)
+par(mar = c(5, 4, 4, 4) + 1.4)
+plot(outliers$r, outliers$abs_se, type="l", col = "black",xlab="Read count threshold",ylab="Global median SE(meanF)",lwd=2)             
+par(new = TRUE) 
+plot(outliers$r, outliers$p, type="l", col = "red",axes = FALSE, xlab = "", ylab = "",lwd=2)
+axis(side = 4, at = pretty(range(c(outliers$p,outliers$var_01))),col="red",col.ticks="red")
+mtext("Fraction variants retained", side = 4, line = 3,col="red")
+par(new = TRUE)
+plot(outliers$r, outliers$var_01, type="l", col = "#cf6b08",axes = FALSE, xlab = "", ylab = "",lwd=2,ylim=range(c(outliers$p,outliers$var_01)))
+mtext("Fraction of variants with SE(meanF) <= 0.1", side = 4, line = 4,col="#cf6b08")
+abline(v=24,lty=2,col="gray",lwd=3)
 
 ```
 
+After having identified the read threshold, we will perform a second filter removing variants with SE(meanF) > 0.1. 
 
-Show correlation between replicates
+```{r filterse}
+# Second strategy: Filter variants per replicate based on a read threshold (from strategy 1 or 3). Then filter
+### variants by SE(meanF).
+
+rc <- 24 # read count threshold
+
+## REP1-2
+a <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP1,z=se_meanF)) +
+  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep1") +
+  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
+  guides(fill=guide_legend(title="SE(meanF)")) + ggtitle("Reps 1-2") # points colored by SE(meanF)
+
+  # How much data is retained after filtering by standard error
+meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
+  group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n)) 
+
+b <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc) %>% ggplot(aes(x = se_meanF)) + 
+  geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
+  theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") +
+  geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.4%") # histogram of SE(meanF)
+
+c <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP1)) +
+  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep1") +
+  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
+a + b + c
+
+
+## REP2-3
+d <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP3,z=se_meanF)) +
+  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep3") +
+  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
+  guides(fill=guide_legend(title="SE(meanF)")) + ggtitle("Reps 2-3")
+
+  # How much data is retained after filtering by standard error
+meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
+  group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
+
+e <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc) %>% ggplot(aes(x = se_meanF)) + 
+  geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
+  theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
+  geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.91%") # histogram of SE(meanF)
+
+f <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP3)) +
+  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep3") +
+  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
+d + e + f
+
+
+```
 
 
 ## Correcting nonlinearity between replicates
 
+Here we will correct for the remaining non linearity between replicates in order to adjust all measurements to be on the same scale (the reference scale being replicate 1). 
+
 ```{r splinefit}
+# Datasets:
+r12 <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc & se_meanF <= 0.1) %>%
+  dplyr::select(AA_var,REBC,avg_meanF,meanF_REP1,meanF_REP2)
+r23 <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc  & se_meanF <= 0.1) %>%
+  dplyr::select(AA_var,REBC,avg_meanF,meanF_REP2,meanF_REP3)
+r24 <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc & se_meanF <= 0.1) %>%
+  dplyr::select(AA_var,REBC,avg_meanF,meanF_REP2,meanF_REP4) 
+
+# Correct for nonlinearity between replicates using I-splines.
+# Correction with respect to Rep2
+
+# Rationale:
+# Use an I-spline to capture the nonlinearity between replicates. Then use the fitted spline model to correct
+# the values of the other replicate, by predicting their new values on the rep2 scale.
+
+#################
+
+# REP1 vs REP2
+knots_r12 <- summary(r12$meanF_REP1)[3] #using the median meanF of rep1 as internal knot
+bound_knots_r12 <- c(min(c(r12$meanF_REP1,r12$meanF_REP2)), max(c(r12$meanF_REP1,r12$meanF_REP2))) # boundary knots
+degree <- 2 # degree of piecewise polynomials
+
+# Create the basis matrix for the I-spline:
+basis_mat12 <- iSpline(r12$meanF_REP1, knots = knots_r12, Boundary.knots = bound_knots_r12, degree = degree)
+# Fit a linear regression model to the second replicate using the basis matrix as predictors:
+spline_r12 <- lm(r12$meanF_REP2 ~ basis_mat12)
+# Correct rep1 values using I-Spline models: Predict the values of the rep1 using the fitted model and the basis matrix.
+# The 'predict' function generates a new basis matrix based on the fitted basis matrix and the new data. 
+# The new basis matrix is multiplied by the spline coefficients to get the new X's (and then add the intercept)
+r12$meanF_REP1_c <- (predict(basis_mat12, newx = r12$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1]
+
+print("REPS: 1 and 2")
+print(paste("Correlation before correction:", cor(r12$meanF_REP1,r12$meanF_REP2)))
+print(paste("Correlation after correction:", cor(r12$meanF_REP1_c,r12$meanF_REP2))) # correlation of corrected values
+print(paste("Correlation of the 'active' region:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1_c,r12[r12$avg_meanF>=-4,]$meanF_REP2))) # correlation of the "active" variants
+
+# plot results:
+r12_before <- r12 %>% ggplot(aes(x=meanF_REP1,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep1") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
+  geom_line(data=data.frame(meanF_REP1 = r12$meanF_REP1, meanF_REP2 = spline_r12$fitted.values), size=1.3,col="red") + ggtitle("Reps 1 and 2")
+
+r12_after <- r12 %>% ggplot(aes(x=meanF_REP1_c,meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep1") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
+
+
+#################
+# REP2 vs REP3
+knots_r23 <- summary(r23$meanF_REP3)[3] #using the median meanF of rep3 as internal knot
+bound_knots_r23 <- c(min(c(r23$meanF_REP2,r23$meanF_REP3)), max(c(r23$meanF_REP2,r23$meanF_REP3))) # boundary knots
+degree <- 2 # degree of piecewise polynomials
+
+basis_mat23 <- iSpline(r23$meanF_REP3, knots = knots_r23, Boundary.knots = bound_knots_r23, degree = degree)
+spline_r23 <- lm(r23$meanF_REP2 ~ basis_mat23)
+r23$meanF_REP3_c <- (predict(basis_mat23, newx = r23$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1]
+
+print("REPS: 2 and 3")
+print(paste("Correlation before correction:", cor(r23$meanF_REP2,r23$meanF_REP3)))
+print(paste("Correlation after correction:", cor(r23$meanF_REP2,r23$meanF_REP3_c))) # correlation of corrected values
+print(paste("Correlation of the 'active' region:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3_c))) # correlation of the "active" variants
+
+# plot results:
+r23_before <- r23 %>% ggplot(aes(x=meanF_REP3,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep3") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
+  geom_line(data=data.frame(meanF_REP3 = r23$meanF_REP3, meanF_REP2 = spline_r23$fitted.values), size=1.3,col="red") + ggtitle("Reps 2 and 3")
+
+r23_after <- r23 %>% ggplot(aes(x=meanF_REP3_c,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep3") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
+
+r13_before + r13_after
+
+#################
+# REP2 vs REP4
+knots_r24 <- summary(r24$meanF_REP4)[3] #using the median meanF of rep4 as internal knot
+bound_knots_r24 <- c(min(c(r24$meanF_REP2,r24$meanF_REP4)), max(c(r24$meanF_REP2,r24$meanF_REP4))) # boundary knots
+degree <- 2 # degree of piecewise polynomials
+
+basis_mat24 <- iSpline(r24$meanF_REP4, knots = knots_r24, Boundary.knots = bound_knots_r24, degree = degree)
+spline_r24 <- lm(r24$meanF_REP2 ~ basis_mat24)
+r24$meanF_REP4_c <- (predict(basis_mat24, newx = r24$meanF_REP4) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1]
+
+print("REPS: 2 and 4")
+print(paste("Correlation before correction:", cor(r24$meanF_REP2,r24$meanF_REP4)))
+print(paste("Correlation after correction:", cor(r24$meanF_REP2,r24$meanF_REP4_c))) # correlation of corrected values
+print(paste("Correlation of the 'active' region:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4_c))) # correlation of the "active" variants
+
+# plot results:
+r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
+  geom_line(data=data.frame(meanF_REP4 = r24$meanF_REP4, meanF_REP2 = spline_r24$fitted.values), size=1.3,col="red") + ggtitle("Reps 2 and 4")
+
+r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
 
 ```
 
 
+```{r echo=FALSE}
+a <- r12_before + r12_after
+b <- r23_before + r23_after
+c <- r24_before + r24_after
+a / b / c
+```
 
-Show new correlation between replicates
+Use splines to correct *all* variants that passed the filter in reps 1, 3 and 4 - not only the ones that are shared with rep2.
 
+```{r correction}
+# Variants per replicate that passed initial QC filter
+rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>%
+  dplyr::select(AA_var,REBC,meanF_REP2) %>% rename(meanF = meanF_REP2) # all rep2 variants
+rep1 <- meanF_data %>% filter(Count_total_REP1 >= rc) %>%
+  dplyr::select(AA_var,REBC,meanF_REP1) # all rep1 variants
+rep3 <- meanF_data %>% filter(Count_total_REP3 >= rc) %>%
+  dplyr::select(AA_var,REBC,meanF_REP3) # all rep3 variants
+rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc ) %>%
+  dplyr::select(AA_var,REBC,meanF_REP4) # all rep4 variants
+rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>%
+  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>% dplyr::select(AA_var,REBC,meanF_REP4) 
+rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls
 
-## Filtering by standard error
+# Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case.
 
-```{r filterse}
+rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% dplyr::select(AA_var,REBC,meanF_REP1_c) %>% rename(meanF = meanF_REP1_c)
+
+rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% dplyr::select(AA_var,REBC,meanF_REP3_c) %>% rename(meanF = meanF_REP3_c)
+
+rep4 <- rep4 %>% mutate(meanF_REP4_c = ((predict(basis_mat24, newx = rep4$meanF_REP4) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% dplyr::select(AA_var,REBC,meanF_REP4_c) %>% rename(meanF = meanF_REP4_c)
+
+# Re-calculate SE(meanF) of variants after correction.
+meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
+  group_by(AA_var,REBC) %>%
+  summarise(avg_meanF = mean(meanF,na.rm = T), # meanF per var-REBC across replicates
+            n_reps = n(), # number of replicates in which var-REBC is found
+            sd_meanF = sd(meanF,na.rm = T),
+            se_meanF = sd_meanF / sqrt(n_reps)) # standard error of average meanF
+
+# plot histogram of SE(meanF) 
+meanF_data_corrected %>% filter(n_reps != 1) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
+  group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
+
+meanF_data_corrected %>% filter(n_reps != 1) %>% 
+  ggplot(aes(x=se_meanF)) + geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
+  theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
+  geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 1.41%") # histogram of SE(meanF)
 
 ```
 
@@ -141,5 +411,50 @@ Show new correlation between replicates
 
 ```{r filterdebulk}
 
+```
+
+
+## Checking correlations with isogenic and REBC controls
+
+```{r}
+# Plot meanF of control variants (from Rep1 and Rep4) *need to include data from Reps 2 and 3
+bounds <- meanF_data %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
+  group_by(group) %>% summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
+
+ctl <- meanF_data %>% filter(type=="control") %>% 
+  filter(grepl(paste(c("GSKV","EGKA","GGKM"),collapse = "|"),AA_var)) # filter out sequencing errors in controls
+
+ctl_rep1 <- ctl %>% filter(!is.na(meanF_REP1)) %>% dplyr::select(AA_var,REBC,meanF_REP1) %>% mutate(REP = "REP1") %>% rename(meanF = meanF_REP1) 
+ctl_rep4 <- ctl %>% filter(!is.na(meanF_REP4)) %>% dplyr::select(AA_var,REBC,meanF_REP4) %>% mutate(REP = "REP4") %>% rename(meanF = meanF_REP4) 
+
+rbind(ctl_rep1,ctl_rep4) %>%
+  ggplot(aes(x=REBC,y=meanF)) +
+  geom_point(color="black",pch = 21,size=2.5, aes(fill=REP)) +
+  scale_fill_manual(values = c("#edd221","#2651a6")) +
+  ylim(c(-4.5,-2.5)) +
+  theme_bw() + coord_flip() +
+  theme(axis.title.x = element_text(size=12,face="bold"), 
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size = 10),
+        axis.title=element_text(size=12,face="bold")) +
+  geom_hline(yintercept = bounds$mean[1], size=1, linetype="dashed",col="red") +
+  geom_hline(yintercept = bounds$max[2], size=1, linetype="dashed",col="red") +
+  ylab("Fluorescence") 
+
+# Check correlations in meanF between measured isogenics and DMS spiked-in isogenics
+iso_file = file.path("..", "data", "meanF", "rep4_isogenic_controls_FlowJo_bin.csv")
+isogenics <- read.csv(iso_file,header=T) %>% rowwise() %>%
+  mutate(meanF_iso = sum(c(fbin1*cell_countb1,fbin2*cell_countb2,fbin3*cell_countb3,fbin4*cell_countb4))/sum(c(cell_countb1,cell_countb2,cell_countb3,cell_countb4)))
+  
+inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=meanF)) +
+  geom_point() + theme_bw() + xlim(-4.5,-2.1) + ylim(-4.5,-2.1) +
+  theme(axis.title.x = element_text(size=12,face="bold"), 
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size = 10),
+        axis.title=element_text(size=12,face="bold")) +
+  geom_abline(slope = 1,intercept = 0,color="gray") +
+  geom_smooth(method="lm",se=F) +
+  ylab("meanF isogenic (spiked-in)") + xlab("meanF isogenic") +
+  annotate(geom = "text",label="r = 0.84", x= -4,y=-3,size=6)
 ```
 
