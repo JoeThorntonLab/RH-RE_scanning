@@ -199,11 +199,10 @@ abline(v=24,lty=2,col="gray",lwd=3)
 
 ```
 
-After having identified the read threshold, we will perform a second filter removing variants with SE(meanF) > 0.1. 
+After having identified the read threshold, we will perform a second filter removing variants with SE(meanF) > 0.1. This reduces the noise, and will help to fit the splines in order to capture the global relationships between replicates.
 
 ```{r filterse}
-# Second strategy: Filter variants per replicate based on a read threshold (from strategy 1 or 3). Then filter
-### variants by SE(meanF).
+# Filter variants per replicate based on a read threshold. Then filter out variants by SE(meanF) > 0.1
 
 rc <- 24 # read count threshold
 
@@ -256,7 +255,7 @@ d + e + f
 
 ## Correcting nonlinearity between replicates
 
-Here we will correct for the remaining non linearity between replicates in order to adjust all measurements to be on the same scale (the reference scale being replicate 1). 
+Here we will correct for the remaining non linearity between replicates in order to adjust all measurements to be on the same scale (the reference scale being replicate 2). 
 
 ```{r splinefit}
 # Datasets:
@@ -278,7 +277,7 @@ r24 <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc & s
 
 # REP1 vs REP2
 knots_r12 <- summary(r12$meanF_REP1)[3] #using the median meanF of rep1 as internal knot
-bound_knots_r12 <- c(min(c(r12$meanF_REP1,r12$meanF_REP2)), max(c(r12$meanF_REP1,r12$meanF_REP2))) # boundary knots
+bound_knots_r12 <- c(min(c(meanF_data$meanF_REP1,meanF_data$meanF_REP2),na.rm = T), max(c(meanF_data$meanF_REP1,meanF_data$meanF_REP2),na.rm = T)) # boundary knots
 degree <- 2 # degree of piecewise polynomials
 
 # Create the basis matrix for the I-spline:
@@ -307,7 +306,7 @@ r12_after <- r12 %>% ggplot(aes(x=meanF_REP1_c,meanF_REP2)) + stat_bin2d(bins = 
 #################
 # REP2 vs REP3
 knots_r23 <- summary(r23$meanF_REP3)[3] #using the median meanF of rep3 as internal knot
-bound_knots_r23 <- c(min(c(r23$meanF_REP2,r23$meanF_REP3)), max(c(r23$meanF_REP2,r23$meanF_REP3))) # boundary knots
+bound_knots_r23 <- c(min(c(meanF_data$meanF_REP2,meanF_data$meanF_REP3),na.rm = T), max(c(meanF_data$meanF_REP2,meanF_data$meanF_REP3),na.rm = T)) # boundary knots
 degree <- 2 # degree of piecewise polynomials
 
 basis_mat23 <- iSpline(r23$meanF_REP3, knots = knots_r23, Boundary.knots = bound_knots_r23, degree = degree)
@@ -327,12 +326,11 @@ r23_before <- r23 %>% ggplot(aes(x=meanF_REP3,y=meanF_REP2)) + stat_bin2d(bins =
 r23_after <- r23 %>% ggplot(aes(x=meanF_REP3_c,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep3") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
 
-r13_before + r13_after
 
 #################
 # REP2 vs REP4
-knots_r24 <- summary(r24$meanF_REP4)[3] #using the median meanF of rep4 as internal knot
-bound_knots_r24 <- c(min(c(r24$meanF_REP2,r24$meanF_REP4)), max(c(r24$meanF_REP2,r24$meanF_REP4))) # boundary knots
+knots_r24 <- -4.6#summary(r24$meanF_REP4)[1] #using the median meanF of rep4 as internal knot
+bound_knots_r24 <- c(min(c(meanF_data$meanF_REP2,meanF_data$meanF_REP4),na.rm = T), max(c(meanF_data$meanF_REP2,meanF_data$meanF_REP4),na.rm = T)) # boundary knots
 degree <- 2 # degree of piecewise polynomials
 
 basis_mat24 <- iSpline(r24$meanF_REP4, knots = knots_r24, Boundary.knots = bound_knots_r24, degree = degree)
@@ -352,92 +350,91 @@ r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins =
 r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
 
+## *Note: Spline for rep2-4 seems to overshoot the fit. But it does reduce the SE(meanF) for isogenic controls.
+
 ```
 
 
-```{r echo=FALSE}
+```{r plotsplinefits, echo=FALSE}
 a <- r12_before + r12_after
 b <- r23_before + r23_after
 c <- r24_before + r24_after
 a / b / c
 ```
 
-Use splines to correct *all* variants that passed the filter in reps 1, 3 and 4 - not only the ones that are shared with rep2.
+Use splines to correct *all* variants that passed the read count filter in reps 1, 3 and 4 - not only the ones that are shared with rep2. This will also reduce the SE(meanF) of variants that were filtered out before.
 
 ```{r correction}
-# Variants per replicate that passed initial QC filter
+# Variants per replicate that passed initial read count QC filter
 rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>%
-  dplyr::select(AA_var,REBC,meanF_REP2) %>% rename(meanF = meanF_REP2) # all rep2 variants
+  dplyr::select(AA_var,REBC,bg,RE,meanF_REP2,type) %>% dplyr::rename(meanF = meanF_REP2) %>% mutate(REP = "REP2") # all rep2 variants
 rep1 <- meanF_data %>% filter(Count_total_REP1 >= rc) %>%
-  dplyr::select(AA_var,REBC,meanF_REP1) # all rep1 variants
+  dplyr::select(AA_var,REBC,bg,RE,meanF_REP1,type) %>% mutate(REP = "REP1") # all rep1 variants
 rep3 <- meanF_data %>% filter(Count_total_REP3 >= rc) %>%
-  dplyr::select(AA_var,REBC,meanF_REP3) # all rep3 variants
+  dplyr::select(AA_var,REBC,bg,RE,meanF_REP3,type) %>% mutate(REP = "REP3") # all rep3 variants
 rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc ) %>%
-  dplyr::select(AA_var,REBC,meanF_REP4) # all rep4 variants
+  dplyr::select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% mutate(REP = "REP4") # all rep4 variants
 rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>%
-  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>% dplyr::select(AA_var,REBC,meanF_REP4) 
-rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls
+  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% mutate(REP = "REP4")
+rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls (make sure they're not discarded)
 
 # Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case.
 
-rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% dplyr::select(AA_var,REBC,meanF_REP1_c) %>% rename(meanF = meanF_REP1_c)
+rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP1_c,type,REP) %>% dplyr::rename(meanF = meanF_REP1_c) 
 
-rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% dplyr::select(AA_var,REBC,meanF_REP3_c) %>% rename(meanF = meanF_REP3_c)
+rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP3_c,type,REP) %>% dplyr::rename(meanF = meanF_REP3_c) 
 
-rep4 <- rep4 %>% mutate(meanF_REP4_c = ((predict(basis_mat24, newx = rep4$meanF_REP4) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% dplyr::select(AA_var,REBC,meanF_REP4_c) %>% rename(meanF = meanF_REP4_c)
+rep4 <- rep4 %>% mutate(meanF_REP4_c = ((predict(basis_mat24, newx = rep4$meanF_REP4) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP4_c,type,REP) %>% dplyr::rename(meanF = meanF_REP4_c) 
 
 # Re-calculate SE(meanF) of variants after correction.
 meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
-  group_by(AA_var,REBC) %>%
-  summarise(avg_meanF = mean(meanF,na.rm = T), # meanF per var-REBC across replicates
-            n_reps = n(), # number of replicates in which var-REBC is found
-            sd_meanF = sd(meanF,na.rm = T),
+  pivot_wider(names_from = REP, values_from = meanF) %>%
+  mutate(avg_meanF = rowMeans(.[6:9],na.rm = T), # meanF per var-REBC across replicates
+            n_reps = rowSums(!is.na(.[6:9])), # number of replicates in which var-REBC is found
+            sd_meanF = rowSds(as.matrix(.[6:9]),na.rm=TRUE),
             se_meanF = sd_meanF / sqrt(n_reps)) # standard error of average meanF
-
-# plot histogram of SE(meanF) 
+            
+# Proportions of variants kepts and discarded based on SE(meanF) cutoff
 meanF_data_corrected %>% filter(n_reps != 1) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
   group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
 
+# plot histogram of SE(meanF) 
 meanF_data_corrected %>% filter(n_reps != 1) %>% 
   ggplot(aes(x=se_meanF)) + geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
   theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
   geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
-  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 1.41%") # histogram of SE(meanF)
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 1.42%") # histogram of SE(meanF)
 
+# New corrected dataset
+ctls <- meanF_data_corrected %>% filter(type=="control") %>% 
+  filter(grepl(paste(c("GSKV","EGKA","GGKM"),collapse = "|"),AA_var)) # Extract control variants, and filter out sequencing errors in controls
+meanF_data_corrected <- meanF_data_corrected %>% filter(se_meanF <= 0.1) 
+meanF_data_corrected <- unique(rbind(meanF_data_corrected,ctls)) # Manually add controls to new dataset
+
+write.csv(meanF_data_corrected,file=gzfile("meanF_data_corrected_NovaSeq.csv.gz")) # Save new corrected dataset
 ```
-
-
-## Filtering debulk sort data
-
-```{r filterdebulk}
-
-```
-
 
 ## Checking correlations with isogenic and REBC controls
 
 ```{r}
 # Plot meanF of control variants (from Rep1 and Rep4) *need to include data from Reps 2 and 3
-bounds <- meanF_data %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
+bounds <- meanF_data_corrected %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
   group_by(group) %>% summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
 
-ctl <- meanF_data %>% filter(type=="control") %>% 
-  filter(grepl(paste(c("GSKV","EGKA","GGKM"),collapse = "|"),AA_var)) # filter out sequencing errors in controls
-
-ctl_rep1 <- ctl %>% filter(!is.na(meanF_REP1)) %>% dplyr::select(AA_var,REBC,meanF_REP1) %>% mutate(REP = "REP1") %>% rename(meanF = meanF_REP1) 
-ctl_rep4 <- ctl %>% filter(!is.na(meanF_REP4)) %>% dplyr::select(AA_var,REBC,meanF_REP4) %>% mutate(REP = "REP4") %>% rename(meanF = meanF_REP4) 
+ctl_rep1 <- ctls %>% filter(!is.na(REP1)) %>% dplyr::select(AA_var,REBC,REP1) %>% mutate(REP = "REP1") %>% dplyr::rename(meanF = REP1)
+ctl_rep4 <- ctls %>% filter(!is.na(REP4)) %>% dplyr::select(AA_var,REBC,REP4) %>% mutate(REP = "REP4") %>% dplyr::rename(meanF = REP4) 
 
 rbind(ctl_rep1,ctl_rep4) %>%
   ggplot(aes(x=REBC,y=meanF)) +
   geom_point(color="black",pch = 21,size=2.5, aes(fill=REP)) +
   scale_fill_manual(values = c("#edd221","#2651a6")) +
-  ylim(c(-4.5,-2.5)) +
+  ylim(c(-4.7,-2)) +
   theme_bw() + coord_flip() +
   theme(axis.title.x = element_text(size=12,face="bold"), 
         axis.text.x = element_text(size=10),
         axis.text.y = element_text(size = 10),
         axis.title=element_text(size=12,face="bold")) +
-  geom_hline(yintercept = bounds$mean[1], size=1, linetype="dashed",col="red") +
+  geom_hline(yintercept = bounds$min[1], size=1, linetype="dashed",col="red") +
   geom_hline(yintercept = bounds$max[2], size=1, linetype="dashed",col="red") +
   ylab("Fluorescence") 
 
@@ -458,3 +455,8 @@ inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=meanF)) +
   annotate(geom = "text",label="r = 0.84", x= -4,y=-3,size=6)
 ```
 
+## Filtering debulk sort data
+
+```{r filterdebulk}
+
+```
