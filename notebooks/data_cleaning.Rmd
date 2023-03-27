@@ -402,7 +402,7 @@ meanF_data_corrected %>% filter(n_reps != 1) %>%
   ggplot(aes(x=se_meanF)) + geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
   theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
   geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
-  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 1.42%") # histogram of SE(meanF)
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.17%") # histogram of SE(meanF)
 
 # New corrected dataset
 ctls <- meanF_data_corrected %>% filter(type=="control") %>% 
