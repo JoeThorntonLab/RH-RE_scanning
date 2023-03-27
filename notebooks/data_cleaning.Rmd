@@ -97,9 +97,9 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   
   # unlist meanF data and calculate current SE(meanF) per variant and REBC
   meanF_data <- rbind(meanF_data$rep1, meanF_data$rep2, meanF_data$rep3, meanF_data$rep4) %>% 
-    select(AA_var,REBC,bg,RE,REP,meanF,Count_total,cellCount_total) %>% 
+    select(AA_var,REBC,bg,RE,REP,meanF,Count_total,cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4) %>% 
     # Re-organize the dataframe: each row is a variant-REBC combo
-    pivot_wider(names_from = REP, values_from = c(meanF,Count_total,cellCount_total)) %>%
+    pivot_wider(names_from = REP, values_from = c(meanF,Count_total,cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4)) %>%
     # Add summary statistics per varianr-REBC
     mutate(avg_meanF = rowMeans(.[5:8], na.rm = TRUE), # meanF per var-REBC across replicates
             n_reps = rowSums(!is.na(.[5:8])), # number of replicates in which var-REBC is found
@@ -156,8 +156,7 @@ meanF_data %>% filter(!(n_reps==1)) %>%
 ```
 
 
-
-## Filtering data
+### Filtering data
 
 DMS binned sort data is filtered based on two approaches. First, we filter out variants with low read count (across replicates) to reduce the global standard error; second, we remove variants with high SE(meanF) to further reduce the standard error. 
 
@@ -230,7 +229,6 @@ b <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc) %>% 
 c <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP1)) +
   stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep1") +
   geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
-a + b + c
 
 
 ## REP2-3
@@ -252,11 +250,33 @@ e <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc) %>% 
 f <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP3)) +
   stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep3") +
   geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
-d + e + f
 
+
+## REP2-4
+g <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP4,z=se_meanF)) +
+  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep4") +
+  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
+  guides(fill=guide_legend(title="SE(meanF)")) + ggtitle("Reps 2-4")
+
+  # How much data is retained after filtering by standard error
+meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
+  group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
+
+h <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc) %>% ggplot(aes(x = se_meanF)) + 
+  geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
+  theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
+  geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 3.21%") # histogram of SE(meanF)
+
+i <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP4)) +
+  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep4") +
+  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
 
 ```
 
+```{r plotfiltereddata, echo=FALSE, fig.width=11, fig.height=5}
+(a + b + c) / (d + e + f) / (g + h + i)
+```
 
 ## Correcting nonlinearity between replicates
 
@@ -296,8 +316,9 @@ r12$meanF_REP1_c <- (predict(basis_mat12, newx = r12$meanF_REP1) %*% coef(spline
 
 print("REPS: 1 and 2")
 print(paste("Correlation before correction:", cor(r12$meanF_REP1,r12$meanF_REP2)))
-print(paste("Correlation after correction:", cor(r12$meanF_REP1_c,r12$meanF_REP2))) # correlation of corrected values
-print(paste("Correlation of the 'active' region:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1_c,r12[r12$avg_meanF>=-4,]$meanF_REP2))) # correlation of the "active" variants
+print(paste("Correlation of the 'active' region before correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1,r12[r12$avg_meanF>=-4,]$meanF_REP2)))
+print(paste("Correlation after correction:", cor(r12$meanF_REP1_c,r12$meanF_REP2)))
+print(paste("Correlation of the 'active' region after correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1_c,r12[r12$avg_meanF>=-4,]$meanF_REP2))) 
 
 # plot results:
 r12_before <- r12 %>% ggplot(aes(x=meanF_REP1,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
@@ -320,8 +341,9 @@ r23$meanF_REP3_c <- (predict(basis_mat23, newx = r23$meanF_REP3) %*% coef(spline
 
 print("REPS: 2 and 3")
 print(paste("Correlation before correction:", cor(r23$meanF_REP2,r23$meanF_REP3)))
-print(paste("Correlation after correction:", cor(r23$meanF_REP2,r23$meanF_REP3_c))) # correlation of corrected values
-print(paste("Correlation of the 'active' region:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3_c))) # correlation of the "active" variants
+print(paste("Correlation of the 'active' region before correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3))) 
+print(paste("Correlation after correction:", cor(r23$meanF_REP2,r23$meanF_REP3_c)))
+print(paste("Correlation of the 'active' region after correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3_c))) 
 
 # plot results:
 r23_before <- r23 %>% ggplot(aes(x=meanF_REP3,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
@@ -344,8 +366,9 @@ r24$meanF_REP4_c <- (predict(basis_mat24, newx = r24$meanF_REP4) %*% coef(spline
 
 print("REPS: 2 and 4")
 print(paste("Correlation before correction:", cor(r24$meanF_REP2,r24$meanF_REP4)))
-print(paste("Correlation after correction:", cor(r24$meanF_REP2,r24$meanF_REP4_c))) # correlation of corrected values
-print(paste("Correlation of the 'active' region:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4_c))) # correlation of the "active" variants
+print(paste("Correlation of the 'active' region before correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4)))
+print(paste("Correlation after correction:", cor(r24$meanF_REP2,r24$meanF_REP4_c)))
+print(paste("Correlation of the 'active' region after correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4_c)))
 
 # plot results:
 r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
@@ -355,34 +378,49 @@ r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins =
 r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
 
-## *Note: Spline for rep2-4 seems to overshoot the fit. It does reduce the SE(meanF) for isogenic controls but predicts functional controls as null.
+## *Note: Spline for rep2-4 seems to overshoot the fit. It does reduce the SE(meanF) for isogenic controls but predicts some functional controls as null (see below)
 
 ```
 
 Plot the spline fits. 
 
-```{r plotsplinefits, echo=FALSE}
+```{r plotsplinefits, echo=FALSE, fig.width=9, fig.height=5}
 a <- r12_before + r12_after
 b <- r23_before + r23_after
 c <- r24_before + r24_after
 a / b / c
 ```
 
-Use splines to correct *all* variants that passed the read count filter - not only the ones that are shared with rep2 and the other replicates. This will also reduce the SE(meanF) of variants that were filtered out before.
+We'll use the fitted splines to correct *all* variants that passed the read count filter - not only the ones that are shared with rep2 and the other replicates. This will also reduce the SE(meanF) of variants that were filtered out before.
 
 ```{r correction}
 # Variants per replicate that passed initial read count QC filter
 rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP2,type) %>% rename(meanF = meanF_REP2) %>% mutate(REP = "REP2") # all rep2 variants
+  select(AA_var,REBC,bg,RE,meanF_REP2,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
+         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
+         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>% 
+  rename(meanF = meanF_REP2) %>% mutate(REP = "REP2") # all rep2 variants
 rep1 <- meanF_data %>% filter(Count_total_REP1 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP1,type) %>% mutate(REP = "REP1") # all rep1 variants
+  select(AA_var,REBC,bg,RE,meanF_REP1,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
+         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
+         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
+  mutate(REP = "REP1") # all rep1 variants
 rep3 <- meanF_data %>% filter(Count_total_REP3 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP3,type) %>% mutate(REP = "REP3") # all rep3 variants
+  select(AA_var,REBC,bg,RE,meanF_REP3,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
+         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
+         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
+  mutate(REP = "REP3") # all rep3 variants
 rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc ) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% rename(meanF = meanF_REP4) %>% mutate(REP = "REP4") # all rep4 variants
+  select(AA_var,REBC,bg,RE,meanF_REP4,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
+         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
+         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
+  rename(meanF = meanF_REP4) %>% mutate(REP = "REP4") # all rep4 variants
 rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>%
-  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>% select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% rename(meanF = meanF_REP4) %>%
-  mutate(REP = "REP4")
+  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>%
+  select(AA_var,REBC,bg,RE,meanF_REP4,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
+         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
+         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
+  rename(meanF = meanF_REP4) %>% mutate(REP = "REP4")
 rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls (make sure they're not discarded)
 
 # Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case (Don't correct Rep4).
@@ -390,6 +428,10 @@ rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls (make
 rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% select(AA_var,REBC,bg,RE,meanF_REP1_c,type,REP) %>% rename(meanF = meanF_REP1_c) 
 
 rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% select(AA_var,REBC,bg,RE,meanF_REP3_c,type,REP) %>% rename(meanF = meanF_REP3_c) 
+
+# Compare uncorrected vs corrected meanF values for isogenic controls in Rep4
+# Given the overshoot of the I-spline, all estimated values are pulled towards lower predicted values of meanF (compare 'meanF' vs 'meanF_c' columns). The effect is especially severe for AncSR2_SRE and AncSR1_GGKM_ERE. These variants are active based on cytometry data from isogenic strains, but are predicted as null variants (see plot below showing the lower and upper bounds of detection).  
+rep4_ctls %>% mutate(meanF_c = ((predict(basis_mat24, newx = rep4_ctls$meanF) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% select(AA_var,REBC,bg,RE,type,REP,meanF,meanF_c)
 
 # Re-calculate SE(meanF) of variants after correction.
 meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
@@ -399,7 +441,7 @@ meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
             sd_meanF = rowSds(as.matrix(.[6:9]),na.rm=TRUE),
             se_meanF = sd_meanF / sqrt(n_reps)) # standard error of average meanF
             
-# Proportions of variants kepts and discarded based on SE(meanF) cutoff
+# Proportions of variants kept and discarded based on SE(meanF) cutoff
 meanF_data_corrected %>% filter(n_reps != 1) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
   group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
 
@@ -422,24 +464,34 @@ write.csv(meanF_data_corrected,file=gzfile(file.path("..", "results", "meanF_dat
 ## Checking correlations with isogenic and REBC controls
 
 ```{r}
-# Plot meanF of control variants (from Rep1 and Rep4) *need to include data from Reps 2 and 3
+# Plot meanF of control variants (from Rep1 and Rep4)
+#### TODO: need to include data from Reps 2 and 3
 bounds <- meanF_data_corrected %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
   group_by(group) %>% summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
 
 ctl_rep1 <- ctls %>% filter(!is.na(REP1)) %>% select(AA_var,REBC,REP1) %>% mutate(REP = "REP1") %>% rename(meanF = REP1)
-ctl_rep4 <- ctls %>% filter(!is.na(REP4)) %>% select(AA_var,REBC,REP4) %>% mutate(REP = "REP4") %>% rename(meanF = REP4) 
+ctl_rep4 <- ctls %>% filter(!is.na(REP4)) %>% select(AA_var,REBC,REP4) %>% mutate(REP = "REP4") %>% rename(meanF = REP4)
+ctls_in_lib <- meanF_data_corrected %>% mutate(v = paste(AA_var,REBC,sep = "_")) %>% 
+  filter(v %in% c("EGKA_AncSR1_REBC3","EGKA_AncSR2_REBC3","GGKM_AncSR1_REBC3","GGKM_AncSR2_REBC1","GSKV_AncSR2_REBC1")) %>% 
+  mutate(REP = "Library",
+         Variant = case_when(v == "EGKA_AncSR1_REBC3" ~ "AncSR1_ERE",
+                         v == "EGKA_AncSR2_REBC3" ~ "AncSR2_rh_ERE",
+                         v == "GGKM_AncSR1_REBC3" ~ "AncSR1_GGKM_ERE",
+                         v == "GGKM_AncSR2_REBC1" ~ "AncSR2_GGKM_SRE",
+                         v == "GSKV_AncSR2_REBC1" ~ "AncSR2_SRE")) %>% 
+  select(AA_var,Variant,avg_meanF,REP) %>% rename(meanF = avg_meanF, REBC = Variant)
 
-rbind(ctl_rep1,ctl_rep4) %>%
+rbind(ctl_rep1,ctl_rep4,ctls_in_lib) %>%
   ggplot(aes(x=REBC,y=meanF)) +
   geom_point(color="black",pch = 21,size=2.5, aes(fill=REP)) +
-  scale_fill_manual(values = c("#edd221","#2651a6")) +
-  ylim(c(-4.7,-2)) +
+  scale_fill_manual(values = c("black","#edd221","#2651a6")) +
+  ylim(c(-4.7,-2.5)) +
   theme_bw() + coord_flip() +
   theme(axis.title.x = element_text(size=12,face="bold"), 
         axis.text.x = element_text(size=10),
         axis.text.y = element_text(size = 10),
         axis.title=element_text(size=12,face="bold")) +
-  geom_hline(yintercept = bounds$min[1], size=1, linetype="dashed",col="red") +
+  geom_hline(yintercept = bounds$mean[1], size=1, linetype="dashed",col="red") +
   geom_hline(yintercept = bounds$max[2], size=1, linetype="dashed",col="red") +
   ylab("Fluorescence") 
 
