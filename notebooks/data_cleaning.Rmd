@@ -350,7 +350,7 @@ r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins =
 r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
 
-## *Note: Spline for rep2-4 seems to overshoot the fit. But it does reduce the SE(meanF) for isogenic controls.
+## *Note: Spline for rep2-4 seems to overshoot the fit. It does reduce the SE(meanF) for isogenic controls but predicts functional controls as null.
 
 ```
 
@@ -373,18 +373,17 @@ rep1 <- meanF_data %>% filter(Count_total_REP1 >= rc) %>%
 rep3 <- meanF_data %>% filter(Count_total_REP3 >= rc) %>%
   dplyr::select(AA_var,REBC,bg,RE,meanF_REP3,type) %>% mutate(REP = "REP3") # all rep3 variants
 rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc ) %>%
-  dplyr::select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% mutate(REP = "REP4") # all rep4 variants
+  dplyr::select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% dplyr::rename(meanF = meanF_REP4) %>% mutate(REP = "REP4") # all rep4 variants
 rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>%
-  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% mutate(REP = "REP4")
+  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP4,type) %>% dplyr::rename(meanF = meanF_REP4) %>%
+  mutate(REP = "REP4")
 rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls (make sure they're not discarded)
 
-# Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case.
+# Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case (Don't correct Rep4).
 
 rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP1_c,type,REP) %>% dplyr::rename(meanF = meanF_REP1_c) 
 
 rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP3_c,type,REP) %>% dplyr::rename(meanF = meanF_REP3_c) 
-
-rep4 <- rep4 %>% mutate(meanF_REP4_c = ((predict(basis_mat24, newx = rep4$meanF_REP4) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% dplyr::select(AA_var,REBC,bg,RE,meanF_REP4_c,type,REP) %>% dplyr::rename(meanF = meanF_REP4_c) 
 
 # Re-calculate SE(meanF) of variants after correction.
 meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
