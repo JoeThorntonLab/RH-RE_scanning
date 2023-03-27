@@ -26,9 +26,9 @@ if(any(installed_packages == F)) {
 invisible(lapply(packages, library, character.only=TRUE))
 
 # make output directories
-# if(!dir.exists(file.path("..", "results"))) {
-#   dir.create(file.path("..", "results"))
-# }
+if(!dir.exists(file.path("..", "results"))) {
+  dir.create(file.path("..", "results"))
+}
 ```
 
 
@@ -516,8 +516,28 @@ inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=meanF)) +
 
 ## Filtering debulk sort data
 
-Now let's turn to filtering the data from the debulk sort (first round of sorting to enrich for GFP+ variants). For this experiment, we had two sort bins: GFP- and GFP+. We sequenced cells collected in the GFP- bin to determine the set of variants that were present in the unsorted library. Variants that are seen in the debulk GFP- dataset but not in the binned sort (round 2 sort) dataset may be null variants that did not have a high enough proportion of GFP+ cells to be collected in the GFP+ bin during the debulk sort. Alternatively, they may be variants that do have a high proportion of GFP+ cells, but by chance were not sorted at high enough frequency to be detected in the binned sort dataset.
+Now let's turn to filtering the data from the debulk sort (first round of sorting to enrich for GFP+ variants). For this experiment, we had two sort bins: GFP- and GFP+. We sequenced cells collected in the GFP- bin to determine the set of variants that were present in the unsorted library. Variants that are seen in the debulk GFP- dataset but not in the binned sort (round 2 sort) dataset may be null variants that did not have a high enough proportion of GFP+ cells to be collected in the GFP+ bin during the debulk sort. Alternatively, they may be variants that are active (i.e. they have a significant proportion of GFP+ cells), but by chance were not sorted at high enough frequency to be detected in the binned sort dataset. 
 
-```{r filterdebulk}
+We want to have some criterion to call variants null if they are detected in the debulk GFP- datset but not the binned sort dataset. We can use read count as a metric for the likelihood of being null, since variants that are detected at high frequency in the debulk GPF- dataset but not at all in the binned sort dataset are more likely to be null than those that are detected at low frequency in the debulk GFP- dataset. 
+
+How should we determine a read count threshold for calling a variant null in the debulk GPF- dataset? To do this, we can calculate the binomial sampling probability of a variant being sorted into the debulk GFP+ bin given a total number of cells sorted for that variant and the proportion of cells for the variant that are in the GFP+ bin. We can then set a read count threshold to ensure that variants at that read count level that are truly active would have a high probability of being detected in the binned sort data, and conversely if they are not detected in the binned sort data then they are likely to be null.
+
+First, we need to estimate how many cells must be sorted for a variant into the debulk GFP+ bin to be detected in the binned sort dataset (and make it past the binned sort filtering procedures). To do this, we can estimate the average number of cells that were sorted for each variant in the debulk GFP+ bin. We will assume that the proportion of cells per variant per RE library in the binned sort data is the same as the proportion of cells per variant per RE library in the debulk sort GFP+ bin. We can then multiply this by the total number of cells sorted per RE library in the debulk sort to estimate the number of cells sorted into the GFP+ bin ber library.
+
+```{r estimateGFPpluscellcount}
+# number of GFP+ cells sorted per RE library in debulk sort
+debulkposcells <- data.frame(bg = c(rep(rep(c("AncSR1", "AncSR2"), each = 16), 3), rep("AncSR1", 8)),
+                          RE = c(rep(REs[[1]], 2*3), REs[[1]][9:16]),
+                          REP = c(rep(c("REP1", "REP2", "REP3"), each = 32), rep("REP4", 8)),
+                          GFPposcellslib = c(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
+                                          858760, 379479, 744771, 285197, 329854, 587774, 348916, 437954,
+                                          847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
+                                          903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539),
+                                          rep(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
+                                                342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658,
+                                                847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
+                                                903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539), 2),
+                                          c(342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658)))
+debulkposcells <- debulkposcells %>% spread(REP, GFPposcellslib)
 
 ```
