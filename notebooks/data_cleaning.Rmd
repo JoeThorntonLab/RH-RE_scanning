@@ -466,8 +466,8 @@ write.csv(meanF_data_corrected,file=gzfile(file.path("..", "results", "meanF_dat
 bounds <- meanF_data_corrected %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
   group_by(group) %>% summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
 
-ctl_rep1 <- ctls %>% filter(!is.na(REP1)) %>% select(AA_var,REBC,REP1) %>% mutate(REP = "REP1") %>% rename(meanF = REP1)
-ctl_rep4 <- ctls %>% filter(!is.na(REP4)) %>% select(AA_var,REBC,REP4) %>% mutate(REP = "REP4") %>% rename(meanF = REP4)
+ctl_rep1 <- ctls %>% filter(!is.na(meanF_REP1)) %>% select(AA_var,REBC,meanF_REP1) %>% mutate(REP = "REP1") %>% dplyr::rename(meanF = meanF_REP1)
+ctl_rep4 <- ctls %>% filter(!is.na(meanF_REP4)) %>% select(AA_var,REBC,meanF_REP4) %>% mutate(REP = "REP4") %>% dplyr::rename(meanF = meanF_REP4)
 ctls_in_lib <- meanF_data_corrected %>% mutate(v = paste(AA_var,REBC,sep = "_")) %>% 
   filter(v %in% c("EGKA_AncSR1_REBC3","EGKA_AncSR2_REBC3","GGKM_AncSR1_REBC3","GGKM_AncSR2_REBC1","GSKV_AncSR2_REBC1")) %>% 
   mutate(REP = "Library",
@@ -476,7 +476,7 @@ ctls_in_lib <- meanF_data_corrected %>% mutate(v = paste(AA_var,REBC,sep = "_"))
                          v == "GGKM_AncSR1_REBC3" ~ "AncSR1_GGKM_ERE",
                          v == "GGKM_AncSR2_REBC1" ~ "AncSR2_GGKM_SRE",
                          v == "GSKV_AncSR2_REBC1" ~ "AncSR2_SRE")) %>% 
-  select(AA_var,Variant,avg_meanF,REP) %>% rename(meanF = avg_meanF, REBC = Variant)
+  select(AA_var,Variant,avg_meanF,REP) %>% dplyr::rename(meanF = avg_meanF, REBC = Variant)
 
 rbind(ctl_rep1,ctl_rep4,ctls_in_lib) %>%
   ggplot(aes(x=REBC,y=meanF)) +
