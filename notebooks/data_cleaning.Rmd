@@ -85,7 +85,7 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
         mutate(bg = str_replace(factor(bg), "^SR", "AncSR"),
                RE = str_replace(RE, "REBC\\d+", as.character(REBC_to_RE(RE))))
       # sort rows by REBC and AA_var
-      meanF_data[[rep]] <- meanF_data[[rep]] %>% arrange(REBC, AA_var)
+      #meanF_data[[rep]] <- meanF_data[[rep]] %>% arrange(REBC, AA_var)
     } 
     
     # read in data from debulk sort experiment
@@ -395,39 +395,36 @@ We'll use the fitted splines to correct *all* variants that passed the read coun
 
 ```{r correction}
 # Variants per replicate that passed initial read count QC filter
-rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP2,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>% 
-  rename(meanF = meanF_REP2) %>% mutate(REP = "REP2") # all rep2 variants
+rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>% 
+  select(AA_var,REBC,bg,RE,meanF_REP2,Count_total_REP2,cellCount_total_REP2,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,type) %>% 
+  dplyr::rename(meanF = meanF_REP2, Count_total = Count_total_REP2, cellCount_total = cellCount_total_REP2, cellCount_b1 =  cellCount_b1_REP2,
+                cellCount_b2 = cellCount_b2_REP2, cellCount_b3 = cellCount_b3_REP2, cellCount_b4 = cellCount_b4_REP2) %>% mutate(REP = "REP2") # all rep2 variants
 rep1 <- meanF_data %>% filter(Count_total_REP1 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP1,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
-  mutate(REP = "REP1") # all rep1 variants
+  select(AA_var,REBC,bg,RE,meanF_REP1,Count_total_REP1,cellCount_total_REP1,cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,type) %>% 
+  dplyr::rename(meanF = meanF_REP1, Count_total = Count_total_REP1, cellCount_total = cellCount_total_REP1, cellCount_b1 =  cellCount_b1_REP1,
+                cellCount_b2 = cellCount_b2_REP1, cellCount_b3 = cellCount_b3_REP1, cellCount_b4 = cellCount_b4_REP1) %>%  mutate(REP = "REP1") # all rep1 variants
 rep3 <- meanF_data %>% filter(Count_total_REP3 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP3,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
-  mutate(REP = "REP3") # all rep3 variants
-rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc ) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP4,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
-  rename(meanF = meanF_REP4) %>% mutate(REP = "REP4") # all rep4 variants
+  select(AA_var,REBC,bg,RE,meanF_REP3,Count_total_REP3,cellCount_total_REP3,cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,type) %>% 
+  dplyr::rename(meanF = meanF_REP3, Count_total = Count_total_REP3, cellCount_total = cellCount_total_REP3, cellCount_b1 =  cellCount_b1_REP3,
+                cellCount_b2 = cellCount_b2_REP3, cellCount_b3 = cellCount_b3_REP3, cellCount_b4 = cellCount_b4_REP3) %>%  mutate(REP = "REP3") # all rep3 variants
+rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc) %>%
+  select(AA_var,REBC,bg,RE,meanF_REP4,Count_total_REP4,cellCount_total_REP4,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4,type) %>% 
+  dplyr::rename(meanF = meanF_REP4, Count_total = Count_total_REP4, cellCount_total = cellCount_total_REP4, cellCount_b1 =  cellCount_b1_REP4,
+                cellCount_b2 = cellCount_b2_REP4, cellCount_b3 = cellCount_b3_REP4, cellCount_b4 = cellCount_b4_REP4) %>% mutate(REP = "REP4") # all rep4 variants
 rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>%
   filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP4,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP,cellCount_b2_REP4,cellCount_b3_REP14,cellCount_b4_REP4) %>%
-  rename(meanF = meanF_REP4) %>% mutate(REP = "REP4")
+  select(AA_var,REBC,bg,RE,meanF_REP4,Count_total_REP4,cellCount_total_REP4,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4,type) %>% 
+  dplyr::rename(meanF = meanF_REP4, Count_total = Count_total_REP4, cellCount_total = cellCount_total_REP4, cellCount_b1 =  cellCount_b1_REP4,
+                cellCount_b2 = cellCount_b2_REP4, cellCount_b3 = cellCount_b3_REP4, cellCount_b4 = cellCount_b4_REP4) %>% mutate(REP = "REP4")
 rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls (make sure they're not discarded)
 
 # Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case (Don't correct Rep4).
 
-rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% select(AA_var,REBC,bg,RE,meanF_REP1_c,type,REP) %>% rename(meanF = meanF_REP1_c) 
+rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% 
+  select(-c(meanF)) %>% dplyr::rename(meanF = meanF_REP1_c) %>% relocate(meanF,.after = RE)
 
-rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% select(AA_var,REBC,bg,RE,meanF_REP3_c,type,REP) %>% rename(meanF = meanF_REP3_c) 
+rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% 
+  select(-c(meanF)) %>% dplyr::rename(meanF = meanF_REP3_c) %>% relocate(meanF,.after = RE)
 
 # Compare uncorrected vs corrected meanF values for isogenic controls in Rep4
 # Given the overshoot of the I-spline, all estimated values are pulled towards lower predicted values of meanF (compare 'meanF' vs 'meanF_c' columns). The effect is especially severe for AncSR2_SRE and AncSR1_GGKM_ERE. These variants are active based on cytometry data from isogenic strains, but are predicted as null variants (see plot below showing the lower and upper bounds of detection).  
@@ -435,11 +432,11 @@ rep4_ctls %>% mutate(meanF_c = ((predict(basis_mat24, newx = rep4_ctls$meanF) %*
 
 # Re-calculate SE(meanF) of variants after correction.
 meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
-  pivot_wider(names_from = REP, values_from = meanF) %>%
+  pivot_wider(names_from = REP, values_from = c(meanF,Count_total,cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4)) %>%
   mutate(avg_meanF = rowMeans(.[6:9],na.rm = T), # meanF per var-REBC across replicates
-            n_reps = rowSums(!is.na(.[6:9])), # number of replicates in which var-REBC is found
-            sd_meanF = rowSds(as.matrix(.[6:9]),na.rm=TRUE),
-            se_meanF = sd_meanF / sqrt(n_reps)) # standard error of average meanF
+         n_reps = rowSums(!is.na(.[6:9])), # number of replicates in which var-REBC is found
+         sd_meanF = rowSds(as.matrix(.[6:9]),na.rm=TRUE),
+         se_meanF = sd_meanF / sqrt(n_reps)) # standard error of average meanF
             
 # Proportions of variants kept and discarded based on SE(meanF) cutoff
 meanF_data_corrected %>% filter(n_reps != 1) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
