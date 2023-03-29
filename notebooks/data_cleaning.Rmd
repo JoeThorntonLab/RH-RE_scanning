@@ -395,7 +395,6 @@ We'll use the fitted splines to correct *all* variants that passed the read coun
 
 ```{r correction}
 # Variants per replicate that passed initial read count QC filter
-<<<<<<< HEAD
 rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>% 
   select(AA_var,REBC,bg,RE,meanF_REP2,Count_total_REP2,cellCount_total_REP2,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,type) %>% 
   dplyr::rename(meanF = meanF_REP2, Count_total = Count_total_REP2, cellCount_total = cellCount_total_REP2, cellCount_b1 =  cellCount_b1_REP2,
@@ -421,34 +420,6 @@ rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>
   select(AA_var,REBC,bg,RE,meanF_REP4,Count_total_REP4,cellCount_total_REP4,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4,type) %>% 
   dplyr::rename(meanF = meanF_REP4, Count_total = Count_total_REP4, cellCount_total = cellCount_total_REP4, cellCount_b1 =  cellCount_b1_REP4,
                 cellCount_b2 = cellCount_b2_REP4, cellCount_b3 = cellCount_b3_REP4, cellCount_b4 = cellCount_b4_REP4) %>% mutate(REP = "REP4")
-=======
-rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP2,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4) %>% 
-  rename(meanF = meanF_REP2) %>% mutate(REP = "REP2") # all rep2 variants
-rep1 <- meanF_data %>% filter(Count_total_REP1 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP1,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4) %>%
-  mutate(REP = "REP1") # all rep1 variants
-rep3 <- meanF_data %>% filter(Count_total_REP3 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP3,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4) %>%
-  mutate(REP = "REP3") # all rep3 variants
-rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc ) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP4,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4) %>%
-  rename(meanF = meanF_REP4) %>% mutate(REP = "REP4") # all rep4 variants
-rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>%
-  filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP4,type,cellCount_total_REP1,cellCount_total_REP2,cellCount_total_REP3,cellCount_total_REP4,
-         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,
-         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4) %>%
-  rename(meanF = meanF_REP4) %>% mutate(REP = "REP4")
->>>>>>> not much modified here
 rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls (make sure they're not discarded)
 
 # Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case (Don't correct Rep4).
