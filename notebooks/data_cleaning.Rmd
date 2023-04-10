@@ -123,8 +123,7 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
 
 ## Filtering binned sort data
 
-These plots show some general features of the dataset. 1) SE(meanF) decays with read depth, as expected. 2) Variants with a minimum read count of ~15
-have a SE(meanF) < 0.1, regardless of the number of replicates. 
+These plots show some general features of the dataset. 1) SE(meanF) decays with read depth, as expected, because variants with more reads have more precise estimates of meanF. 2) Variants with a minimum read count of ~15 have a SE(meanF) < 0.1, regardless of the number of replicates. 
 
 ```{r exploratoryfigs}
 # SE(meanF) as a function of minimum read depth per variant
@@ -158,7 +157,7 @@ meanF_data %>% filter(!(n_reps==1)) %>%
 
 ### Filtering data
 
-DMS binned sort data is filtered based on two approaches. First, we filter out variants with low read count (across replicates) to reduce the global standard error; second, we remove variants with high SE(meanF) to further reduce the standard error. 
+DMS binned sort data is filtered based on two approaches. First, we filter out variants with low read count (across replicates) to reduce the global standard error; second, we correct use an I-spline to correct the nonlnearity between replicates, and remove variants with high SE(meanF). These two procedures ensure that we keep variants for which we have high confidence in their meanF estimates. 
 
 ```{r filterdata}
 ### First strategy: Choose a read count for which we maximize the fraction of retained variants, maximize the 
@@ -203,7 +202,7 @@ abline(v=24,lty=2,col="gray",lwd=3)
 ```
 
 
-After having identified the read threshold, we will perform a second filter removing variants with SE(meanF) > 0.1. This reduces the noise, and will help to fit the splines in order to capture the global relationships between replicates.
+After having identified the read threshold, we will perform a second filter removing variants with SE(meanF) > 0.1. This is not the final filter based on standard error, we do this to remove noisy variants and will help to fit the splines in order to capture the *global* relationships between replicates (compare the plots in the left column with those in the right column).
 
 ```{r filterse}
 # Filter variants per replicate based on a read threshold. Then filter out variants by SE(meanF) > 0.1
@@ -224,7 +223,7 @@ b <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc) %>% 
   geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
   theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") +
   geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
-  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.4%") # histogram of SE(meanF)
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 1.73%") # histogram of SE(meanF)
 
 c <- meanF_data %>% filter(Count_total_REP1 >= rc & Count_total_REP2 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP1)) +
   stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep1") +
@@ -245,7 +244,7 @@ e <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc) %>% 
   geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
   theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
   geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
-  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.91%") # histogram of SE(meanF)
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.21%") # histogram of SE(meanF)
 
 f <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP3 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP3)) +
   stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep3") +
@@ -266,7 +265,7 @@ h <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc) %>% 
   geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
   theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
   geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
-  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 3.21%") # histogram of SE(meanF)
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.65%") # histogram of SE(meanF)
 
 i <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc & se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP4)) +
   stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep4") +
@@ -280,7 +279,7 @@ i <- meanF_data %>% filter(Count_total_REP2 >= rc & Count_total_REP4 >= rc & se_
 
 ## Correcting nonlinearity between replicates
 
-Here we will correct for the remaining non linearity between replicates in order to adjust all measurements to be on the same scale (the reference scale being replicate 2). 
+Here we will correct for the remaining nonlinearity between replicates in order to adjust all measurements to be on the same scale (the reference scale being replicate 2). 
 
 ```{r splinefit}
 # Datasets:
@@ -382,7 +381,7 @@ r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 
 
 ```
 
-Plot the spline fits. 
+Plot the spline fits. The plots on the left column show the fitted I-spline, and the plots in the right column show the corrected values for replicates 1, 3, and 4.
 
 ```{r plotsplinefits, echo=FALSE, fig.width=9, fig.height=5}
 a <- r12_before + r12_after
@@ -391,7 +390,7 @@ c <- r24_before + r24_after
 a / b / c
 ```
 
-We'll use the fitted splines to correct *all* variants that passed the read count filter - not only the ones that are shared with rep2 and the other replicates. This will also reduce the SE(meanF) of variants that were filtered out before.
+The splines were fitted with those variants that are present in replicate 2 and the other replicate. We'll use the fitted splines to correct *all* variants that passed the previous read count filter - not only the ones that are shared with rep2 and the other replicates. This will also reduce the SE(meanF) of the noisy variants that were filtered out before.
 
 ```{r correction}
 # Variants per replicate that passed initial read count QC filter
@@ -430,7 +429,7 @@ rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF)
 rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% 
   select(-c(meanF)) %>% dplyr::rename(meanF = meanF_REP3_c) %>% relocate(meanF,.after = RE)
 
-# Compare uncorrected vs corrected meanF values for isogenic controls in Rep4
+# Comparison of uncorrected vs corrected meanF values for isogenic controls in Rep4:
 # Given the overshoot of the I-spline, all estimated values are pulled towards lower predicted values of meanF (compare 'meanF' vs 'meanF_c' columns). The effect is especially severe for AncSR2_SRE and AncSR1_GGKM_ERE. These variants are active based on cytometry data from isogenic strains, but are predicted as null variants (see plot below showing the lower and upper bounds of detection).  
 rep4_ctls %>% mutate(meanF_c = ((predict(basis_mat24, newx = rep4_ctls$meanF) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% select(AA_var,REBC,bg,RE,type,REP,meanF,meanF_c)
 
@@ -464,14 +463,19 @@ write.csv(meanF_data_corrected,file=gzfile(file.path("..", "results", "meanF_dat
 
 ## Checking correlations with isogenic and REBC controls
 
+We used two kinds of control variants. First, we spiked into our DMS library several isogenic controls of reference DBD variants for which we have estimates of meanF based on flow cytometry data; this will allow us to validate our estmates of meanF from the sort-seq data. Second, we used RE-barcode (REBC) controls. We measured each DBD library (AncSR1 and AncSR2) on 16 yeast strains, each containing an RE sequence, and all 32 libraries were assayed together in a single sort-seq experiment. To distinguish the RE in which a given DBD variant was assayed in, we assigned an REBC to each DBD library using synonymous codon variants in the RH region. Thus, the REBC controls correspond to the RH genotype of AncSR1 or AncSR2 on the background of each of the REBC sequences, assayed in ERE and SRE, respectively; all AncSR1-REBCs on ERE and AncSR2-REBCs on SRE should have the same meanF estimate as the wild type AncSR1/ERE and AncSR2/SRE genotypes. In total, we have 5 isogenic controls and 32 REBC controls (16 per DBD library).
+
 ```{r}
-# Plot meanF of control variants (from Rep1 and Rep4)
-#### TODO: need to include data from Reps 2 and 3
+# Plot meanF of control variants
 bounds <- meanF_data_corrected %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
   group_by(group) %>% summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
 
 ctl_rep1 <- ctls %>% filter(!is.na(meanF_REP1)) %>% select(AA_var,REBC,meanF_REP1) %>% mutate(REP = "REP1") %>% dplyr::rename(meanF = meanF_REP1)
+ctl_rep2 <- ctls %>% filter(!is.na(meanF_REP2)) %>% select(AA_var,REBC,meanF_REP2) %>% mutate(REP = "REP2") %>% dplyr::rename(meanF = meanF_REP2)
+ctl_rep3 <- ctls %>% filter(!is.na(meanF_REP3)) %>% select(AA_var,REBC,meanF_REP3) %>% mutate(REP = "REP3") %>% dplyr::rename(meanF = meanF_REP3)
 ctl_rep4 <- ctls %>% filter(!is.na(meanF_REP4)) %>% select(AA_var,REBC,meanF_REP4) %>% mutate(REP = "REP4") %>% dplyr::rename(meanF = meanF_REP4)
+
+# Extract genotypes of isogenic controls from the DMS library mutants.
 ctls_in_lib <- meanF_data_corrected %>% mutate(v = paste(AA_var,REBC,sep = "_")) %>% 
   filter(v %in% c("EGKA_AncSR1_REBC3","EGKA_AncSR2_REBC3","GGKM_AncSR1_REBC3","GGKM_AncSR2_REBC1","GSKV_AncSR2_REBC1")) %>% 
   mutate(REP = "Library",
@@ -482,10 +486,10 @@ ctls_in_lib <- meanF_data_corrected %>% mutate(v = paste(AA_var,REBC,sep = "_"))
                          v == "GSKV_AncSR2_REBC1" ~ "AncSR2_SRE")) %>% 
   select(AA_var,Variant,avg_meanF,REP) %>% dplyr::rename(meanF = avg_meanF, REBC = Variant)
 
-rbind(ctl_rep1,ctl_rep4,ctls_in_lib) %>%
+c1 <- rbind(ctl_rep1,ctl_rep2,ctl_rep3,ctl_rep4,ctls_in_lib) %>%
   ggplot(aes(x=REBC,y=meanF)) +
   geom_point(color="black",pch = 21,size=2.5, aes(fill=REP)) +
-  scale_fill_manual(values = c("black","#edd221","#2651a6")) +
+  scale_fill_manual(values = c("black","#edd221","#2651a6","#0b9e32","#631cc7")) +
   ylim(c(-4.7,-2.5)) +
   theme_bw() + coord_flip() +
   theme(axis.title.x = element_text(size=12,face="bold"), 
@@ -494,14 +498,14 @@ rbind(ctl_rep1,ctl_rep4,ctls_in_lib) %>%
         axis.title=element_text(size=12,face="bold")) +
   geom_hline(yintercept = bounds$mean[1], size=1, linetype="dashed",col="red") +
   geom_hline(yintercept = bounds$max[2], size=1, linetype="dashed",col="red") +
-  ylab("Fluorescence") 
+  ylab("Fluorescence") + xlab("Control")
 
 # Check correlations in meanF between measured isogenics and DMS spiked-in isogenics
 iso_file = file.path("..", "data", "meanF", "rep4_isogenic_controls_FlowJo_bin.csv")
 isogenics <- read.csv(iso_file,header=T) %>% rowwise() %>%
   mutate(meanF_iso = sum(c(fbin1*cell_countb1,fbin2*cell_countb2,fbin3*cell_countb3,fbin4*cell_countb4))/sum(c(cell_countb1,cell_countb2,cell_countb3,cell_countb4)))
   
-inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=meanF)) +
+c2 <- inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=meanF)) +
   geom_point() + theme_bw() + xlim(-4.5,-2.1) + ylim(-4.5,-2.1) +
   theme(axis.title.x = element_text(size=12,face="bold"), 
         axis.text.x = element_text(size=10),
@@ -509,10 +513,12 @@ inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=meanF)) +
         axis.title=element_text(size=12,face="bold")) +
   geom_abline(slope = 1,intercept = 0,color="gray") +
   geom_smooth(method="lm",se=F) +
-  ylab("meanF isogenic (spiked-in)") + xlab("meanF isogenic") +
+  ylab("meanF isogenic (spiked-in)") + xlab("meanF isogenic (flow cytometry)") +
   annotate(geom = "text",label="r = 0.84", x= -4,y=-3,size=6)
 ```
-
+```{r plotcontrols echo=FALSE, fig.width=12, fig.height=6}
+c1 + c2
+```
 
 ## Testing for fluorescence significance
 
