@@ -522,533 +522,107 @@ c1 + c2
 
 ## Testing for fluorescence significance
 
-We will now determine a significance threshold for calling a variant active vs. null in the binned (2nd round) sort data. We will use the fluorescence distribution of stop codon-containing variance as a null distribution to compute a p-value for each variant, and perform multiple testing correction using a Benjamini-Hochberg false discovery rate.
+We will now determine a significance threshold for calling a variant active vs. null in the binned (2nd round) sort data. We will use the fluorescence distribution of nonsense variants as a null distribution to compute a nonparametric p-value for each variant, and perform multiple testing correction using a Benjamini-Hochberg false discovery rate.
 
-```{r}
-meanF_p <- meanF_data_corrected %>% select(AA_var:type, avg_meanF) %>% arrange(bg, RE, AA_var, type)
+We observed during the sorting experiment that the fluorescence distribution of null variants in the AncSR2 protein background is systematically higher than in the AncSR1 protein background. We will therefore test each variant using the fluorescence distribution of nonsense variants from the same protein background. We will also bin variants by mean read count across sorting replicates for testing, since we observe that the null fluorescence distribution also depends on this variable. Below we plot the distribution of mean fluorescence for nonsense variants splitting by protein background and mean read count.
 
-cl <- parallel::makeCluster(2, "FORK", outfile="")
-doParallel::registerDoParallel(cl)
-p <- foreach(background = c("AncSR1", "AncSR2")) %dopar% {
-  # get meanF for stop codons
-  fstop <- meanF_p %>% filter(bg == background, grepl("\\*", AA_var)) %>% pull(avg_meanF)
-  nstop <- length(fstop)
-  # calculate proportion of stop codon variants that have higher fluorescence that of each test variant
-  res <- list(p = meanF_p %>% filter(bg == background, !grepl("\\*", AA_var)) %>% 
-    pull(avg_meanF) %>%
-    sapply(function(x) sum(fstop > x) / nstop))
-  res$padj <- p.adjust(res$p, method = "fdr")
-  res
-}
-stopCluster(cl)
-
-meanF_p <- meanF_p %>% filter(!grepl("\\*", AA_var))
-meanF_p$p <- c(p[[1]]$p, p[[2]]$p)
-meanF_p$padj <- c(p[[1]]$padj, p[[2]]$padj)
-
-
-# now try fitting distributions to the stop codon variants to determine a p-value
-meanF_p <- meanF_data_corrected %>% select(AA_var:type, avg_meanF) %>% arrange(bg, RE, AA_var, type)
-
-AncSR1.stopfit.logis <- fitdistr(meanF_p %>% 
-                             filter(bg == "AncSR1", grepl("\\*", AA_var)) %>% 
-                             pull(avg_meanF), "logistic")
-AncSR2.stopfit.logis <- fitdistr(meanF_p %>% 
-                             filter(bg == "AncSR2", grepl("\\*", AA_var)) %>% 
-                             pull(avg_meanF), "logistic")
-AncSR1.stopfit.normal <- fitdistr(meanF_p %>% 
-                             filter(bg == "AncSR1", grepl("\\*", AA_var)) %>% 
-                             pull(avg_meanF), "normal")
-AncSR2.stopfit.normal <- fitdistr(meanF_p %>% 
-                             filter(bg == "AncSR2", grepl("\\*", AA_var)) %>% 
-                             pull(avg_meanF), "normal")
-AncSR1.stopfit.normal$loglik
-AncSR1.stopfit.logis$loglik
-AncSR2.stopfit.normal$loglik
-AncSR2.stopfit.logis$loglik
-# a logistic distribution fits better for both AncSR1 and AncSR2 datasets
-
-p.logis.AncSR1 <- plogis(meanF_p %>% filter(bg == "AncSR1", !grepl("\\*", AA_var)) %>% 
-                    pull(avg_meanF),
-                    AncSR1.stopfit.logis$estimate[1], 
-                  AncSR1.stopfit.logis$estimate[2], 
-                  lower.tail = FALSE)
-padj.logis.AncSR1 <- p.adjust(p.logis.AncSR1, method="fdr")
-p.logis.AncSR2 <- plogis(meanF_p %>% filter(bg == "AncSR2", !grepl("\\*", AA_var)) %>% 
-                    pull(avg_meanF),
-                    AncSR2.stopfit.logis$estimate[1], 
-                  AncSR2.stopfit.logis$estimate[2], 
-                  lower.tail = FALSE)
-padj.logis.AncSR2 <- p.adjust(p.logis.AncSR2, method="fdr")
-meanF_p <- meanF_p %>% filter(!grepl("\\*", AA_var))
-meanF_p$p <- c(p.logis.AncSR1, p.logis.AncSR2)
-meanF_p$padj <- c(padj.logis.AncSR1, padj.logis.AncSR2)
-
-# determine significance threshold given FDR cutoff of 0.01
-fdr.thresh <- 0.05
-AncSR1.signif <- meanF_p %>% filter(bg == "AncSR1", padj <= fdr.thresh) %>% pull(avg_meanF) %>% min()
-AncSR2.signif <- meanF_p %>% filter(bg == "AncSR2", padj <= fdr.thresh) %>% pull(avg_meanF) %>% min()
-
-# plot fluorescence distribution per background with significance threshold
-F_dist_AncSR1_plot <- meanF_data_corrected %>% 
-  filter(bg == "AncSR1", type == "exp") %>%
-  mutate(stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(position="stack", color="black", bins = 50) +
-  scale_fill_manual(values=c("white", "black")) +
-  labs(title = "AncSR1", x = "meanF", y = "count") +
-  geom_vline(xintercept = AncSR1.signif, linetype = "dashed") +
-  theme_classic() +
-  theme(legend.position = "none")
-F_dist_AncSR1_signif_plot <- meanF_data_corrected %>% 
-  filter(bg == "AncSR1", type == "exp", avg_meanF >= AncSR1.signif) %>%
-  mutate(stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(position="stack", color="black", bins = 50) +
-  scale_fill_manual(values=c("white", "black")) +
-  labs(title = "AncSR1", x = "meanF", y = "count") +
-  theme_classic() +
-  theme(legend.position = "none")
-F_dist_AncSR2_plot <- meanF_data_corrected %>% 
-  filter(bg == "AncSR2", type == "exp") %>%
-  mutate(stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(position="stack", color="black", bins = 50) +
-  scale_fill_manual(values=c("white", "black")) +
-  labs(title = "AncSR2", x = "meanF", y = "count") +
-  geom_vline(xintercept = AncSR2.signif, linetype = "dashed") +
-  theme_classic() +
-  theme(legend.position = "none")
-F_dist_AncSR2_signif_plot <- meanF_data_corrected %>% 
-  filter(bg == "AncSR2", type == "exp", avg_meanF >= AncSR2.signif) %>%
-  mutate(stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(position="stack", color="black", bins = 50) +
-  scale_fill_manual(values=c("white", "black")) +
-  labs(title = "AncSR2", x = "meanF", y = "count") +
-  theme_classic() +
-  theme(legend.position = "none")
-
-(F_dist_AncSR1_plot + F_dist_AncSR1_signif_plot) /
-  (F_dist_AncSR2_plot + F_dist_AncSR2_signif_plot)
-```
-
-Try computing p-values for the whole dataset rather than splitting by protein background.
-
-```{r}
-meanF_p_all <- meanF_data_corrected %>% select(AA_var:type, avg_meanF)
-# get meanF for stop codons
-fstop <- meanF_p_all %>% filter(grepl("\\*", AA_var)) %>% pull(avg_meanF)
-nstop <- length(fstop)
-# calculate proportion of stop codon variants that have higher fluorescence that of each test variant
-p_all <- meanF_p_all %>% filter(!grepl("\\*", AA_var)) %>% 
-  pull(avg_meanF) %>%
-  sapply(function(x) sum(fstop > x) / nstop)
-padj_all <- p.adjust(p_all, method = "fdr")
-
-meanF_p_all <- meanF_p_all %>% filter(!grepl("\\*", AA_var))
-meanF_p_all$p <- p_all
-meanF_p_all$padj <- padj_all
-
-# fit logistic distribution to all stop codon variants
-meanF_p_all <- meanF_data_corrected %>% select(AA_var:type, avg_meanF)
-all.stopfit.logis <- fitdistr(meanF_p_all %>% 
-                             filter(grepl("\\*", AA_var)) %>% 
-                             pull(avg_meanF), "logistic")
-print(all.stopfit.logis)
-
-fdr.thresh <- 0.05
-signif_all <- meanF_p_all %>% filter(padj <= fdr.thresh) %>% pull(avg_meanF) %>% min()
-
-# plot fluorescence distribution with significance threshold
-F_dist_all_plot <- meanF_data_corrected %>% 
-  filter(type == "exp") %>%
-  mutate(stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(position="stack", color="black", bins = 50) +
-  scale_fill_manual(values=c("white", "black")) +
-  labs(title = "all", x = "meanF", y = "count") +
-  geom_vline(xintercept = signif_all, linetype = "dashed") +
-  theme_classic() +
-  theme(legend.position = "none")
-F_dist_all_signif_plot <- meanF_data_corrected %>% 
-  filter(type == "exp", avg_meanF >= signif_all) %>%
-  mutate(stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(position="stack", color="black", bins = 50) +
-  scale_fill_manual(values=c("white", "black")) +
-  labs(title = "all", x = "meanF", y = "count") +
-  theme_classic() +
-  theme(legend.position = "none")
-
-F_dist_all_plot + F_dist_all_signif_plot
-
-# test for normality of the stop codon distribution
-shapiro.test(sample(fstop, 5000))
-```
-
-
-```{r}
-meanF_data_centered <- meanF_data_corrected %>%
-  select(AA_var:meanF_REP4, avg_meanF) %>% 
-  mutate(meanF_REP1 = meanF_REP1 - avg_meanF,
-         meanF_REP2 = meanF_REP2 - avg_meanF,
-         meanF_REP3 = meanF_REP3 - avg_meanF,
-         meanF_REP4 = meanF_REP4 - avg_meanF)
-
-sigdata.logis <- fitdistr(meanF_data_centered %>%
-  filter(avg_meanF >= -4) %>%
-  pivot_longer(cols = meanF_REP1:meanF_REP4) %>% drop_na(value) %>% pull(value), "logistic")
-print(sigdata.logis)
-sigdata.normal <- fitdistr(meanF_data_centered %>%
-  filter(avg_meanF >= -4) %>%
-  pivot_longer(cols = meanF_REP1:meanF_REP4) %>% drop_na(value) %>% pull(value), "normal")
-
-meanF_data_centered %>%
-  filter(avg_meanF >= -4) %>%
-  pivot_longer(cols = meanF_REP1:meanF_REP4) %>%
-  drop_na(value) %>%
-  pull(value) %>%
-  hist(freq = F, breaks = 100)
-curve(dlogis(x, sigdata.logis$estimate[1], sigdata.logis$estimate[2]), from=min(meanF_data_centered %>% select(meanF_REP1:meanF_REP4), na.rm = T), to=max(meanF_data_centered %>% select(meanF_REP1:meanF_REP4), na.rm = T), add=T, col = "blue")
-curve(dnorm(x, sigdata.normal$estimate[1], sigdata.normal$estimate[2]), from=min(meanF_data_centered %>% select(meanF_REP1:meanF_REP4), na.rm = T), to=max(meanF_data_centered %>% select(meanF_REP1:meanF_REP4), na.rm = T), add=T, col = "red")
-
-# test for normality of mean-centered data
-shapiro.test(meanF_data_centered %>%
-  filter(avg_meanF >= -4) %>%
-  pivot_longer(cols = meanF_REP1:meanF_REP4) %>%
-  drop_na(value) %>%
-    pull(value) %>%
-    sample(5000))
-```
-
-
-Parametric bootstrap likelihood ratio test with logistic likelihood function
-
-```{r}
-LRS.logis <- function(x, null_mu) {
-  x <- x[!is.na(x)]
-  mu <- mean(x)
-  s <- sd(x) * sqrt(3) / pi
-  LRS <- ifelse(mu < null_mu, 0, -2 * log(sum(dlogis(x, null_mu, s)) / sum(dlogis(x, mu, s))))
-  return(LRS)
-}
-
-LRS.logis.bootstrap <- function(x, null_mu, nbootstrap) {
-  x <- x[!is.na(x)]
-  s <- sd(x) * sqrt(3) / pi
-  LRS <- LRS.logis(x, null_mu)
-  mu_bootstrap <- min(null_mu, mean(x))
-  null_bootstrap <- matrix(rlogis(nbootstrap * length(x), mu_bootstrap, s),
-                          ncol = length(x))
-  LRS_null <- as.numeric(apply(null_bootstrap, 1, LRS.logis, null_mu))
-  p <- sum(LRS_null >= LRS) / nbootstrap
-  return(p)
-}
-
-stop_mu <- meanF_data_corrected %>% filter(grepl("\\*", AA_var)) %>% pull(avg_meanF) %>% mean()
-
-cl <- parallel::makeCluster(cores-2, "FORK", outfile="")
-doParallel::registerDoParallel(cl)
-p.LRS.logis.bs <- foreach(i = 1:(cores-2), .combine = "c") %dopar% {
-  size <- meanF_data_corrected %>% filter(!grepl("\\*", AA_var)) %>% 
-    # slice(10001:20000) %>% 
-    nrow()
-  chunk <- ceiling(size / (cores - 2))
+```{r nonsensedist}
+# Add columns for mean read count across reps and logical for whether a variant is nonsense.
+# Then assign variants to mean read count bins
+meanF_data_corrected <- meanF_data_corrected %>%
+  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
+         stop = grepl("\\*", AA_var)) %>%
+  mutate(rcbin = case_when(avg_Count_total < 100 ~ "<100",
+                           avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
+                           avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
+                           avg_Count_total >= 1000 ~ ">=1000") %>% 
+           factor(levels = c("<100", "100-500", "500-1000", ">=1000")))
   
-  meanF_data_corrected %>% filter(!grepl("\\*", AA_var)) %>% 
-    # slice(10001:20000) %>%
-    slice(((i-1)*chunk+1):min(i*chunk, size)) %>%
-    select(meanF_REP1:meanF_REP4) %>% as.matrix() %>%
-    apply(1, LRS.logis.bootstrap, null_mu = stop_mu, nbootstrap = 1000)
-}
-stopCluster(cl)
-
-
-# p.LRS.logis.bs <- meanF_data_corrected %>% filter(!grepl("\\*", AA_var)) %>% 
-#   slice(10000:20000) %>%
-#   select(meanF_REP1:meanF_REP4) %>% as.matrix() %>%
-#   apply(1, LRS.logis.bootstrap, null_mu = stop_mu, nbootstrap = 1000)
-save(p.LRS.logis.bs, 
-     file = file.path("..", "results", "prelim_analyses", "p.LRS.logis.bootstrap.rda"))
-padj.LRS.logis.bs <- p.adjust(p.LRS.logis.bs, method = "fdr")
-
-meanF_p_logis_bs <- meanF_data_corrected %>% 
-  select(AA_var:type, avg_meanF) %>% 
-  filter(!grepl("\\*", AA_var)) %>% 
-  # slice(10001:20000) %>%
-  mutate(p = p.LRS.logis.bs, padj = padj.LRS.logis.bs) %>%
-  # mutate(sig = ifelse(padj <= 0.05, "sig", "notsig")) %>%
-  right_join(meanF_data_corrected, by = c("AA_var", "REBC", "bg", "RE", "type", "avg_meanF")) %>%
-  mutate(sig = case_when(padj <= 0.1 ~ "sig",
-                         padj > 0.1 ~ "notsig",
-                         grepl("\\*", AA_var) ~ "stop"))
-
-meanF_p_logis_bs %>%
-  filter(sig %in% c("sig", "notsig")) %>%
-  ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(position = "stack", bins = 100)
-
-meanF_p_logis_bs %>%
-  filter(sig %in% c("sig", "notsig")) %>%
-  filter(avg_meanF > -4.25) %>%
-  ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(bins = 100)
-
-meanF_p_logis_bs %>%
-  filter(avg_meanF >= -4) %>%
-  ggplot(aes(x = p, y = avg_meanF)) +
-  geom_point()
-
-plot(x=meanF_p_logis_bs$p, y = meanF_p_logis_bs$padj)
-```
-
-
-one-sided t-test
-
-```{r}
-p.t <- apply(meanF_data_corrected %>% filter(!grepl("\\*", AA_var)) %>% 
-    # slice(10001:20000) %>%
-  select(meanF_REP1:meanF_REP4) %>% 
-    filter(rowSums(!is.na(.)) >= 3) %>%
-    mutate(across(.fns = ~ . - stop_mu)) %>%
-    as.matrix(), 
-  1, function(x) t.test(x, alternative = "greater", mu = 0, na.action = "na.omit")$p.value)
-padj.t <- p.adjust(p.t, method = "fdr")
-
-meanF_p_t <- meanF_data_corrected %>% 
-  select(AA_var:type, meanF_REP1:meanF_REP4, avg_meanF) %>% 
-  filter(!grepl("\\*", AA_var), rowSums(!is.na(select(., meanF_REP1:meanF_REP4))) >= 3) %>% 
-  # slice(10001:20000) %>%
-  mutate(p = p.t, padj = padj.t) %>%
-  right_join(meanF_data_corrected, by = c("AA_var", "REBC", "bg", "RE", "type", "avg_meanF")) %>%
-  mutate(sig = case_when(padj <= 0.1 ~ "sig",
-                         padj > 0.1 ~ "notsig",
-                         grepl("\\*", AA_var) ~ "stop"))
-
-meanF_p_t %>%
-  filter(sig %in% c("sig", "notsig")) %>%
-  ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(position = "stack", bins = 100)
-
-meanF_p_t %>%
-  filter(sig %in% c("sig", "notsig")) %>%
-  filter(avg_meanF > -4.25) %>%
-  ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(bins = 100)
-
-meanF_p_t %>%
-  ggplot(aes(x = p, y = avg_meanF)) +
-  geom_point()
-
-cor(meanF_p_t$p, meanF_p_logis_bs$p, use = "complete.obs")
-plot(x = meanF_p_t$p, y = meanF_p_logis_bs$p)
-```
-
-
-
-```{r}
+# plot meanF histograms for nonsense variants separated by mean read count bin and background
 meanF_data_corrected %>%
-  filter(type == "exp") %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_Count_total, color = stop)) +
-  geom_density() +
-  scale_x_log10()
-
-meanF_data_corrected %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var)) %>%
-  ggplot(aes(x = avg_Count_total, y = se_meanF)) +
-  stat_summary_bin(geom = "line", fun = "median") +
-  stat_summary_bin(geom = "line", linetype = "dashed", fun = function(x) quantile(x, 0.025)) +
-  stat_summary_bin(geom = "line", linetype = "dashed", fun = function(x) quantile(x, 0.975)) +
-  scale_x_log10() +
-  theme_classic() +
-  geom_vline(xintercept = 1*10^4.5)
-
-meanF_data_corrected %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var)) %>%
-  mutate(rc = case_when(avg_Count_total < 100 ~ "<100",
-                        avg_Count_total >= 100 & avg_Count_total < 300 ~ "100-300",
-                        avg_Count_total >= 300 & avg_Count_total < 1000 ~ "300-1000",
-                        avg_Count_total >= 1000 & avg_Count_total < 3000 ~ "1000-3000",
-                        avg_Count_total >= 3000 & avg_Count_total < 10000 ~ "3000-10000",
-                        avg_Count_total >= 10000 & avg_Count_total < 30000 ~ "10000-30000",
-                        avg_Count_total >= 30000 ~ ">=30000") %>% 
-           factor(levels = c("<100", "100-300", "300-1000", "1000-3000", "3000-10000", "10000-30000", ">=30000"))) %>%
-  count(stop, bg, rc)
-
-meanF_data_corrected %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var)) %>%
-  mutate(rc = case_when(avg_Count_total < 100 ~ "<100",
-                        avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
-                        avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
-                        avg_Count_total >= 1000 ~ ">=1000") %>% 
-           factor(levels = c("<100", "100-500", "500-1000", ">=1000"))) %>%
   filter(stop == T) %>%
-  # filter(rc == ">=1000") %>%
-  # filter(rc == "<100") %>%
-  ggplot(aes(x = avg_meanF, color = rc)) +
-  geom_histogram(bins = 100) +
-  facet_wrap(vars(bg))
+  ggplot(aes(x = avg_meanF, fill = rcbin)) +
+  geom_histogram(bins = 50) +
+  facet_grid(rows = vars(bg)) +
+  theme_classic() +
+  labs(x = "meanF", title = "Nonsense variants", fill = "mean read count")
 ```
 
-Compute non-parametric p-value on variants split by average read count
+Now let's compute the p-values as the fraction of nonsense variants in the same protein background and mean read count bin that have meanF greater than that of the test variant. Also compute an FDR-corrected p-value.
 
-```{r}
-meanF_p_all_byrc <- meanF_data_corrected %>% 
-  select(AA_var:type, Count_total_REP1:Count_total_REP4, avg_meanF) %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var),
-         rc = case_when(avg_Count_total < 100 ~ "<100",
-                        avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
-                        avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
-                        avg_Count_total >= 1000 ~ ">=1000") %>% 
-           factor(levels = c("<100", "100-500", "500-1000", ">=1000")))
-meanF_p_all_byrc <- list(filter(meanF_p_all_byrc, rc == "<100"),
-                         filter(meanF_p_all_byrc, rc == "100-500"),
-                         filter(meanF_p_all_byrc, rc == "500-1000"),
-                         filter(meanF_p_all_byrc, rc == ">=1000"))
+```{r meanFtest}
+# split data by background and mean read count bin
+meanF_p <- meanF_data_corrected %>%
+  select(AA_var:type, avg_meanF, avg_Count_total, stop, rcbin) %>%
+  list(filter(., rcbin == "<100", bg == "AncSR1"),
+       filter(., rcbin == "100-500", bg == "AncSR1"),
+       filter(., rcbin == "500-1000", bg == "AncSR1"),
+       filter(., rcbin == ">=1000", bg == "AncSR1"), 
+       filter(., rcbin == "<100", bg == "AncSR2"),
+       filter(., rcbin == "100-500", bg == "AncSR2"),
+       filter(., rcbin == "500-1000", bg == "AncSR2"),
+       filter(., rcbin == ">=1000", bg == "AncSR2"))
 
-for(i in 1:length(meanF_p_all_byrc)) {
-  fstop <- meanF_p_all_byrc[[i]] %>% filter(stop == T) %>% pull(avg_meanF)
+# compute p-values
+for(i in 1:length(meanF_p)) {
+  fstop <- meanF_p[[i]] %>% filter(stop == T) %>% pull(avg_meanF)
   nstop <- length(fstop)
   
+  # parallel computing
   cl <- parallel::makeCluster(cores-4, "FORK", outfile="")
   doParallel::registerDoParallel(cl)
- p_all_byrc <- foreach(j = 1:(cores-4), .combine = "c") %dopar% {
-    size <- meanF_p_all_byrc[[i]] %>% filter(stop == F) %>% nrow()
+  p <- foreach(j = 1:(cores-4), .combine = "c") %dopar% {
+    size <- meanF_p[[i]] %>% filter(stop == F) %>% nrow()
     chunk <- ceiling(size / (cores - 4))
     
-    meanF_p_all_byrc[[i]] %>% filter(stop == F) %>% 
+    # compute fraction of nonsense variants whose meanF is above that of the test variant;
+    # perform test for all non-nonsense variants
+    meanF_p[[i]] %>% filter(stop == F) %>% 
       slice(((j-1)*chunk+1):min(j*chunk, size)) %>%
       pull(avg_meanF) %>%
       sapply(function(x) sum(fstop > x) / nstop)
   }
   stopCluster(cl)
   
-  padj_all_byrc <- p.adjust(p_all_byrc, method = "fdr")
+  # FDR correction
+  padj <- p.adjust(p, method = "fdr")
   
-  meanF_p_all_byrc[[i]] <- meanF_p_all_byrc[[i]] %>%
+  meanF_p[[i]] <- meanF_p[[i]] %>%
     filter(stop == F) %>%
-    mutate(p = p_all_byrc, padj = padj_all_byrc)
+    mutate(p = p, padj = padj)
 }
 
-meanF_p_all_byrc <- rbind(meanF_p_all_byrc[[1]], meanF_p_all_byrc[[2]], meanF_p_all_byrc[[3]], meanF_p_all_byrc[[4]])
-meanF_p_all_byrc <- meanF_data_corrected %>%
-  select(AA_var:type, avg_meanF, Count_total_REP1:Count_total_REP4) %>%
-  left_join(meanF_p_all_byrc %>% select(AA_var:type, p, padj), 
+# re-merge with all variants for plotting
+meanF_p <- do.call(rbind, meanF_p)
+meanF_p <- meanF_data_corrected %>%
+  select(AA_var:type, avg_meanF, avg_Count_total, stop, rcbin) %>%
+  left_join(meanF_p %>% select(AA_var:type, p, padj), 
             by = c("AA_var", "REBC", "bg", "RE", "type"))
-meanF_p_all_byrc <- mutate(meanF_p_all_byrc, 
-                           sig = case_when(padj <= 0.1 ~ "sig", 
-                                           padj > 0.1 ~ "notsig",
-                                           grepl("\\*", AA_var) ~ "stop"))
-meanF_p_all_byrc <- meanF_p_all_byrc %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var),
-         rc = case_when(avg_Count_total < 100 ~ "<100",
-                        avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
-                        avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
-                        avg_Count_total >= 1000 ~ ">=1000") %>% 
-           factor(levels = c("<100", "100-500", "500-1000", ">=1000")))
 
-meanF_p_all_byrc %>%
+# call variants significant if they fall below the false discovery rate
+fdr.thresh <- 0.1
+meanF_p <- mutate(meanF_p, 
+                  sig = case_when(padj <= fdr.thresh ~ "sig", 
+                                  padj > fdr.thresh ~ "notsig",
+                                  grepl("\\*", AA_var) ~ "stop"))
+
+meanF_p %>%
   # filter(sig %in% c("sig", "notsig")) %>%
   ggplot(aes(x = avg_meanF, fill = sig)) +
   geom_histogram(position = "stack", bins = 100)
 
-meanF_p_all_byrc %>%
-  # filter(sig %in% c("sig", "notsig")) %>%
-  filter(avg_meanF > -4.4) %>%
-  filter(avg_Count_total >= 500) %>%
-  ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(bins = 100) +
-  facet_wrap(vars(rc))
-```
-
-Compute non-parametric p-value on variants split by average read count and protein background
-
-```{r}
-meanF_p_all_byrcbg<- meanF_data_corrected %>% 
-  select(AA_var:type, Count_total_REP1:Count_total_REP4, avg_meanF) %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var),
-         rc = case_when(avg_Count_total < 100 ~ "<100",
-                        avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
-                        avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
-                        avg_Count_total >= 1000 ~ ">=1000") %>% 
-           factor(levels = c("<100", "100-500", "500-1000", ">=1000")))
-meanF_p_all_byrcbg <- list(filter(meanF_p_all_byrcbg, rc == "<100", bg == "AncSR1"),
-                         filter(meanF_p_all_byrcbg, rc == "100-500", bg == "AncSR1"),
-                         filter(meanF_p_all_byrcbg, rc == "500-1000", bg == "AncSR1"),
-                         filter(meanF_p_all_byrcbg, rc == ">=1000", bg == "AncSR1"),
-                         filter(meanF_p_all_byrcbg, rc == "<100", bg == "AncSR2"),
-                         filter(meanF_p_all_byrcbg, rc == "100-500", bg == "AncSR2"),
-                         filter(meanF_p_all_byrcbg, rc == "500-1000", bg == "AncSR2"),
-                         filter(meanF_p_all_byrcbg, rc == ">=1000", bg == "AncSR2"))
-
-for(i in 1:length(meanF_p_all_byrcbg)) {
-  fstop <- meanF_p_all_byrcbg[[i]] %>% filter(stop == T) %>% pull(avg_meanF)
-  nstop <- length(fstop)
-  
-  cl <- parallel::makeCluster(cores-4, "FORK", outfile="")
-  doParallel::registerDoParallel(cl)
-  p_all_byrcbg <- foreach(j = 1:(cores-4), .combine = "c") %dopar% {
-    size <- meanF_p_all_byrcbg[[i]] %>% filter(stop == F) %>% nrow()
-    chunk <- ceiling(size / (cores - 4))
-    
-    meanF_p_all_byrcbg[[i]] %>% filter(stop == F) %>% 
-      slice(((j-1)*chunk+1):min(j*chunk, size)) %>%
-      pull(avg_meanF) %>%
-      sapply(function(x) sum(fstop > x) / nstop)
-  }
-  stopCluster(cl)
-  
-  padj_all_byrcbg <- p.adjust(p_all_byrcbg, method = "fdr")
-  
-  meanF_p_all_byrcbg[[i]] <- meanF_p_all_byrcbg[[i]] %>%
-    filter(stop == F) %>%
-    mutate(p = p_all_byrcbg, padj = padj_all_byrcbg)
-}
-
-meanF_p_all_byrcbg <- do.call(rbind, meanF_p_all_byrcbg)
-meanF_p_all_byrcbg <- meanF_data_corrected %>%
-  select(AA_var:type, avg_meanF, Count_total_REP1:Count_total_REP4) %>%
-  left_join(meanF_p_all_byrcbg %>% select(AA_var:type, p, padj), 
-            by = c("AA_var", "REBC", "bg", "RE", "type"))
-meanF_p_all_byrcbg <- mutate(meanF_p_all_byrcbg, 
-                           sig = case_when(padj <= 0.1 ~ "sig", 
-                                           padj > 0.1 ~ "notsig",
-                                           grepl("\\*", AA_var) ~ "stop"))
-meanF_p_all_byrcbg <- meanF_p_all_byrcbg %>%
-  mutate(avg_Count_total = rowMeans(select(., Count_total_REP1:Count_total_REP4), na.rm = T), 
-         stop = grepl("\\*", AA_var),
-         rc = case_when(avg_Count_total < 100 ~ "<100",
-                        avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
-                        avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
-                        avg_Count_total >= 1000 ~ ">=1000") %>% 
-           factor(levels = c("<100", "100-500", "500-1000", ">=1000")))
-
-meanF_p_all_byrcbg %>%
-  # filter(sig %in% c("sig", "notsig")) %>%
-  ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(position = "stack", bins = 100)
-
-meanF_p_all_byrcbg %>%
+meanF_p %>%
   # filter(sig %in% c("sig", "notsig")) %>%
   filter(avg_meanF > -4.3) %>%
   # filter(avg_Count_total >= 500) %>%
   ggplot(aes(x = avg_meanF, fill = sig)) +
   geom_histogram(bins = 100) +
-  facet_grid(rows = vars(bg), cols = vars(rc))
+  facet_grid(rows = vars(bg), cols = vars(rcbin))
 
 # get meanF cutoffs for each protein background and read count bin
-meanF_cutoffs <- meanF_p_all_byrcbg %>%
+meanF_cutoffs <- meanF_p %>%
   filter(sig == "sig") %>%
-  group_by(bg, rc) %>%
+  group_by(bg, rcbin) %>%
   summarize(minF = min(avg_meanF))
 ```
 
