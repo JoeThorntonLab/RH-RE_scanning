@@ -26,8 +26,8 @@ if(any(installed_packages == F)) {
 invisible(lapply(packages, library, character.only=TRUE))
 
 # make output directories
-if(!dir.exists(file.path("..", "results"))) {
-  dir.create(file.path("..", "results"))
+if(!dir.exists(file.path("..", "results", "cleaned_data"))) {
+  dir.create(file.path("..", "results", "cleaned_data"))
 }
 ```
 
@@ -65,9 +65,9 @@ REBC_to_RE <- function(REBC, levels=1) {
 ```{r readdata}
 if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   #### TODO: update file paths once we find a permanent place to store the data
-  untar(file.path("..", "data", "meanF", "meanF_NovaSeq_data.tar.gz"), 
+  untar(file.path("..", "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), 
         exdir = file.path("..", "data", "meanF"))
-  datafiles <- untar(file.path("..", "data", "meanF", "meanF_NovaSeq_data.tar.gz"), list = TRUE)
+  datafiles <- untar(file.path("..", "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), list = TRUE)
   meanF_data <- list()
   
   for(i in 1:length(datafiles)) {
@@ -458,7 +458,7 @@ ctls <- meanF_data_corrected %>% filter(type=="control") %>%
 meanF_data_corrected <- meanF_data_corrected %>% filter(se_meanF <= 0.1) 
 meanF_data_corrected <- unique(rbind(meanF_data_corrected,ctls)) # Manually add controls to new dataset
 
-write.csv(meanF_data_corrected,file=gzfile(file.path("..", "results", "meanF_data_corrected_NovaSeq.csv.gz"))) # Save new corrected dataset
+
 ```
 
 ## Checking correlations with isogenic and REBC controls
@@ -551,79 +551,99 @@ meanF_data_corrected %>%
 Now let's compute the p-values as the fraction of nonsense variants in the same protein background and mean read count bin that have meanF greater than that of the test variant. Also compute an FDR-corrected p-value.
 
 ```{r meanFtest}
-# split data by background and mean read count bin
-meanF_p <- meanF_data_corrected %>%
-  select(AA_var:type, avg_meanF, avg_Count_total, stop, rcbin) %>%
-  list(filter(., rcbin == "<100", bg == "AncSR1"),
-       filter(., rcbin == "100-500", bg == "AncSR1"),
-       filter(., rcbin == "500-1000", bg == "AncSR1"),
-       filter(., rcbin == ">=1000", bg == "AncSR1"), 
-       filter(., rcbin == "<100", bg == "AncSR2"),
-       filter(., rcbin == "100-500", bg == "AncSR2"),
-       filter(., rcbin == "500-1000", bg == "AncSR2"),
-       filter(., rcbin == ">=1000", bg == "AncSR2"))
-
-# compute p-values
-for(i in 1:length(meanF_p)) {
-  fstop <- meanF_p[[i]] %>% filter(stop == T) %>% pull(avg_meanF)
-  nstop <- length(fstop)
+if(!file.exists(file.path("..", "results", "cleaned_data", "meanF_p.rda"))) {
+  # split data by background and mean read count bin
+  meanF_p <- meanF_data_corrected %>%
+    select(AA_var:type, avg_meanF, avg_Count_total, stop, rcbin)
+  meanF_p <- list(filter(meanF_p, rcbin == "<100", bg == "AncSR1"),
+                  filter(meanF_p, rcbin == "100-500", bg == "AncSR1"),
+                  filter(meanF_p, rcbin == "500-1000", bg == "AncSR1"),
+                  filter(meanF_p, rcbin == ">=1000", bg == "AncSR1"), 
+                  filter(meanF_p, rcbin == "<100", bg == "AncSR2"),
+                  filter(meanF_p, rcbin == "100-500", bg == "AncSR2"),
+                  filter(meanF_p, rcbin == "500-1000", bg == "AncSR2"),
+                  filter(meanF_p, rcbin == ">=1000", bg == "AncSR2"))
   
-  # parallel computing
-  cl <- parallel::makeCluster(cores-4, "FORK", outfile="")
-  doParallel::registerDoParallel(cl)
-  p <- foreach(j = 1:(cores-4), .combine = "c") %dopar% {
-    size <- meanF_p[[i]] %>% filter(stop == F) %>% nrow()
-    chunk <- ceiling(size / (cores - 4))
+  # compute p-values
+  
+  for(i in 1:length(meanF_p)) {
+    fstop <- meanF_p[[i]] %>% filter(stop == T) %>% pull(avg_meanF)
+    nstop <- length(fstop)
     
-    # compute fraction of nonsense variants whose meanF is above that of the test variant;
-    # perform test for all non-nonsense variants
-    meanF_p[[i]] %>% filter(stop == F) %>% 
-      slice(((j-1)*chunk+1):min(j*chunk, size)) %>%
-      pull(avg_meanF) %>%
-      sapply(function(x) sum(fstop > x) / nstop)
+    # parallel computing
+    cl <- parallel::makeCluster(cores-4, "FORK", outfile="")
+    doParallel::registerDoParallel(cl)
+    p <- foreach(j = 1:(cores-4), .combine = "c") %dopar% {
+      size <- meanF_p[[i]] %>% filter(stop == F) %>% nrow()
+      chunk <- ceiling(size / (cores - 4))
+      
+      # compute fraction of nonsense variants whose meanF is above that of the test variant;
+      # perform test for all non-nonsense variants
+      meanF_p[[i]] %>% filter(stop == F) %>% 
+        slice(((j-1)*chunk+1):min(j*chunk, size)) %>%
+        pull(avg_meanF) %>%
+        sapply(function(x) sum(fstop > x) / nstop)
+    }
+    stopCluster(cl)
+    
+    # FDR correction
+    padj <- p.adjust(p, method = "fdr")
+    
+    meanF_p[[i]] <- meanF_p[[i]] %>%
+      filter(stop == F) %>%
+      mutate(p = p, padj = padj)
   }
-  stopCluster(cl)
   
-  # FDR correction
-  padj <- p.adjust(p, method = "fdr")
+  # re-merge with all variants for plotting
+  meanF_p <- do.call(rbind, meanF_p)
+  meanF_p <- meanF_data_corrected %>%
+    select(AA_var:type, avg_meanF, avg_Count_total, stop, rcbin) %>%
+    left_join(meanF_p %>% select(AA_var:type, p, padj), 
+              by = c("AA_var", "REBC", "bg", "RE", "type"))
   
-  meanF_p[[i]] <- meanF_p[[i]] %>%
-    filter(stop == F) %>%
-    mutate(p = p, padj = padj)
+  # save data for faster loading later
+  save(meanF_p, file = file.path("..", "results", "cleaned_data", "meanF_p.rda"))
+} else {
+  load(file.path("..", "results", "cleaned_data", "meanF_p.rda"))
 }
 
-# re-merge with all variants for plotting
-meanF_p <- do.call(rbind, meanF_p)
-meanF_p <- meanF_data_corrected %>%
-  select(AA_var:type, avg_meanF, avg_Count_total, stop, rcbin) %>%
-  left_join(meanF_p %>% select(AA_var:type, p, padj), 
-            by = c("AA_var", "REBC", "bg", "RE", "type"))
 
 # call variants significant if they fall below the false discovery rate
 fdr.thresh <- 0.1
 meanF_p <- mutate(meanF_p, 
-                  sig = case_when(padj <= fdr.thresh ~ "sig", 
-                                  padj > fdr.thresh ~ "notsig",
-                                  grepl("\\*", AA_var) ~ "stop"))
+                  sig = case_when(padj <= fdr.thresh ~ "significant", 
+                                  padj > fdr.thresh ~ "not significant",
+                                  stop == TRUE ~ "nonsense") %>%
+                    factor(levels = c("not significant", "significant", "nonsense")))
 
+# plot distribution of meanF coloring variants by significant, nonsignificant, or nonsense
 meanF_p %>%
-  # filter(sig %in% c("sig", "notsig")) %>%
   ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(position = "stack", bins = 100)
+  geom_histogram(position = "stack", bins = 50) +
+  scale_y_log10() +
+  theme_classic() +
+  labs(x = "meanF", fill = "")
 
+# same plot but split by protein background and mean read count bin
 meanF_p %>%
-  # filter(sig %in% c("sig", "notsig")) %>%
-  filter(avg_meanF > -4.3) %>%
-  # filter(avg_Count_total >= 500) %>%
   ggplot(aes(x = avg_meanF, fill = sig)) +
-  geom_histogram(bins = 100) +
-  facet_grid(rows = vars(bg), cols = vars(rcbin))
+  geom_histogram(bins = 50) +
+  facet_grid(rows = vars(bg), cols = vars(rcbin)) +
+  scale_y_log10() +
+  theme_classic() +
+  labs(x = "meanF", fill = "")
 
 # get meanF cutoffs for each protein background and read count bin
 meanF_cutoffs <- meanF_p %>%
-  filter(sig == "sig") %>%
+  filter(sig == "significant") %>%
   group_by(bg, rcbin) %>%
   summarize(minF = min(avg_meanF))
+
+# Save dataset of corrected mean fluorescence values with p-values.
+meanF_data_corrected <- meanF_data_corrected %>%
+  left_join(meanF_p %>% select(AA_var:type, p:sig), by = c("AA_var", "REBC", "bg", "RE", "type"))
+write.csv(meanF_data_corrected,
+          file=gzfile(file.path("..", "results", "cleaned_data", "meanF_data_corrected_NovaSeq.csv.gz"))) 
 ```
 
 
@@ -638,22 +658,22 @@ How can we determine a good threshold? First, we can calculate the binomial samp
 We first need to estimate how many cells must be sorted for a variant into the debulk GFP+ bin to be detected in the filtered binned sort dataset. To do this, we can estimate the average number of cells that were sorted into the debulk GFP+ bin, given that they are present in the filtered binned sort dataset. We will assume that the total proportion of cells for a variant in the binned sort data is the same as the proportion of cells for that same variant in the debulk sort GFP+ bin, given a particular RE/protein background. We can then multiply this by the total number of GFP+ cells sorted per RE/protein library in the debulk sort to estimate the number of GFP+ cells sorted per binned sort variant.
 
 ```{r estimateGFPpluscellcount}
-# number of GFP+ cells sorted per RE library in debulk sort
+# data frame of number of GFP+ cells sorted per RE library in debulk sort
 debulkposcells <- data.frame(bg = c(rep(rep(c("AncSR1", "AncSR2"), each = 16), 3), rep("AncSR1", 8)),
                              RE = c(rep(REs[[1]], 2*3), REs[[1]][9:16]),
                              REP = c(rep(c("1", "2", "3"), each = 32), rep("4", 8)),
                              GFPposcellslib = c(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
-                                               858760, 379479, 744771, 285197, 329854, 587774, 348916, 437954,
-                                               847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
-                                               903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539),
-                                             rep(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
-                                                   342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658,
-                                                   847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
-                                                   903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539), 2),
-                                             c(342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658)))
+                                                  858760, 379479, 744771, 285197, 329854, 587774, 348916, 437954,
+                                                  847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
+                                                  903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539),
+                                                rep(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
+                                                      342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658,
+                                                      847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
+                                                      903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539), 2),
+                                                c(342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658)))
 
 meanF_data_corrected_long <- meanF_data_corrected %>%
-  select(AA_var:cellCount_b4_REP4) %>%
+  select(AA_var:cellCount_b4_REP4, avg_meanF, avg_Count_total) %>%
   pivot_longer(cols = meanF_REP1:cellCount_b4_REP4,
                names_to = c(".value", "REP"),
                names_sep = "_REP",
@@ -688,60 +708,69 @@ print(cor.test(~ REP4 + REP2,
                  pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
                na.action = "na.omit"))
 
-# average estimates of GFP+ cells across binned sort replicates
+# average estimates of GFP+ cells across binned sort replicates, but not for the libraries
+# in rep 1 that were from a different debulk sorting experiment than the other replicates
 estGFPpos <- meanF_data_corrected_long %>%
   ungroup() %>%
   filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                     "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"),
-         REP == "1") %>%
-  select(-type, -REP, -GFPposcellslib) %>%
+                     "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), REP == "1") %>%
+  select(AA_var:RE, avg_meanF, avg_Count_total, estGFPposcells) %>%
   mutate(debulk = "ori")
-estGFPpos <- rbind(estGFPpos,
-                   meanF_data_corrected_long %>%
+
+estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
                      filter(!(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
                                           "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16") &
                                 REP == "1")) %>%
                      group_by(AA_var, REBC, bg, RE) %>%
-                     summarize(meanF = mean(meanF), Count_total = mean(Count_total), 
-                               cellCount_total = mean(cellCount_total), 
+                     summarize(avg_meanF = mean(avg_meanF), 
+                               avg_Count_total = mean(avg_Count_total), 
                                estGFPposcells = mean(estGFPposcells)) %>%
                      mutate(debulk = "ori/redo"))
+
+# now for libraries that underwent two different debulk sorts, average GFP+ cell count
+# estimates across the two debulk sorts
 estGFPpos <- estGFPpos %>%
-  mutate(rc = case_when(Count_total < 100 ~ "<100",
-                        Count_total >= 100 & Count_total < 500 ~ "100-500",
-                        Count_total >= 500 & Count_total < 1000 ~ "500-1000",
-                        Count_total >= 1000 ~ ">=1000") %>% 
+  group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
+  summarize(estGFPposcells = mean(estGFPposcells))
+
+estGFPpos <- estGFPpos %>%
+  ungroup() %>%
+  mutate(rcbin = case_when(avg_Count_total < 100 ~ "<100",
+                           avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
+                           avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
+                           avg_Count_total >= 1000 ~ ">=1000") %>% 
            factor(levels = c("<100", "100-500", "500-1000", ">=1000"))) %>%
-  left_join(meanF_cutoffs, by = c("bg", "rc"))
+  left_join(meanF_cutoffs, by = c("bg", "rcbin"))
 
 # plot meanF vs. estimated GFP+ cells sorted (median, 2.5%, and 97.5% quantiles)
-F_GFPpluscells_plot <- estGFPpos %>%
-  ggplot(aes(x = meanF, y = estGFPposcells)) +
+mean_meanF_se <- meanF_data_corrected %>% filter(type == "exp") %>% pull(se_meanF) %>% mean(na.rm = T)
+estGFPpos %>%
+  ggplot(aes(x = avg_meanF, y = estGFPposcells)) +
   stat_summary_bin(geom = "line", fun = "median", size = 1.5) +
   stat_summary_bin(geom = "line", linetype = "dashed", fun = function(x) quantile(x, 0.025)) +
   stat_summary_bin(geom = "line", linetype = "dashed", fun = function(x) quantile(x, 0.975)) +
-  facet_grid(rows = vars(bg), cols = vars(rc)) +
+  facet_grid(rows = vars(bg), cols = vars(rcbin)) +
   geom_vline(aes(xintercept = minF), color = "red") +
+  # geom_vline(aes(xintercept = minF + 2*mean_meanF_se), color = "red", linetype = "dashed") +
+  # geom_vline(aes(xintercept = minF - 2*mean_meanF_se), color = "red", linetype = "dashed") +
   scale_y_log10() +
   theme_classic() +
   labs(x = "meanF", y = "estimated debulk GFP+ cells sorted")
 
-F_GFPpluscells_plot
-
 # get median # of GFP+ cells sorted for variants at the fluorescence significance
 # threshold, according to the protein background and read count bin
 GFPpluscellssig <- estGFPpos %>%
-  group_by(bg, rc) %>%
-  filter(meanF >= minF - 0.05 & meanF <= minF + 0.05) %>%
+  group_by(bg, rcbin) %>%
+  filter(avg_meanF >= minF - 2*mean_meanF_se & avg_meanF <= minF + 2*mean_meanF_se) %>%
   summarize(GFPpluscellssig = median(estGFPposcells))
 
 # get estimated # of GFP+ cells for variants at fluorescence significance threshold
-# across backgrounds and read count bins by computing a weighted average based on the
-# number of variants in each background/read count bin.
+# across backgrounds and mean read count bins by computing a weighted average based on the
+# number of variants in each background/read count category
 GFPpluscellssig <- estGFPpos %>%
-  group_by(bg, rc) %>%
+  group_by(bg, rcbin) %>%
   count() %>%
-  right_join(GFPpluscellssig, by = c("bg", "rc"))
+  right_join(GFPpluscellssig, by = c("bg", "rcbin"))
 
 GFPpluscellssig <- GFPpluscellssig %>%
   ungroup() %>%
@@ -750,44 +779,50 @@ GFPpluscellssig <- GFPpluscellssig %>%
 print(GFPpluscellssig)
 ```
 
-Our estimated number of cells in the GFP+ bin for variants at the fluorescence significance threshold is 9.
+Our estimated number of cells in the GFP+ bin for variants at the fluorescence significance threshold is 8.15.
 
 Now let's estimate the proportion of cells that fall into the GFP+ bin for variants at the fluorescence significance threshold. Because the fluorescence boundary between the GFP- and GFP+ debulk sort bins corresponds roughly to the boundary between bins 2 and 3 in the binned sort, we can use the fraction of cells per variant that are in the upper two binned sort bins (bins 3 and 4) as an estimate of the fraction of cells per variant in the GFP+ debulk sort bin.
 
-```{r}
+```{r estimateGFPplusproportion}
+# calculate proportion of cells in bins 3 and 4 for each variant and replicate,
+# then average across replicates
 proppos <- meanF_data_corrected_long %>% 
   mutate(propb34 = (cellCount_b3 + cellCount_b4) / cellCount_total) %>%
-  mutate(rc = case_when(Count_total < 100 ~ "<100",
-                        Count_total >= 100 & Count_total < 500 ~ "100-500",
-                        Count_total >= 500 & Count_total < 1000 ~ "500-1000",
-                        Count_total >= 1000 ~ ">=1000") %>% 
+  group_by(AA_var, REBC, bg, avg_meanF, avg_Count_total) %>%
+  summarize(propb34 = mean(propb34)) %>%
+  ungroup() %>%
+  mutate(rcbin = case_when(avg_Count_total < 100 ~ "<100",
+                           avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
+                           avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
+                           avg_Count_total >= 1000 ~ ">=1000") %>% 
            factor(levels = c("<100", "100-500", "500-1000", ">=1000"))) %>%
-  left_join(meanF_cutoffs, by = c("bg", "rc"))
+  left_join(meanF_cutoffs, by = c("bg", "rcbin"))
 
+# plot meanF vs. proportion of cells in bins 3 and 4
 proppos %>%
-  ggplot(aes(x = meanF, y = propb34)) +
+  ggplot(aes(x = avg_meanF, y = propb34)) +
   stat_summary_bin(geom = "line", fun = "median") +
   stat_summary_bin(geom = "line", linetype = "dashed", fun = function(x) quantile(x, 0.05)) +
   stat_summary_bin(geom = "line", linetype = "dashed", fun = function(x) quantile(x, 0.95)) +
-  facet_grid(rows = vars(bg), cols = vars(rc)) +
+  facet_grid(rows = vars(bg), cols = vars(rcbin)) +
   geom_vline(aes(xintercept = minF), color = "red") +
   theme_classic() +
-  labs(x = "meanF", y = "prop cells in bins 3 and 4")
+  labs(x = "meanF", y = "proportion of cells in bins 3 and 4")
 
 # get median proportion of cells in bins 3 and 4 for variants at the fluorescence significance
 # threshold, according to the protein background and read count bin
 proppossig <- proppos %>%
-  group_by(bg, rc) %>%
-  filter(meanF >= minF - 0.05 & meanF <= minF + 0.05) %>%
+  group_by(bg, rcbin) %>%
+  filter(avg_meanF >= minF - 2*mean_meanF_se & avg_meanF <= minF + 2*mean_meanF_se) %>%
   summarize(proppossig = median(propb34))
 
 # get estimated proportion of cells in bins 3 and 4 for variants at fluorescence significance threshold
 # across backgrounds and read count bins by computing a weighted average based on the
 # number of variants in each background/read count bin.
 proppossig <- estGFPpos %>%
-  group_by(bg, rc) %>%
+  group_by(bg, rcbin) %>%
   count() %>%
-  right_join(proppossig, by = c("bg", "rc"))
+  right_join(proppossig, by = c("bg", "rcbin"))
 
 proppossig <- proppossig %>%
   ungroup() %>%
@@ -796,34 +831,149 @@ proppossig <- proppossig %>%
 print(proppossig)
 ```
 
-Our estimated proportion of cells in the GFP+ debulk sort bin for variants at the fluorescence significance threshold is 0.25.
+Our estimated proportion of cells in the GFP+ debulk sort bin for variants at the fluorescence significance threshold is 0.23.
 
-Now let's use our estimates for number and proportion of cells in the GFP+ bin for variants at the fluorescence significance threshold to calculate how many cells we would need to sort for these variants to have >0.95 probability of detecting them as signficantly fluorescent in the binned sort experiment.
+Now let's use our estimates for number and proportion of cells in the GFP+ bin for variants at the fluorescence significance threshold to calculate how many cells we would need to sort for these variants to have >0.95 probability of detecting them as significantly fluorescent in the binned sort experiment. We'll also calculate a corresponding read threshold for the GFP- data given the mean number of reads per cell in that dataset.
 
-```{r}
+```{r calculateGFPnegrcthreshold}
+# calculate number of cells we would need to sort to have >=0.95 chance of
+# detecting variants at the fluorescence significance threshold in the binned
+# sort data
 for(i in 1:200) {
   p <- pbinom(round(GFPpluscellssig) - 1, i, proppossig)
   if(p <= 0.05) {  # p<0.05 significance level
-    debulk_rc_p <- i  # total number of cells sorted
+    debulk_cc_p <- i  # total number of cells sorted
     print(paste("p < 0.05 total cells =", i))  
     break
   }
 }
 
+# do the same but with a Bonferroni correction
 for(i in 1:200) {
   p <- pbinom(round(GFPpluscellssig) - 1, i, proppossig)
   if(p <= 0.05 / (21^4*32)) {  # Bonferroni-corrected significance level
-    debulk_rc_padj <- i  # total number of cells sorted
+    debulk_cc_padj <- i  # total number of cells sorted
     print(paste("p < 8e-9 total cells =", i))  
     break
   }
 }
 
-# calculate corresponding number of cells in the GFP- bin
-debulk_rcneg_p <- round((1 - proppossig) * debulk_rc_p)
-print(paste("p < 0.05 GFP- cells =", debulk_rcneg_p))
-debulk_rcneg_padj <- round((1 - proppossig) * debulk_rc_padj)
-print(paste("p < 8e-9 GFP- cells =", debulk_rcneg_padj))
+# calculate number of cells in the GFP- bin corresponding to total cell count
+# thresholds calculated above
+debulk_ccneg_p <- round((1 - proppossig) * debulk_cc_p)
+print(paste("p < 0.05 GFP- cells =", debulk_ccneg_p))
+debulk_ccneg_padj <- round((1 - proppossig) * debulk_cc_padj)
+print(paste("p < 8e-9 GFP- cells =", debulk_ccneg_padj))
+
+### calculate mean reads per cell in the debulk GFP- data
+
+# data frame of number of GFP- cells sorted per RE library in debulk sort
+debulknegcells <- data.frame(REBC = c(sapply(1:16, function(x) paste0("AncSR1_REBC", x)),
+                                      sapply(1:16, function(x) paste0("AncSR2_REBC", x)),
+                                      sapply(9:16, function(x) paste0("AncSR1_REBC", x))),
+                             BinBC = c(rep("GFPneg", 32), rep("GFPneg2", 8)),
+                             GFPnegcellslib = c(24375871, 24800681, 24681039, 24592905, 24662980, 24806774, 24352862, 24658946,
+                                                24326839, 24736293, 24336612, 24841745, 24748789, 24558731, 24945619, 25226917,
+                                                24220370, 24825719 ,24694083, 24602087, 24690832, 24686331, 24407887, 24637616,
+                                                24399903, 24518676, 24214644, 24511230, 24606769, 24040623, 24441448, 24619287,
+                                                24750095, 24422603, 24826229, 24622262, 24870439, 24586253, 24629933, 24685092))
+# calculate total number of reads per debulk library
+debulknegcells <- debulk_data %>%
+  group_by(REBC, BinBC) %>%
+  summarize(total_reads = sum(Count)) %>%
+  right_join(debulknegcells, by = c("REBC", "BinBC"))
+
+# calculate mean reads per cell across debulk libraries
+debulknegreadspercell <- debulknegcells %>%
+  ungroup() %>%
+  summarize(weighted.mean(total_reads/GFPnegcellslib, GFPnegcellslib/sum(GFPnegcellslib))) %>%
+  as.numeric()
+print(paste("GFP- reads per cell:", debulknegreadspercell))
+
+### calculate number of GFP- reads per variant corresponding to minimum number of
+### GFP- cells per variant calculated above
+debulk_rcneg_p <- debulk_ccneg_p * debulknegreadspercell
+print(paste("p < 0.05 GFP- reads =", debulk_rcneg_p))
+debulk_rcneg_padj <- debulk_ccneg_padj * debulknegreadspercell
+print(paste("p < 8e-9 GFP- reads =", debulk_rcneg_padj))
 ```
 
-We would need to sample at least 55 total cells for p < 0.05, and at least 134 for p < 8e-9 (Bonferroni corrected cutoff); this translates to 41 (101) cells in the GFP- bin. This corresponds to a read count of XXX given the mean number of reads per cell for the debulk GFP- data. We can infer that variants that have at least this many reads in the debulk GFP- data have a high chance of being measured as fluorescent in the binned sort, and therefore if they are not detected in the binned sort dataset then they likely have null fluorescence.
+We would need to sample at least 55 total cells per variant for p < 0.05 (140 for p < 8e-9; Bonferroni corrected cutoff); this translates to 42 (108) cells per variant in the GFP- bin. Given the mean number of reads per cell is 0.86 for the debulk GFP- data, this corresponds to 36 (93) reads per variant. We can infer that variants that have at least this many reads in the debulk GFP- data have a high chance of being measured as fluorescent in the binned sort, and therefore if they are not detected in the binned sort dataset then they likely have null fluorescence.
+
+
+Compute p-value for each variant
+
+```{r}
+debulk_data <- debulk_data %>%
+  mutate(cells_GFPneg = Count * 1/)
+```
+
+
+
+
+Now let's filter the variants in the debulk GFP- data given this read count threshold.
+
+```{r filterdebulkdata}
+# plot read count distribution variants in debulk GFP- data and read count threshold
+debulk_data %>%
+  ggplot(aes(x = Count)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = debulk_rcneg_p, color = "red") +
+  geom_vline(xintercept = debulk_rcneg_padj, color = "red", linetype = "dashed") +
+  scale_x_log10() +
+  labs(x = "reads per variant", title = "Debulk GFP- data") +
+  theme_classic()
+
+# fraction of variants in binned sort data out of all possible variants
+meanF_data_corrected %>% filter(type == "exp") %>% summarize(n_distinct(AA_var, REBC)) / (21^4*32)
+
+# fraction of variants in library out of all possible variants before filtering
+# (including variants in the debulk GFP- dataset and the filtered binned sort dataset)
+debulk_data %>%
+  select(AA_var, REBC) %>%
+  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
+  summarize(n_distinct(AA_var, REBC)) / (21^4*32)
+
+# filter variants at alpha = 0.05 level
+debulk_data_filter_p <- debulk_data %>% filter(Count >= debulk_rcneg_p)
+
+# fraction of variants in the debulk GFP- data remaining
+debulk_data_filter_p %>% summarize(n_distinct(AA_var, REBC)) /
+  debulk_data %>% summarize(n_distinct(AA_var, REBC))
+
+# number of variants remaining (including those in binned sort data)
+debulk_data_filter_p %>% 
+  select(AA_var, REBC) %>%
+  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
+  summarize(n_distinct(AA_var, REBC))
+
+# fraction of variants remaining out of all possible variants
+debulk_data_filter_p %>% 
+  select(AA_var, REBC) %>%
+  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
+  summarize(n_distinct(AA_var, REBC)) / (21^4*32)
+
+# filter variants at alpha = 8e-9 level
+debulk_data_filter_padj <- debulk_data %>% filter(Count >= debulk_rcneg_padj)
+
+# fraction of variants in the debulk GFP- data remaining
+debulk_data_filter_padj %>% summarize(n_distinct(AA_var, REBC)) /
+  debulk_data %>% summarize(n_distinct(AA_var, REBC))
+
+# number of variants remaining (including those in binned sort data)
+debulk_data_filter_padj %>% 
+  select(AA_var, REBC) %>%
+  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
+  summarize(n_distinct(AA_var, REBC))
+
+# fraction of variants remaining out of all possible variants
+debulk_data_filter_padj %>% 
+  select(AA_var, REBC) %>%
+  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
+  summarize(n_distinct(AA_var, REBC)) / (21^4*32)
+
+# export filtered data
+write.csv(debulk_data_filter_p,
+          file = file.path("..", "results", "cleaned_data", "debulk_data_filtered.csv"))
+```
+
