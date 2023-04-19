@@ -1,11 +1,38 @@
-Data cleaning
-================
-Jaeda Patton and Santiago Herrera
-2023-03-14
+---
+title: "Data cleaning"
+author: "Jaeda Patton and Santiago Herrera"
+date: "2023-03-14"
+output: github_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+require("knitr")
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=5, fig.height=5, warning = FALSE, message = FALSE)
+
+# check for packages and install any that are missing
+packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble", 
+              "patchwork", "foreach", "doParallel", "ggpubr", 
+              "splines2","matrixStats", "forcats", "dplyr")
+installed_packages <- packages %in% rownames(installed.packages())
+
+if(any(installed_packages == F)) {
+  install.packages(packages[!installed_packages])
+}
+
+# load packages
+invisible(lapply(packages, library, character.only=TRUE))
+
+# make output directories
+if(!dir.exists(file.path("..", "results", "cleaned_data"))) {
+  dir.create(file.path("..", "results", "cleaned_data"))
+}
+```
+
 
 ## Functions
 
-``` r
+```{r functions}
 # make factors with different levels for ordering of REs in plotting
 REs <- list()
 REs[[1]] <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", 
@@ -26,11 +53,14 @@ REBC_to_RE <- function(REBC, levels=1) {
   RE <- REs[[levels]][bc]
   return(RE)
 }
+
 ```
+
+
 
 ## Reading in data
 
-``` r
+```{r readdata}
 if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   #### TODO: update file paths once we find a permanent place to store the data
   untar(file.path("..", "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), 
@@ -85,17 +115,15 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   load(file.path("..", "data", "meanF", "meanF_data.rda"))
   load(file.path("..", "data", "meanF", "debulk_data.rda"))
 }
+
 ```
+
 
 ## Filtering binned sort data
 
-These plots show some general features of the dataset. 1) SE(meanF)
-decays with read depth, as expected, because variants with more reads
-have more precise estimates of meanF. 2) Variants with a minimum read
-count of \~15 have a SE(meanF) \< 0.1, regardless of the number of
-replicates.
+These plots show some general features of the dataset. 1) SE(meanF) decays with read depth, as expected, because variants with more reads have more precise estimates of meanF. 2) Variants with a minimum read count of ~15 have a SE(meanF) < 0.1, regardless of the number of replicates. 
 
-``` r
+```{r exploratoryfigs}
 # histogram of read counts for binned sort data, separated by replicate
 meanF_data %>%
   filter(type != "control") %>%
@@ -115,11 +143,7 @@ meanF_data %>%
         legend.title = element_text(size = 14),
         legend.text = element_text(size = 14)) +
   labs(x = "Reads", color = "replicate")
-```
 
-![](data_cleaning_files/figure-gfm/exploratoryfigs-1.png)<!-- -->
-
-``` r
 # SE(meanF) as a function of minimum read depth per variant
 # meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
 #   ggplot(aes(x=min_read_count,y=se_meanF)) +
@@ -146,11 +170,8 @@ meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
         axis.title=element_text(size = 16)) +
   geom_hline(aes(yintercept = mean(se_meanF)), color="red", linetype="dashed") +
   xlab("Min. read count") + ylab("SE(meanF)")
-```
+  
 
-![](data_cleaning_files/figure-gfm/exploratoryfigs-2.png)<!-- -->
-
-``` r
 # Gruop variants by Avg. Min Read Depth (RC) and plot SE(meanF) by n_reps. This shows that variants with a minimum read count of ~15
 # have a SE(meanF) < 0.1, regardless of the number of replicates. 
 meanF_data %>% filter(!(n_reps==1)) %>% 
@@ -167,18 +188,12 @@ meanF_data %>% filter(!(n_reps==1)) %>%
   geom_hline(yintercept = 0.1,color="gray",linetype="dashed",size=1.5)
 ```
 
-![](data_cleaning_files/figure-gfm/exploratoryfigs-3.png)<!-- -->
 
 ### Filtering data
 
-DMS binned sort data is filtered based on two approaches. First, we
-filter out variants with low read count (across replicates) to reduce
-the global standard error; second, we correct use an I-spline to correct
-the nonlnearity between replicates, and remove variants with high
-SE(meanF). These two procedures ensure that we keep variants for which
-we have high confidence in their meanF estimates.
+DMS binned sort data is filtered based on two approaches. First, we filter out variants with low read count (across replicates) to reduce the global standard error; second, we correct use an I-spline to correct the nonlnearity between replicates, and remove variants with high SE(meanF). These two procedures ensure that we keep variants for which we have high confidence in their meanF estimates. 
 
-``` r
+```{r filterdata}
 ### First strategy: Choose a read count for which we maximize the fraction of retained variants, maximize the 
 ### fraction of retained variants with SE(meanF) <= 0.1, and minimize the global SE(meanF).
 
@@ -232,17 +247,9 @@ if(!file.exists(file.path("..", "results", "cleaned_data", "outliers.rda"))) {
 outliers$r <- seq(1,100,1)
 rc <- outliers %>% filter(var_01 >= 0.95) %>% slice_head() %>% pull(r)
 paste("read count threshold:", rc)
-```
-
-    ## [1] "read count threshold: 27"
-
-``` r
 paste("variants retained:", outliers %>% filter(r == rc) %>% pull(p) * nrow(meanF_data))
-```
 
-    ## [1] "variants retained: 1569125"
 
-``` r
 # plot results: A read count threshold of 27 ensures that 95% of variants have SE <= 0.1, decreasing the global SE by 27%
 par(mar = c(5, 4, 4, 4) + 1.4)
 plot(outliers$r, outliers$abs_se, type="l", col = "black",xlab="Read count threshold",ylab="Global median SE(meanF)",lwd=2)             
@@ -257,16 +264,10 @@ abline(v = rc, lty=2,col="gray",lwd=3)
 abline(h = 0.95, lty = 2, col = "gray", lwd = 3)
 ```
 
-![](data_cleaning_files/figure-gfm/filterdata-1.png)<!-- -->
 
-After having identified the read threshold, we will perform a second
-filter removing variants with SE(meanF) \> 0.1. This is not the final
-filter based on standard error, we do this to remove noisy variants and
-will help to fit the splines in order to capture the *global*
-relationships between replicates (compare the plots in the left column
-with those in the right column).
+After having identified the read threshold, we will perform a second filter removing variants with SE(meanF) > 0.1. This is not the final filter based on standard error, we do this to remove noisy variants and will help to fit the splines in order to capture the *global* relationships between replicates (compare the plots in the left column with those in the right column).
 
-``` r
+```{r filterse}
 # Filter variants per replicate based on a read threshold and recalculate SE. Then filter out variants by SE(meanF) > 0.1
 meanF_data_filter <- meanF_data %>%
     select(AA_var:Count_total_REP4) %>%
@@ -320,15 +321,7 @@ f <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y
 # How much data is retained after filtering by standard error?
 meanF_data_filter %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
   group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
-```
 
-    ## # A tibble: 2 × 4
-    ##   included       n mean_se   prop
-    ##   <chr>      <int>   <dbl>  <dbl>
-    ## 1 in       1491573  0.0346 0.951 
-    ## 2 out        77552  0.139  0.0494
-
-``` r
 g <- meanF_data_filter %>% 
   ggplot(aes(x = se_meanF)) +
   geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
@@ -337,17 +330,19 @@ g <- meanF_data_filter %>%
   annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 4.94%") # histogram of SE(meanF)
 ```
 
-![](data_cleaning_files/figure-gfm/plotfiltereddata-1.png)<!-- -->
+```{r plotfiltereddata, echo=FALSE, fig.width=11, fig.height=5}
+(a + b) / (c + d) / (e + f)
+```
 
-![](data_cleaning_files/figure-gfm/plotfiltereddata2-1.png)<!-- -->
+```{r plotfiltereddata2, echo=FALSE, fig.width=5, fig.height=5}
+g
+```
 
 ## Correcting nonlinearity between replicates
 
-Here we will correct for the remaining nonlinearity between replicates
-in order to adjust all measurements to be on the same scale (the
-reference scale being replicate 2).
+Here we will correct for the remaining nonlinearity between replicates in order to adjust all measurements to be on the same scale (the reference scale being replicate 2). 
 
-``` r
+```{r splinefit}
 # Datasets:
 r12 <- meanF_data_filter %>% filter(!is.na(meanF_REP1), !is.na(meanF_REP2), se_meanF <= 0.1) %>%
   select(AA_var,REBC,avg_meanF,meanF_REP1,meanF_REP2)
@@ -380,59 +375,15 @@ spline_r12 <- lm(r12$meanF_REP2 ~ basis_mat12)
 r12$meanF_REP1_c <- (predict(basis_mat12, newx = r12$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1]
 
 print("REPS: 1 and 2")
-```
-
-    ## [1] "REPS: 1 and 2"
-
-``` r
 print(paste("Correlation before correction:", cor(r12$meanF_REP1,r12$meanF_REP2)))
-```
-
-    ## [1] "Correlation before correction: 0.613234699108762"
-
-``` r
 print(paste("R^2 before correction:", cor(r12$meanF_REP1,r12$meanF_REP2)^2))
-```
-
-    ## [1] "R^2 before correction: 0.376056796191014"
-
-``` r
 print(paste("Correlation of the 'active' region before correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1,r12[r12$avg_meanF>=-4,]$meanF_REP2)))
-```
-
-    ## [1] "Correlation of the 'active' region before correction: 0.964971637616784"
-
-``` r
 print(paste("R^2 of the 'active' region before correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1,r12[r12$avg_meanF>=-4,]$meanF_REP2)^2))
-```
-
-    ## [1] "R^2 of the 'active' region before correction: 0.931170261404818"
-
-``` r
 print(paste("Correlation after correction:", cor(r12$meanF_REP1_c,r12$meanF_REP2)))
-```
-
-    ## [1] "Correlation after correction: 0.688811984503021"
-
-``` r
 print(paste("R^2 after correction:", cor(r12$meanF_REP1_c,r12$meanF_REP2)^2))
-```
-
-    ## [1] "R^2 after correction: 0.47446194999499"
-
-``` r
 print(paste("Correlation of the 'active' region after correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1_c,r12[r12$avg_meanF>=-4,]$meanF_REP2))) 
-```
-
-    ## [1] "Correlation of the 'active' region after correction: 0.968181855351895"
-
-``` r
 print(paste("R^2 of the 'active' region after correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1_c,r12[r12$avg_meanF>=-4,]$meanF_REP2)^2)) 
-```
 
-    ## [1] "R^2 of the 'active' region after correction: 0.937376105032638"
-
-``` r
 # plot results:
 r12_before <- r12 %>% ggplot(aes(x=meanF_REP1,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep1") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
@@ -453,59 +404,15 @@ spline_r23 <- lm(r23$meanF_REP2 ~ basis_mat23)
 r23$meanF_REP3_c <- (predict(basis_mat23, newx = r23$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1]
 
 print("REPS: 2 and 3")
-```
-
-    ## [1] "REPS: 2 and 3"
-
-``` r
 print(paste("Correlation before correction:", cor(r23$meanF_REP2,r23$meanF_REP3)))
-```
-
-    ## [1] "Correlation before correction: 0.586731926649125"
-
-``` r
 print(paste("Correlation of the 'active' region before correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3))) 
-```
-
-    ## [1] "Correlation of the 'active' region before correction: 0.973408813301117"
-
-``` r
 print(paste("Correlation after correction:", cor(r23$meanF_REP2,r23$meanF_REP3_c)))
-```
-
-    ## [1] "Correlation after correction: 0.658485192855734"
-
-``` r
 print(paste("Correlation of the 'active' region after correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3_c))) 
-```
-
-    ## [1] "Correlation of the 'active' region after correction: 0.973849279899134"
-
-``` r
 print(paste("R^2 before correction:", cor(r23$meanF_REP2,r23$meanF_REP3)^2))
-```
-
-    ## [1] "R^2 before correction: 0.344254353749395"
-
-``` r
 print(paste("R^2 of the 'active' region before correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3)^2)) 
-```
-
-    ## [1] "R^2 of the 'active' region before correction: 0.947524717812288"
-
-``` r
 print(paste("R^2 after correction:", cor(r23$meanF_REP2,r23$meanF_REP3_c)^2))
-```
-
-    ## [1] "R^2 after correction: 0.433602749210254"
-
-``` r
 print(paste("R^2 of the 'active' region after correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3_c)^2)) 
-```
 
-    ## [1] "R^2 of the 'active' region after correction: 0.948382419960061"
-
-``` r
 # plot results:
 r23_before <- r23 %>% ggplot(aes(x=meanF_REP3,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep3") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
@@ -526,59 +433,15 @@ spline_r24 <- lm(r24$meanF_REP2 ~ basis_mat24)
 r24$meanF_REP4_c <- (predict(basis_mat24, newx = r24$meanF_REP4) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1]
 
 print("REPS: 2 and 4")
-```
-
-    ## [1] "REPS: 2 and 4"
-
-``` r
 print(paste("Correlation before correction:", cor(r24$meanF_REP2,r24$meanF_REP4)))
-```
-
-    ## [1] "Correlation before correction: 0.202666828370998"
-
-``` r
 print(paste("Correlation of the 'active' region before correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4)))
-```
-
-    ## [1] "Correlation of the 'active' region before correction: 0.927003536277944"
-
-``` r
 print(paste("Correlation after correction:", cor(r24$meanF_REP2,r24$meanF_REP4_c)))
-```
-
-    ## [1] "Correlation after correction: 0.226946100112036"
-
-``` r
 print(paste("Correlation of the 'active' region after correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4_c)))
-```
-
-    ## [1] "Correlation of the 'active' region after correction: 0.928112429182438"
-
-``` r
 print(paste("R^2 before correction:", cor(r24$meanF_REP2,r24$meanF_REP4)^2))
-```
-
-    ## [1] "R^2 before correction: 0.0410738433219597"
-
-``` r
 print(paste("R^2 of the 'active' region before correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4)^2))
-```
-
-    ## [1] "R^2 of the 'active' region before correction: 0.859335556271814"
-
-``` r
 print(paste("R^2 after correction:", cor(r24$meanF_REP2,r24$meanF_REP4_c)^2))
-```
-
-    ## [1] "R^2 after correction: 0.0515045323560621"
-
-``` r
 print(paste("R^2 of the 'active' region after correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4_c)^2))
-```
 
-    ## [1] "R^2 of the 'active' region after correction: 0.861392681202926"
-
-``` r
 # plot results:
 r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
@@ -588,22 +451,22 @@ r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 
   xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
 
 ## *Note: Spline for rep2-4 seems to overshoot the fit. It does reduce the SE(meanF) for isogenic controls but predicts some functional controls as null (see below)
+
 ```
 
-Plot the spline fits. The plots on the left column show the fitted
-I-spline, and the plots in the right column show the corrected values
-for replicates 1, 3, and 4.
+Plot the spline fits. The plots on the left column show the fitted I-spline, and the plots in the right column show the corrected values for replicates 1, 3, and 4.
 
-![](data_cleaning_files/figure-gfm/plotsplinefits-1.png)<!-- -->
+```{r plotsplinefits, echo=FALSE, fig.width=6, fig.height=8}
+a <- r12_before + r12_after
+b <- r23_before + r23_after
+c <- r24_before + r24_after
+a / b / c
+```
 
-The splines were fitted with those variants that are present in
-replicate 2 and the other replicate. We’ll use the fitted splines to
-correct *all* variants that passed the previous read count filter - not
-only the ones that are shared with rep2 and the other replicates. This
-will also reduce the SE(meanF) of the noisy variants that were filtered
-out before.
 
-``` r
+The splines were fitted with those variants that are present in replicate 2 and the other replicate. We'll use the fitted splines to correct *all* variants that passed the previous read count filter - not only the ones that are shared with rep2 and the other replicates. This will also reduce the SE(meanF) of the noisy variants that were filtered out before.
+
+```{r correction, fig.width = 6, fig.height = 5}
 # Variants per replicate that passed initial read count QC filter
 rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>% 
   select(AA_var,REBC,bg,RE,meanF_REP2,Count_total_REP2,cellCount_total_REP2,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,type) %>% 
@@ -643,18 +506,7 @@ rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF)
 # Comparison of uncorrected vs corrected meanF values for isogenic controls in Rep4:
 # Given the overshoot of the I-spline, all estimated values are pulled towards lower predicted values of meanF (compare 'meanF' vs 'meanF_c' columns). The effect is especially severe for AncSR2_SRE and AncSR1_GGKM_ERE. These variants are active based on cytometry data from isogenic strains, but are predicted as null variants (see plot below showing the lower and upper bounds of detection).  
 rep4_ctls %>% mutate(meanF_c = ((predict(basis_mat24, newx = rep4_ctls$meanF) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% select(AA_var,REBC,bg,RE,type,REP,meanF,meanF_c)
-```
 
-    ## # A tibble: 5 × 8
-    ##   AA_var REBC            bg     RE       type    REP   meanF meanF_c
-    ##   <fct>  <fct>           <chr>  <chr>    <chr>   <chr> <dbl>   <dbl>
-    ## 1 EGKA   AncSR1_ERE      AncSR1 ERE      control REP4  -2.99   -3.23
-    ## 2 GGKM   AncSR1_GGKM_ERE AncSR1 GGKM_ERE control REP4  -3.79   -4.21
-    ## 3 GGKM   AncSR2_GGKM_SRE AncSR2 GGKM_SRE control REP4  -2.96   -3.17
-    ## 4 EGKA   AncSR2_rh_ERE   AncSR2 rh_ERE   control REP4  -3.65   -4.10
-    ## 5 GSKV   AncSR2_SRE      AncSR2 SRE      control REP4  -4.25   -4.43
-
-``` r
 # Re-calculate SE(meanF) of variants after correction.
 meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
   pivot_wider(names_from = REP, values_from = c(meanF,Count_total,cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4)) %>%
@@ -666,52 +518,27 @@ meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
 # Proportions of variants kept and discarded based on SE(meanF) cutoff
 meanF_data_corrected %>% filter(n_reps != 1) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
   group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
-```
 
-    ## # A tibble: 2 × 4
-    ##   included       n mean_se   prop
-    ##   <chr>      <int>   <dbl>  <dbl>
-    ## 1 in       1544619  0.0240 0.984 
-    ## 2 out        24506  0.144  0.0156
-
-``` r
 # plot histogram of SE(meanF) 
 meanF_data_corrected %>% filter(n_reps != 1) %>% 
   ggplot(aes(x=se_meanF)) + geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
   theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
   geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
   annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.17%") # histogram of SE(meanF)
-```
 
-![](data_cleaning_files/figure-gfm/correction-1.png)<!-- -->
-
-``` r
 # New corrected dataset
 ctls <- meanF_data_corrected %>% filter(type=="control") %>% 
   filter(grepl(paste(c("GSKV","EGKA","GGKM"),collapse = "|"),AA_var)) # Extract control variants, and filter out sequencing errors in controls
 meanF_data_corrected <- meanF_data_corrected %>% filter(se_meanF <= 0.1) 
 meanF_data_corrected <- unique(rbind(meanF_data_corrected,ctls)) # Manually add controls to new dataset
+
 ```
 
 ## Checking correlations with isogenic and REBC controls
 
-We used two kinds of control variants. First, we spiked into our DMS
-library several isogenic controls of reference DBD variants for which we
-have estimates of meanF based on flow cytometry data; this will allow us
-to validate our estmates of meanF from the sort-seq data. Second, we
-used RE-barcode (REBC) controls. We measured each DBD library (AncSR1
-and AncSR2) on 16 yeast strains, each containing an RE sequence, and all
-32 libraries were assayed together in a single sort-seq experiment. To
-distinguish the RE in which a given DBD variant was assayed in, we
-assigned an REBC to each DBD library using synonymous codon variants in
-the RH region. Thus, the REBC controls correspond to the RH genotype of
-AncSR1 or AncSR2 on the background of each of the REBC sequences,
-assayed in ERE and SRE, respectively; all AncSR1-REBCs on ERE and
-AncSR2-REBCs on SRE should have the same meanF estimate as the wild type
-AncSR1/ERE and AncSR2/SRE genotypes. In total, we have 5 isogenic
-controls and 32 REBC controls (16 per DBD library).
+We used two kinds of control variants. First, we spiked into our DMS library several isogenic controls of reference DBD variants for which we have estimates of meanF based on flow cytometry data; this will allow us to validate our estmates of meanF from the sort-seq data. Second, we used RE-barcode (REBC) controls. We measured each DBD library (AncSR1 and AncSR2) on 16 yeast strains, each containing an RE sequence, and all 32 libraries were assayed together in a single sort-seq experiment. To distinguish the RE in which a given DBD variant was assayed in, we assigned an REBC to each DBD library using synonymous codon variants in the RH region. Thus, the REBC controls correspond to the RH genotype of AncSR1 or AncSR2 on the background of each of the REBC sequences, assayed in ERE and SRE, respectively; all AncSR1-REBCs on ERE and AncSR2-REBCs on SRE should have the same meanF estimate as the wild type AncSR1/ERE and AncSR2/SRE genotypes. In total, we have 5 isogenic controls and 32 REBC controls (16 per DBD library).
 
-``` r
+```{r}
 # Plot meanF of control variants
 bounds <- meanF_data_corrected %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
   group_by(group) %>% summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
@@ -769,28 +596,17 @@ c2 <- inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=mean
   ylab("meanF isogenic (spiked-in)") + xlab("meanF isogenic (flow cytometry)") +
   annotate(geom = "text",label="r = 0.84", x= -4,y=-3,size=6)
 ```
-
-![](data_cleaning_files/figure-gfm/plotcontrols-1.png)<!-- -->
+```{r plotcontrols, echo=FALSE, fig.width=12, fig.height=6}
+c1 + c2
+```
 
 ## Testing for fluorescence significance
 
-We will now determine a significance threshold for calling a variant
-active vs. null in the binned (2nd round) sort data. We will use the
-fluorescence distribution of nonsense variants as a null distribution to
-compute a nonparametric p-value for each variant, and perform multiple
-testing correction using a Benjamini-Hochberg false discovery rate.
+We will now determine a significance threshold for calling a variant active vs. null in the binned (2nd round) sort data. We will use the fluorescence distribution of nonsense variants as a null distribution to compute a nonparametric p-value for each variant, and perform multiple testing correction using a Benjamini-Hochberg false discovery rate.
 
-We observed during the sorting experiment that the fluorescence
-distribution of null variants in the AncSR2 protein background is
-systematically higher than in the AncSR1 protein background. We will
-therefore test each variant using the fluorescence distribution of
-nonsense variants from the same protein background. We will also bin
-variants by mean read count across sorting replicates for testing, since
-we observe that the null fluorescence distribution also depends on this
-variable. Below we plot the distribution of mean fluorescence for
-nonsense variants splitting by protein background and mean read count.
+We observed during the sorting experiment that the fluorescence distribution of null variants in the AncSR2 protein background is systematically higher than in the AncSR1 protein background. We will therefore test each variant using the fluorescence distribution of nonsense variants from the same protein background. We will also bin variants by mean read count across sorting replicates for testing, since we observe that the null fluorescence distribution also depends on this variable. Below we plot the distribution of mean fluorescence for nonsense variants splitting by protein background and mean read count.
 
-``` r
+```{r nonsensedist, fig.width=7, fig.height=6}
 # Add columns for mean read count across reps and logical for whether a variant is nonsense.
 # Then assign variants to mean read count bins
 meanF_data_corrected <- meanF_data_corrected %>%
@@ -812,14 +628,9 @@ meanF_data_corrected %>%
   labs(x = "meanF", title = "Nonsense variants", fill = "mean read count")
 ```
 
-![](data_cleaning_files/figure-gfm/nonsensedist-1.png)<!-- -->
+Now let's compute the p-values as the fraction of nonsense variants in the same protein background and mean read count bin that have meanF greater than that of the test variant. Also compute an FDR-corrected p-value.
 
-Now let’s compute the p-values as the fraction of nonsense variants in
-the same protein background and mean read count bin that have meanF
-greater than that of the test variant. Also compute an FDR-corrected
-p-value.
-
-``` r
+```{r meanFtest, fig.width=12, fig.height=6}
 if(!file.exists(file.path("..", "results", "cleaned_data", "meanF_p.rda"))) {
   # split data by background and mean read count bin
   meanF_p <- meanF_data_corrected %>%
@@ -898,11 +709,7 @@ meanF_p %>%
   scale_y_log10() +
   theme_classic() +
   labs(x = "meanF", fill = "")
-```
 
-![](data_cleaning_files/figure-gfm/meanFtest-1.png)<!-- -->
-
-``` r
 # same plot but split by protein background and mean read count bin
 meanF_p %>%
   left_join(meanF_cutoffs) %>%
@@ -916,11 +723,7 @@ meanF_p %>%
   geom_vline(aes(xintercept = minF), color = "red") +
   theme_classic() +
   labs(x = "meanF", fill = "")
-```
 
-![](data_cleaning_files/figure-gfm/meanFtest-2.png)<!-- -->
-
-``` r
 # Save dataset of corrected mean fluorescence values with p-values.
 meanF_data_corrected <- meanF_data_corrected %>%
   left_join(meanF_p %>% select(AA_var:type, p:sig), by = c("AA_var", "REBC", "bg", "RE", "type"))
@@ -928,51 +731,18 @@ write.csv(meanF_data_corrected,
           file=gzfile(file.path("..", "results", "cleaned_data", "meanF_data_corrected_NovaSeq.csv.gz"))) 
 ```
 
+
 ## Filtering debulk sort data
 
-Now let’s turn to filtering the data from the debulk sort (first round
-of sorting to enrich for GFP+ variants). For this experiment, we had two
-sort bins: GFP- and GFP+. We sequenced cells collected in the GFP- bin
-to determine the set of variants that were present in the unsorted
-library. Variants that are seen in the debulk GFP- dataset but not in
-the binned (round 2) sort dataset may be null variants that have a very
-low proportion of GFP+ cells, and therefore were not collected in the
-debulk GFP+ bin. Alternatively, they may be variants that are active
-(i.e. have a significant proportion of GFP+ cells), but by chance were
-not sorted at high enough frequency to be detected in the binned sort
-dataset.
+Now let's turn to filtering the data from the debulk sort (first round of sorting to enrich for GFP+ variants). For this experiment, we had two sort bins: GFP- and GFP+. We sequenced cells collected in the GFP- bin to determine the set of variants that were present in the unsorted library. Variants that are seen in the debulk GFP- dataset but not in the binned (round 2) sort dataset may be null variants that have a very low proportion of GFP+ cells, and therefore were not collected in the debulk GFP+ bin. Alternatively, they may be variants that are active (i.e. have a significant proportion of GFP+ cells), but by chance were not sorted at high enough frequency to be detected in the binned sort dataset. 
 
-We want to have some criterion to call variants null if they are
-detected in the debulk GFP- dataset but not the binned sort dataset. We
-can do this using a read count threshold on the debulk GFP- dataset.
-Variants that are detected at high frequency in the debulk GPF- dataset
-but not at all in the filtered binned sort dataset are likely to be
-null, whereas variants that are not at high frequency in either dataset
-do not have enough information to be called either null or active.
+We want to have some criterion to call variants null if they are detected in the debulk GFP- dataset but not the binned sort dataset. We can do this using a read count threshold on the debulk GFP- dataset. Variants that are detected at high frequency in the debulk GPF- dataset but not at all in the filtered binned sort dataset are likely to be null, whereas variants that are not at high frequency in either dataset do not have enough information to be called either null or active.
 
-How can we determine a good threshold? First, we can calculate the
-binomial sampling probability of a variant being sorted into the debulk
-GFP+ bin given a total number of cells sorted for that variant and the
-proportion of cells in the GFP+ bin. If we know the number and
-proportion of cells that a variant must have in the debulk GFP+ bin to
-be called active in the binned sort data, then we can then find a read
-count threshold for the debulk GFP- data that ensures that variants that
-are truly active would have a high probability of being classified as
-such. Conversely, if they are not detected in the binned sort data given
-that debulk threshold then they are likely to be null.
+How can we determine a good threshold? First, we can calculate the binomial sampling probability of a variant being sorted into the debulk GFP+ bin given a total number of cells sorted for that variant and the proportion of cells in the GFP+ bin. If we know the number and proportion of cells that a variant must have in the debulk GFP+ bin to be called active in the binned sort data, then we can then find a read count threshold for the debulk GFP- data that ensures that variants that are truly active would have a high probability of being classified as such. Conversely, if they are not detected in the binned sort data given that debulk threshold then they are likely to be null.
 
-We first need to know how many cells must be sorted for a variant into
-the debulk GFP+ bin to be detected in the filtered binned sort dataset.
-To do this, we can estimate the average number of cells that were sorted
-into the debulk GFP+ bin, given that they are present in the filtered
-binned sort dataset. We will assume that the total proportion of cells
-for a variant in the binned sort data is the same as the proportion of
-cells for that same variant in the debulk sort GFP+ bin, given a
-particular RE/protein background. We can then multiply this by the total
-number of GFP+ cells sorted per RE/protein library in the debulk sort to
-estimate the number of GFP+ cells sorted per binned sort variant.
+We first need to know how many cells must be sorted for a variant into the debulk GFP+ bin to be detected in the filtered binned sort dataset. To do this, we can estimate the average number of cells that were sorted into the debulk GFP+ bin, given that they are present in the filtered binned sort dataset. We will assume that the total proportion of cells for a variant in the binned sort data is the same as the proportion of cells for that same variant in the debulk sort GFP+ bin, given a particular RE/protein background. We can then multiply this by the total number of GFP+ cells sorted per RE/protein library in the debulk sort to estimate the number of GFP+ cells sorted per binned sort variant.
 
-``` r
+```{r estimateGFPpluscellcount, fig.width=10, fig.height=6}
 # data frame of number of GFP+ cells sorted per RE library in debulk sort
 debulkposcells <- data.frame(bg = c(rep(rep(c("AncSR1", "AncSR2"), each = 16), 3), rep("AncSR1", 8)),
                              RE = c(rep(REs[[1]], 2*3), REs[[1]][9:16]),
@@ -1012,61 +782,17 @@ print(cor.test(~ REP1 + REP2,
                  select(AA_var:REP, estGFPposcells) %>%
                  pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
                na.action = "na.omit"))
-```
-
-    ## 
-    ##  Pearson's product-moment correlation
-    ## 
-    ## data:  REP1 and REP2
-    ## t = 2503.1, df = 844629, p-value < 2.2e-16
-    ## alternative hypothesis: true correlation is not equal to 0
-    ## 95 percent confidence interval:
-    ##  0.9384723 0.9389789
-    ## sample estimates:
-    ##       cor 
-    ## 0.9387261
-
-``` r
 print(cor.test(~ REP3 + REP2,
                data = meanF_data_corrected_long %>%
                  select(AA_var:REP, estGFPposcells) %>%
                  pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
                na.action = "na.omit"))
-```
-
-    ## 
-    ##  Pearson's product-moment correlation
-    ## 
-    ## data:  REP3 and REP2
-    ## t = 2925.8, df = 1110815, p-value < 2.2e-16
-    ## alternative hypothesis: true correlation is not equal to 0
-    ## 95 percent confidence interval:
-    ##  0.9406069 0.9410341
-    ## sample estimates:
-    ##       cor 
-    ## 0.9408209
-
-``` r
 print(cor.test(~ REP4 + REP2,
                data = meanF_data_corrected_long %>%
                  select(AA_var:REP, estGFPposcells) %>%
                  pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
                na.action = "na.omit"))
-```
 
-    ## 
-    ##  Pearson's product-moment correlation
-    ## 
-    ## data:  REP4 and REP2
-    ## t = 823.29, df = 216004, p-value < 2.2e-16
-    ## alternative hypothesis: true correlation is not equal to 0
-    ## 95 percent confidence interval:
-    ##  0.8698005 0.8718388
-    ## sample estimates:
-    ##       cor 
-    ## 0.8708234
-
-``` r
 # average estimates of GFP+ cells across binned sort replicates, but not for the libraries
 # in rep 1 that were from a different debulk sorting experiment than the other replicates
 estGFPpos <- meanF_data_corrected_long %>%
@@ -1122,11 +848,7 @@ estGFPposave %>%
   scale_y_log10() +
   theme_classic() +
   labs(x = "meanF", y = "estimated debulk GFP+ cells sorted")
-```
 
-![](data_cleaning_files/figure-gfm/estimateGFPpluscellcount-1.png)<!-- -->
-
-``` r
 # get median # of GFP+ cells sorted for variants at the fluorescence significance
 # threshold, according to the protein background and read count bin
 GFPpluscellssig <- estGFPposave %>%
@@ -1149,20 +871,11 @@ GFPpluscellssig <- GFPpluscellssig %>%
 print(GFPpluscellssig)
 ```
 
-    ## [1] 8.744825
+Our estimated number of cells in the GFP+ bin for variants at the fluorescence significance threshold is 8.74.
 
-Our estimated number of cells in the GFP+ bin for variants at the
-fluorescence significance threshold is 8.74.
+Now let's estimate the proportion of cells that fall into the GFP+ bin for variants at the fluorescence significance threshold. Because the fluorescence boundary between the GFP- and GFP+ debulk sort bins corresponds roughly to the boundary between bins 2 and 3 in the binned sort, we can use the fraction of cells per variant that are in the upper two binned sort bins (bins 3 and 4) as an estimate of the fraction of cells per variant in the GFP+ debulk sort bin.
 
-Now let’s estimate the proportion of cells that fall into the GFP+ bin
-for variants at the fluorescence significance threshold. Because the
-fluorescence boundary between the GFP- and GFP+ debulk sort bins
-corresponds roughly to the boundary between bins 2 and 3 in the binned
-sort, we can use the fraction of cells per variant that are in the upper
-two binned sort bins (bins 3 and 4) as an estimate of the fraction of
-cells per variant in the GFP+ debulk sort bin.
-
-``` r
+```{r estimateGFPplusproportion, fig.width=10, fig.height=6}
 # calculate proportion of cells in bins 3 and 4 for each variant and replicate,
 # then average across replicates
 proppos <- meanF_data_corrected_long %>% 
@@ -1187,11 +900,7 @@ proppos %>%
   geom_vline(aes(xintercept = minF), color = "red") +
   theme_classic() +
   labs(x = "meanF", y = "proportion of cells in bins 3 and 4")
-```
 
-![](data_cleaning_files/figure-gfm/estimateGFPplusproportion-1.png)<!-- -->
-
-``` r
 # get median proportion of cells in bins 3 and 4 for variants at the fluorescence significance
 # threshold, according to the protein background and read count bin
 proppossig <- proppos %>%
@@ -1214,38 +923,15 @@ proppossig <- proppossig %>%
 print(proppossig)
 ```
 
-    ## [1] 0.2277239
+Our estimated proportion of cells in the GFP+ debulk sort bin for variants at the fluorescence significance threshold is 0.23.
 
-Our estimated proportion of cells in the GFP+ debulk sort bin for
-variants at the fluorescence significance threshold is 0.23.
+Now let's use our estimates for number and proportion of cells in the GFP+ bin for variants at the significance threshold to calculate the probability of not seeing such a variant in the binned sort dataset, given an estimated total number of cells sorted per variant in the debulk sort. I.e., 
 
-Now let’s use our estimates for number and proportion of cells in the
-GFP+ bin for variants at the significance threshold to calculate the
-probability of not seeing such a variant in the binned sort dataset,
-given an estimated total number of cells sorted per variant in the
-debulk sort. I.e.,
+$$\text{Pr}(X\text{ not in binned sort} | \text{Pr}(X = \text{null}) = \alpha_{FDR}) = F_{\text{Binom}}(p;t,f)$$ 
 
-$$\text{Pr}(X\text{ not in binned sort} | \text{Pr}(X = \text{null}) = \alpha_{FDR}) = F_{\text{Binom}}(p;t,f)$$
+where $X$ is a variant detected in the debulk GFP- dataset, $\alpha_{FDR}$ is the significance threshold for a variant being called null in the binned sort, $p$ and $f$ are the estimated number and fraction of GFP+ cells for a minimally active variant, respectively, and $t$ is the estimated total number of cells sorted for $X$ in the debulk sort. This gives us a p-value for the null hypothesis that a variant has too few reads in the debulk GFP- bin to be able to detect it as minimally fluorescent in the binned sort experiment. We can therefore infer that variants with low p-value were sorted to high enough frequency in the debulk experiment to be detectable as minimally fluorescent in the binned sort experiment; if we do not detect them in the binned sort dataset, it is probably because they are null variants and had very few cells that made it into the debulk GFP+ bin. We can then filter out variants with non-significant p-value, and call remaining variants null if they are present in the debulk GFP- dataset but not in the binned sort dataset. We'll then use a Benjamini-Hochberg FDR correction with threshold of 0.1 for multiple testing correction.
 
-where $X$ is a variant detected in the debulk GFP- dataset,
-$\alpha_{FDR}$ is the significance threshold for a variant being called
-null in the binned sort, $p$ and $f$ are the estimated number and
-fraction of GFP+ cells for a minimally active variant, respectively, and
-$t$ is the estimated total number of cells sorted for $X$ in the debulk
-sort. This gives us a p-value for the null hypothesis that a variant has
-too few reads in the debulk GFP- bin to be able to detect it as
-minimally fluorescent in the binned sort experiment. We can therefore
-infer that variants with low p-value were sorted to high enough
-frequency in the debulk experiment to be detectable as minimally
-fluorescent in the binned sort experiment; if we do not detect them in
-the binned sort dataset, it is probably because they are null variants
-and had very few cells that made it into the debulk GFP+ bin. We can
-then filter out variants with non-significant p-value, and call
-remaining variants null if they are present in the debulk GFP- dataset
-but not in the binned sort dataset. We’ll then use a Benjamini-Hochberg
-FDR correction with threshold of 0.1 for multiple testing correction.
-
-``` r
+```{r filterdebulk, fig.width=8, fig.height=6}
 # data frame of number of GFP- cells sorted per RE library in debulk sort
 debulknegcells <- data.frame(REBC = c(sapply(1:16, function(x) paste0("AncSR1_REBC", x)),
                                       sapply(1:16, function(x) paste0("AncSR2_REBC", x)),
@@ -1293,22 +979,13 @@ debulk_data %>%
   scale_x_log10() +
   labs(x = "reads per variant", title = "Debulk GFP- data") +
   theme_classic()
-```
 
-![](data_cleaning_files/figure-gfm/filterdebulk-1.png)<!-- -->
-
-``` r
 debulk_data_filter <- debulk_data %>%
   filter(padj <= debulk.fdrthresh)
 
 # fraction of variants in binned sort data out of all possible variants
 meanF_data_corrected %>% filter(type == "exp") %>% summarize(n_distinct(AA_var, REBC)) / (21^4*32)
-```
 
-    ##   n_distinct(AA_var, REBC)
-    ## 1                 0.248186
-
-``` r
 # fraction of variants in library out of all possible variants before filtering
 # (including variants in the debulk GFP- dataset and the filtered binned sort dataset)
 debulk_data %>%
@@ -1318,30 +995,18 @@ debulk_data %>%
   pull() %>%
   round(3) %>%
   paste("fraction of all possible variants before filtering:", .)
-```
 
-    ## [1] "fraction of all possible variants before filtering: 0.905"
-
-``` r
 # fraction of variants in the debulk GFP- data remaining after filtering
 debulk_data_filter %>% summarize(n_distinct(AA_var, REBC) /
   debulk_data %>% summarize(n_distinct(AA_var, REBC))) %>%
   pull() %>% round(3) %>%
   paste("fraction of debulk GFP- variants retained:", .)
-```
 
-    ## [1] "fraction of debulk GFP- variants retained: 0.559"
-
-``` r
 # number of variants in the debulk GFP- data remaining after filtering
 debulk_data_filter %>% summarize(n_distinct(AA_var, REBC)) %>%
   pull() %>% 
   paste("number of debulk GFP- variants retained:", .)
-```
 
-    ## [1] "number of debulk GFP- variants retained: 3117895"
-
-``` r
 # fraction of variants in debulk GFP- and binned sort datasets after filtering,
 # out of all possible variants
 debulk_data_filter %>% 
@@ -1350,11 +1015,7 @@ debulk_data_filter %>%
   summarize(n_distinct(AA_var, REBC) / (21^4*32)) %>%
   pull() %>% round(3) %>%
   paste("fraction of all possible variants after filtering:", .)
-```
 
-    ## [1] "fraction of all possible variants after filtering: 0.546"
-
-``` r
 # number of variants in debulk GFP- and binned sort datasets after filtering
 debulk_data_filter %>% 
   select(AA_var, REBC) %>%
@@ -1362,11 +1023,7 @@ debulk_data_filter %>%
   summarize(n_distinct(AA_var, REBC)) %>%
   pull() %>% 
   paste("number of variants after filtering:", .)
-```
 
-    ## [1] "number of variants after filtering: 3396938"
-
-``` r
 # number of non-nonsense variants retained after filtering
 debulk_data_filter %>% 
   select(AA_var, REBC) %>%
@@ -1375,11 +1032,7 @@ debulk_data_filter %>%
   summarize(n_distinct(AA_var, REBC)) %>%
   pull() %>% 
   paste("number of variants after filtering:", .)
-```
 
-    ## [1] "number of variants after filtering: 2785140"
-
-``` r
 # fraction of non-nonsense variants retained after filtering out of all possible
 debulk_data_filter %>% 
   select(AA_var, REBC) %>%
@@ -1388,11 +1041,8 @@ debulk_data_filter %>%
   summarize(n_distinct(AA_var, REBC) / (20^4*32)) %>%
   pull() %>% 
   paste("number of variants after filtering:", .)
-```
 
-    ## [1] "number of variants after filtering: 0.54397265625"
 
-``` r
 # export filtered data
 write.csv(debulk_data_filter,
           file = gzfile(file.path("..", "results", "cleaned_data", "debulk_data_filtered.csv.gz")))
