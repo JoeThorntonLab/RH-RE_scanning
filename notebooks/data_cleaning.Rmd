@@ -330,7 +330,7 @@ g <- meanF_data_filter %>%
   annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 4.94%") # histogram of SE(meanF)
 ```
 
-```{r plotfiltereddata, echo=FALSE, fig.width=11, fig.height=5}
+```{r plotfiltereddata, echo=FALSE, fig.width=6, fig.height=8}
 (a + b) / (c + d) / (e + f)
 ```
 
