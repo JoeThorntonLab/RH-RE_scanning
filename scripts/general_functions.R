@@ -35,8 +35,17 @@ REs[[5]] <- factor(REs[[1]],
 REBC_to_RE <- function(REBC, levels=1) {
   if(is.character(REBC)) {
     REBC <- sub("AncSR._REBC", "", REBC)
+    REBC <- sub("REBC", "", REBC)
     REBC <- as.integer(REBC)
   }
   RE <- REs[[levels]][REBC]
   return(RE)
+}
+
+# calculate coefficient of determination for a model fit to data
+calc_R2 <- function(pred, y) {
+  ssr <- sum((y - pred)^2)
+  y.mu <- mean(y)
+  sst <- sum((y - y.mu)^2)
+  return(1 - ssr/sst)
 }
