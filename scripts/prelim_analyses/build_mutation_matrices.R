@@ -296,6 +296,10 @@ save(aa_lib_AncSR1_trans_mat, file = file.path("Matrix2_AncSR1.rda"))
 save(aa_lib_AncSR1_wtrans_mat, file = file.path("Matrix3_AncSR1.rda"))
 save(aa_lib_AncSR1_swtrans_mat, file = file.path("Matrix4_AncSR1.rda"))
 save(aa_lib_AncSR1_nswtrans_mat, file = file.path("Matrix5_AncSR1.rda"))
+save(aa_lib_AncSR2_trans_mat, file = file.path("Matrix2_AncSR2.rda"))
+save(aa_lib_AncSR2_wtrans_mat, file = file.path("Matrix3_AncSR2.rda"))
+save(aa_lib_AncSR2_swtrans_mat, file = file.path("Matrix4_AncSR2.rda"))
+save(aa_lib_AncSR2_nswtrans_mat, file = file.path("Matrix5_AncSR2.rda"))
 
 
 ## how well does the weighted matrix capture the effects of a nucleotide matrix?
