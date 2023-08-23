@@ -143,14 +143,14 @@ aa_wadj_mat <- as(aa_wadj_mat, "sparseMatrix")
 # the number of nucleotide mutations that can convert between library variants
 
 # read in amino acid variants to be included in the network
-if(!file.exists(file.path("..", "results", "mutation_effects_model", 
+if(!file.exists(file.path("..", "..", "results", "mutation_effects_model", 
                           "meanF_data.rda"))) {
-  meanF_data <- read.csv(file.path("..", "results", "cleaned_data", 
+  meanF_data <- read.csv(file.path("..", "..", "results", "cleaned_data", 
                                    "meanF_data_corrected_NovaSeq.csv.gz"),
                          row.names = 1, stringsAsFactors = TRUE)
-  save(meanF_data, file = file.path("..", "results", "mutation_effects_model", 
+  save(meanF_data, file = file.path("..", "..", "results", "mutation_effects_model", 
                                     "meanF_data.rda"))
-} else load(file.path("..", "results", "mutation_effects_model", 
+} else load(file.path("..", "..", "results", "mutation_effects_model", 
                       "meanF_data.rda"))
 aa_lib_AncSR1 <- meanF_data %>% 
   filter(type == "exp", sig == "significant", bg == "AncSR1") %>% 
@@ -321,13 +321,52 @@ for(t in 1:100) {
     codon_tstep_mat[i,] <- sapply(AA, function(x) 
       sum(v1[colnames(v1) %in% names(GENETIC_CODE)[GENETIC_CODE == x]]))
   }
+  aa_tstep_mat <- mat_exp(aa_wtrans_mat, t)
   
-  codon_waa_cor[t] <- cor(as.vector(codon_tstep_mat),
-                          as.vector(mat_exp(aa_wtrans_mat, t)))
+  codon_waa_cor[t] <- cor(as.vector(codon_tstep_mat), as.vector(aa_tstep_mat))
 }
 
-plot(1:50, codon_waa_cor[1:50], type = 'l', xlab = "steps", ylab = "correlation", 
-     main = "nt transition matrix vs. weighted aa transition matrix")
+plot(1:20, codon_waa_cor[1:20], type = 'l', xlab = "steps", ylab = "correlation", 
+     main = "nt transition matrix vs.\nstart and end codon weighted aa transition matrix")
+
+# partially weighted amino acid matrix
+aa_pwtrans_mat <- matrix(nrow = length(AA), ncol = length(AA))
+rownames(aa_pwtrans_mat) <- AA
+colnames(aa_pwtrans_mat) <- AA
+
+codons <- lapply(AA, function(x) names(GENETIC_CODE)[GENETIC_CODE == x])
+for(i in 1:length(AA)) {
+  aaslice <- codon_adj_mat[rownames(codon_adj_mat) %in% codons[[i]], , drop = FALSE]
+  ncodons <- lapply(1:length(AA), function(x) aaslice[,colnames(aaslice) %in% codons[[x]]])
+  ncodons <- sapply(ncodons, function(x) sum(colSums(as.matrix(x)) > 0))
+  aa_pwtrans_mat[i,] <- ncodons / sum(ncodons)
+}
+
+codon_pwaa_cor <- numeric(length=100)
+
+for(t in 1:100) {
+  codon_trans_mat <- t(apply(codon_adj_mat, 1, function(x) x / sum(x)))
+  aa_wtrans_mat <- t(apply(aa_wadj_mat, 1, function(x) x / sum(x)))
+  codon_tstep_mat <- matrix(nrow = length(AA), ncol = length(AA))
+  colnames(codon_tstep_mat) <- AA
+  rownames(codon_tstep_mat) <- AA
+  
+  
+  for(i in 1:length(AA)) {
+    codons <- names(GENETIC_CODE)[GENETIC_CODE == AA[i]]
+    v0 <- as.numeric(rownames(codon_trans_mat) %in% codons)
+    v0 <- v0 / sum(v0)
+    v1 <- v0 %*% mat_exp(codon_trans_mat, t)
+    codon_tstep_mat[i,] <- sapply(AA, function(x) 
+      sum(v1[colnames(v1) %in% names(GENETIC_CODE)[GENETIC_CODE == x]]))
+  }
+  aa_tstep_mat <- mat_exp(aa_pwtrans_mat, t)
+  
+  codon_pwaa_cor[t] <- cor(as.vector(codon_tstep_mat), as.vector(aa_tstep_mat))
+}
+
+plot(1:20, codon_pwaa_cor[1:20], type = 'l', xlab = "steps", ylab = "correlation", 
+     main = "nt transition matrix vs.\nend codon weighted aa transition matrix")
 
 
 # how do the stationary distributions of each matrix compare?
