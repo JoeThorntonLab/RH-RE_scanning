@@ -258,8 +258,8 @@ print(RE_palette)
 print(RE_palette_legend)
 
 # generate gradient for promiscuous genotypes
-promiscuity_palette <- matrix(rgb(seq(1, 0, length.out=15), seq(1, 0, length.out=15), 
-                       seq(1, 0, length.out=15)), nrow = 1)
+promiscuity_palette <- matrix(rgb(seq(1, 0, length.out=10), seq(1, 0, length.out=10), 
+                       seq(1, 0, length.out=10)), nrow = 1)
 grid.newpage()
 grid.raster(promiscuity_palette, interpolate=FALSE)
 print(promiscuity_palette)
