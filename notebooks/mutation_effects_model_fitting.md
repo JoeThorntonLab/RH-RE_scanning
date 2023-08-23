@@ -226,9 +226,9 @@ mutfreq <- data.frame(mut = colnames(AncSR1_full_mat),
 mutfreq %>%
   ggplot(aes(x = order, y = nvars, fill = background)) +
   geom_boxplot() +
-  scale_y_log10() +
-  labs(title = "Mutant state frequencies", x = "order", 
-       y = "number of variants") +
+  scale_y_continuous(trans = log10plus1, labels = label_comma()) +
+  labs(title = "Mutant state frequencies", x = "State combination", 
+       y = "Number of variants + 1") +
   theme_light() +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
         text = element_text(size = 14))
@@ -397,10 +397,12 @@ a <- data.frame(geneticscore = AncSR1_UL_fit_gs,
                 fluorescence = y.AncSR1) %>%
   ggplot(aes(x = geneticscore, y = fluorescence)) +
   geom_bin2d(bins = 50) +
-  scale_fill_viridis(trans = "log") +
+  scale_fill_viridis(trans = log10plus1, name = "Variants + 1",
+                     labels = label_comma()) +
   geom_function(fun = logistic, args = list(L = AncSR1.L, U = AncSR1.U), 
                 color = "red") +
-  labs(x = "genetic score", y = "fluorescence", title = "AncSR1 LU fit") +
+  labs(x = "Genetic score", y = "Observed fluorescence", 
+       title = "AncSR1 LU fit") +
   annotate(geom = "text", x = Inf, y = AncSR1.L + 0.1, 
            label = bquote(R^2 == .(round(AncSR1_UL_R2, 2))), 
            vjust = 0, hjust = 1) +
@@ -410,10 +412,12 @@ b <- data.frame(geneticscore = AncSR2_UL_fit_gs,
                 fluorescence = y.AncSR2) %>%
   ggplot(aes(x = geneticscore, y = fluorescence)) +
   geom_bin2d(bins = 50) +
-  scale_fill_viridis(trans = "log") +
+  scale_fill_viridis(trans = log10plus1, name = "Variants + 1",
+                     labels = label_comma()) +
   geom_function(fun = logistic, args = list(L = AncSR2.L, U = AncSR2.U), 
                 color = "red") +
-  labs(x = "genetic score", y = "fluorescence", title = "AncSR2 LU fit") +
+  labs(x = "Genetic score", y = "Observed fluorescence", 
+       title = "AncSR2 LU fit") +
   annotate(geom = "text", x = Inf, y = AncSR2.L + 0.1, 
            label = bquote(R^2 == .(round(AncSR2_UL_R2, 2))), 
            vjust = 0, hjust = 1) +
@@ -645,18 +649,12 @@ AncSR1.mse <- data.frame(lambda = AncSR1_path,
                          fold1 = AncSR1.fold1.mse,
                          fold2 = AncSR1.fold2.mse)
 
-# get lambda that minimizes mean MSE
-AncSR1.minlambda.i <- which(AncSR1.mse$mean == min(AncSR1.mse$mean))
-AncSR1.minlambda <- AncSR1_path[AncSR1.minlambda.i]
-
 # plot lambda vs. MSE
 AncSR1.mse %>%
   select(lambda, fold1, fold2) %>%
   pivot_longer(2:3, names_to = "fold", values_to = "MSE") %>%
   ggplot(aes(x = log(lambda), y = MSE, color = fold)) +
   geom_point() +
-  geom_vline(xintercept = log(AncSR1.minlambda), linetype = 2, 
-             color = "gray30") +
   labs(title = "AncSR1 prediction error", x = bquote(log(lambda)),
        y = "Mean squared error") +
   theme_classic()
@@ -678,18 +676,12 @@ AncSR2.mse <- data.frame(lambda = AncSR2_path,
                          fold1 = AncSR2.fold1.mse,
                          fold2 = AncSR2.fold2.mse)
 
-# get lambda that minimizes mean MSE
-AncSR2.minlambda.i <- which(AncSR2.mse$mean == min(AncSR2.mse$mean))
-AncSR2.minlambda <- AncSR2_path[AncSR2.minlambda.i]
-
 # plot lambda vs. MSE
 AncSR2.mse %>%
   select(lambda, fold1, fold2) %>%
   pivot_longer(2:3, names_to = "fold", values_to = "MSE") %>%
   ggplot(aes(x = log(lambda), y = MSE, color = fold)) +
   geom_point() +
-  geom_vline(xintercept = log(AncSR2.minlambda), linetype = 2, 
-             color = "gray30") +
   labs(title = "AncSR2 prediction error", x = bquote(log(lambda)), 
        y = "Mean squared error") +
   theme_classic()
@@ -1257,10 +1249,15 @@ AncSR1.mse %>%
   ggplot(aes(x = log(lambda))) +
   geom_point(data = . %>% filter(is.na(mean)), aes(y = mse, color = fold)) +
   geom_errorbar(aes(y = mean, ymin = mean - sd, ymax = mean + sd)) +
-  geom_point(aes(y = mean), color = "red") +
+  geom_point(aes(y = mean, color = "10-fold mean")) +
   geom_vline(xintercept = log(AncSR1.lambdamin), linetype = 2, color = "gray30") +
   labs(title = "AncSR1 prediction error", 
        x = bquote(log(lambda)), y = "Mean squared error") +
+  scale_color_manual(name = "fold",
+                     breaks = c("fold1", "fold2", "10-fold mean"),
+                     values = c("fold1" = hue_pal()(2)[1],
+                                "fold2" = hue_pal()(2)[2],
+                                "10-fold mean" = "red")) +
   theme_classic()
 ```
 
@@ -1273,10 +1270,15 @@ AncSR2.mse %>%
   ggplot(aes(x = log(lambda))) +
   geom_point(data = . %>% filter(is.na(mean)), aes(y = mse, color = fold)) +
   geom_errorbar(aes(y = mean, ymin = mean - sd, ymax = mean + sd)) +
-  geom_point(aes(y = mean), color = "red") +
+  geom_point(aes(y = mean, color = "10-fold mean")) +
   geom_vline(xintercept = log(AncSR2.lambdamin), linetype = 2, color = "gray30") +
   labs(title = "AncSR2 prediction error", 
        x = bquote(log(lambda)), y = "Mean squared error") +
+  scale_color_manual(name = "fold",
+                     breaks = c("fold1", "fold2", "10-fold mean"),
+                     values = c("fold1" = hue_pal()(2)[1],
+                                "fold2" = hue_pal()(2)[2],
+                                "10-fold mean" = "red")) +
   theme_classic()
 ```
 
@@ -1340,13 +1342,14 @@ lapply(1:10, function(x)
   geom_abline(slope = 1, intercept = 0, color = "red") +
   geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
   geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
-  scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
+  scale_fill_viridis(trans = log10plus1, limits = c(1, 160000),
+                     labels = label_comma(), name = "Variants + 1") +
   labs(title = bquote("AncSR1 out-of-sample fits" ~ 
                         (R^2 == .(round(mean(AncSR1.cv.pred.R2), 2))*''%+-%''*
-                         .(round(sd(AncSR1.cv.pred.R2)/sqrt(10), 2)) ~
+                         .(round(sd(AncSR1.cv.pred.R2), 2)) ~
                            "," ~ {R^2}[active] == 
                            .(round(mean(AncSR1.cv.pred.R2.active), 2))*''%+-%''*
-                         .(round(sd(AncSR1.cv.pred.R2.active)/sqrt(10), 2)))), 
+                         .(round(sd(AncSR1.cv.pred.R2.active), 2)))), 
        x = "Predicted fluorescence", y = "Observed fluorescence") +
   facet_wrap(facets = vars(fold)) +
   theme_classic()
@@ -1365,13 +1368,14 @@ lapply(1:10, function(x)
   geom_abline(slope = 1, intercept = 0, color = "red") +
   geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
   geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
-  scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
+  scale_fill_viridis(trans = log10plus1, limits = c(1, 160000),
+                     labels = label_comma(), name = "Variants + 1") +
   labs(title = bquote("AncSR2 out-of-sample fits" ~ 
                         (R^2 == .(round(mean(AncSR2.cv.pred.R2), 2))*''%+-%''*
                          .(round(sd(AncSR2.cv.pred.R2), 2)) ~
                            "," ~ {R^2}[active] == 
-                           .(round(mean(AncSR2.cv.pred.R2.active)/sqrt(10), 2))*''%+-%''*
-                         .(round(sd(AncSR2.cv.pred.R2.active)/sqrt(10), 2)))), 
+                           .(round(mean(AncSR2.cv.pred.R2.active), 2))*''%+-%''*
+                         .(round(sd(AncSR2.cv.pred.R2.active), 2)))), 
        x = "Predicted fluorescence", y = "Observed fluorescence") +
   facet_wrap(facets = vars(fold)) +
   theme_classic()
@@ -1382,86 +1386,78 @@ lapply(1:10, function(x)
 ``` r
 # calculate number of false positives and false negatives for calling variants 
 # more active than WT AncSR2:SRE1
-AncSR1.false.negative <- sapply(1:10, function(x) 
+AncSR1.FN <- sapply(1:10, function(x) 
   sum(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i] < AncSR2.SRE1.f & 
         y.AncSR1[AncSR1_foldid == x] >= AncSR2.SRE1.f))
-AncSR1.false.negative.rate <- sapply(1:10, function(x) 
-  AncSR1.false.negative[x] / 
-    sum(y.AncSR1[AncSR1_foldid == x] >= AncSR2.SRE1.f))
-AncSR1.false.positive <- sapply(1:10, function(x)
+AncSR1.FN.rate <- sapply(1:10, function(x) 
+  AncSR1.FN[x] / sum(y.AncSR1[AncSR1_foldid == x] >= AncSR2.SRE1.f))
+AncSR1.FP <- sapply(1:10, function(x)
   sum(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i] >= AncSR2.SRE1.f & 
         y.AncSR1[AncSR1_foldid == x] < AncSR2.SRE1.f))
-AncSR1.false.positive.rate <- sapply(1:10, function(x)
-  AncSR1.false.positive[x] / 
-    sum(y.AncSR1[AncSR1_foldid == x] < AncSR2.SRE1.f))
+AncSR1.FP.rate <- sapply(1:10, function(x)
+  AncSR1.FP[x] / sum(y.AncSR1[AncSR1_foldid == x] < AncSR2.SRE1.f))
 
-AncSR2.false.negative <- sapply(1:10, function(x) 
+AncSR2.FN <- sapply(1:10, function(x) 
   sum(AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i] < AncSR2.SRE1.f & 
         y.AncSR2[AncSR2_foldid == x] >= AncSR2.SRE1.f))
-AncSR2.false.negative.rate <- sapply(1:10, function(x) 
-  AncSR2.false.negative[x] / 
-    sum(y.AncSR2[AncSR2_foldid == x] >= AncSR2.SRE1.f))
-AncSR2.false.positive <- sapply(1:10, function(x) 
+AncSR2.FN.rate <- sapply(1:10, function(x) 
+  AncSR2.FN[x] / sum(y.AncSR2[AncSR2_foldid == x] >= AncSR2.SRE1.f))
+AncSR2.FP <- sapply(1:10, function(x) 
   sum(AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i] >= AncSR2.SRE1.f & 
         y.AncSR2[AncSR2_foldid == x] < AncSR2.SRE1.f))
-AncSR2.false.positive.rate <- sapply(1:10, function(x)
-  AncSR2.false.positive[x] /
-    sum(y.AncSR2[AncSR2_foldid == x] < AncSR2.SRE1.f))
+AncSR2.FP.rate <- sapply(1:10, function(x)
+  AncSR2.FP[x] / sum(y.AncSR2[AncSR2_foldid == x] < AncSR2.SRE1.f))
 
-print(paste("AncSR1 false negatives:", sum(AncSR1.false.negative)))
+print(paste("AncSR1 false negatives:", sum(AncSR1.FN)))
 ```
 
     ## [1] "AncSR1 false negatives: 99"
 
 ``` r
-print(paste("AncSR1 false positives:", sum(AncSR1.false.positive)))
+print(paste("AncSR1 false positives:", sum(AncSR1.FP)))
 ```
 
     ## [1] "AncSR1 false positives: 10"
 
 ``` r
-print(paste("AncSR2 false negatives:", sum(AncSR2.false.negative)))
+print(paste("AncSR2 false negatives:", sum(AncSR2.FN)))
 ```
 
     ## [1] "AncSR2 false negatives: 692"
 
 ``` r
-print(paste("AncSR2 false positives:", sum(AncSR2.false.positive)))
+print(paste("AncSR2 false positives:", sum(AncSR2.FP)))
 ```
 
     ## [1] "AncSR2 false positives: 348"
 
 ``` r
-print(paste("AncSR1 false negative rate:", 
-            round(mean(AncSR1.false.negative.rate), 2),
-            "+/-", round(sd(AncSR1.false.negative.rate)/sqrt(10), 2)))
+print(paste("AncSR1 false negative rate:", round(mean(AncSR1.FN.rate), 2),
+            "+/-", round(sd(AncSR1.FN.rate), 2)))
 ```
 
-    ## [1] "AncSR1 false negative rate: 0.66 +/- 0.02"
+    ## [1] "AncSR1 false negative rate: 0.66 +/- 0.08"
 
 ``` r
-print(paste("AncSR1 false positive rate:",
-            round(mean(AncSR1.false.positive.rate), 7),
-            "+/-", round(sd(AncSR1.false.positive.rate)/sqrt(10), 7)))
+print(paste("AncSR1 false positive rate:", round(mean(AncSR1.FP.rate), 7),
+            "+/-", round(sd(AncSR1.FP.rate), 7)))
 ```
 
-    ## [1] "AncSR1 false positive rate: 6.7e-06 +/- 1.7e-06"
+    ## [1] "AncSR1 false positive rate: 6.7e-06 +/- 5.5e-06"
 
 ``` r
-print(paste("AncSR2 false negative rate:", 
-            round(mean(AncSR2.false.negative.rate), 2),
-            "+/-", round(sd(AncSR2.false.negative.rate)/sqrt(10), 2)))
+print(paste("AncSR2 false negative rate:", round(mean(AncSR2.FN.rate), 2),
+            "+/-", round(sd(AncSR2.FN.rate), 2)))
 ```
 
-    ## [1] "AncSR2 false negative rate: 0.21 +/- 0.01"
+    ## [1] "AncSR2 false negative rate: 0.21 +/- 0.02"
 
 ``` r
-print(paste("AncSR2 false positive rate:",
-            round(mean(AncSR2.false.positive.rate), 5),
-            "+/-", round(sd(AncSR2.false.positive.rate)/sqrt(10), 5)))
+print(paste("AncSR2 false positive rate:", round(mean(AncSR2.FP.rate), 5),
+            "+/-", round(sd(AncSR2.FP.rate), 5)))
 ```
 
-    ## [1] "AncSR2 false positive rate: 0.00027 +/- 1e-05"
+    ## [1] "AncSR2 false positive rate: 0.00027 +/- 3e-05"
 
 ``` r
 # # plot residuals as a function of fitted fluorescence
@@ -1619,7 +1615,8 @@ data.frame(gs = full.gs.final.AncSR1,
   geom_bin_2d() +
   geom_function(fun = logistic, args = list(L = AncSR1.L, U = AncSR1.U), 
                 color = "red") +
-  scale_fill_viridis(trans = "log") +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Variants + 1") +
   labs(title = bquote("AncSR1 final predictions" ~ 
                         (R^2 == .(round(AncSR1.final.R2, 2)) ~ "," ~
                         {R^2}[active] == .(round(AncSR1.active.final.R2, 2)))), 
@@ -1636,7 +1633,8 @@ data.frame(pred = full.pred.final.AncSR1,
   ggplot(aes(x = pred, y = y)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
-  scale_fill_viridis(trans = "log") +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Variants + 1") +
   labs(title = bquote("AncSR1 final predictions" ~ 
                         (R^2 == .(round(AncSR1.final.R2, 2)) ~ "," ~
                         {R^2}[active] == .(round(AncSR1.active.final.R2, 2)))), 
@@ -1663,7 +1661,8 @@ data.frame(gs = full.gs.final.AncSR2,
   geom_bin_2d() +
   geom_function(fun = logistic, args = list(L = AncSR2.L, U = AncSR2.U), 
                 color = "red") +
-  scale_fill_viridis(trans = "log") +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Variants + 1") +
   labs(title = bquote("AncSR2 final predictions" ~ 
                         (R^2 == .(round(AncSR2.final.R2, 2)) ~ "," ~
                         {R^2}[active] == .(round(AncSR2.active.final.R2, 2)))), 
@@ -1680,7 +1679,8 @@ data.frame(pred = full.pred.final.AncSR2,
   ggplot(aes(x = pred, y = y)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
-  scale_fill_viridis(trans = "log") +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Variants + 1") +
   labs(title = bquote("AncSR2 final predictions" ~ 
                         (R^2 == .(round(AncSR2.final.R2, 2)) ~ "," ~
                         {R^2}[active] == .(round(AncSR2.active.final.R2, 2)))), 
@@ -1737,8 +1737,7 @@ if(!file.exists(file.path(results_dir, "AncSR2_missing_full_mat.rda"))) {
 } else load(file.path(results_dir, "AncSR2_missing_full_mat.rda"))
 ```
 
-Now predict the fluorescence for the missing genotypes and export
-predictions.
+Now predict the fluorescence for the missing genotypes.
 
 ``` r
 # genetic scores and fluorescence predictions for missing genotypes
@@ -1767,48 +1766,215 @@ if(!file.exists(file.path(results_dir, "AncSR2.missing.pred.rda"))) {
   load(file.path(results_dir, "AncSR2.missing.gs.rda"))
   load(file.path(results_dir, "AncSR2.missing.pred.rda"))
 }
+```
 
-# combine predictions with observed data
-AncSR1_complete_data <- missing_vars_AncSR1 %>%
-  mutate(avg_meanF = AncSR1.missing.pred, type = "predicted") %>%
-  rbind(AncSR1_model_data) %>%
+Compute p-values for calling missing variants active vs. inactive
+(greater than vs. not greater than nonsense variants, as in
+`data_cleaning.Rmd`).
+
+``` r
+AncSR1_missing_data <- missing_vars_AncSR1 %>%
+  mutate(avg_meanF = AncSR1.missing.pred, type = "predicted")
+AncSR2_missing_data <- missing_vars_AncSR2 %>%
+  mutate(avg_meanF = AncSR2.missing.pred, type = "predicted")
+
+if(!file.exists(file.path(results_dir, "AncSR1_active_p.rda"))) {
+  # compute p-value for calling variants active 
+  # (greater fluorescence than nonsense variants)
+  fstop <- meanF_data %>% 
+    filter(type == "exp", bg == "AncSR1", stop == TRUE) %>% 
+    pull(avg_meanF)
+  nstop <- length(fstop)
+    
+  # compute fraction of nonsense variants whose meanF is above that of the test variant;
+  # perform test for all non-nonsense variants
+  p <- sapply(AncSR1_missing_data$avg_meanF, function(x) sum(fstop > x) / nstop)
+  save(p, file = file.path(results_dir, "AncSR1_active_p.rda"))
+} else load(file.path(results_dir, "AncSR1_active_p.rda"))
+
+# FDR correction
+padj <- p.adjust(p, method = "fdr")
+
+AncSR1_missing_data <- AncSR1_missing_data %>%
+  mutate(p = p, padj = padj, 
+         sig = case_when(padj <= 0.1 ~ "significant", 
+                         padj > 0.1 ~ "not significant") %>%
+           factor(levels = c("not significant", "significant", "nonsense")))
+
+if(!file.exists(file.path(results_dir, "AncSR2_active_p.rda"))) {
+  # compute p-value for calling variants active 
+  # (greater fluorescence than nonsense variants)
+  fstop <- meanF_data %>% 
+    filter(type == "exp", bg == "AncSR2", stop == TRUE) %>% 
+    pull(avg_meanF)
+  nstop <- length(fstop)
+    
+  # compute fraction of nonsense variants whose meanF is above that of the test variant;
+  # perform test for all non-nonsense variants
+  p <- sapply(AncSR2_missing_data$avg_meanF, function(x) sum(fstop > x) / nstop)
+  save(p, file = file.path(results_dir, "AncSR2_active_p.rda"))
+} else load(file.path(results_dir, "AncSR2_active_p.rda"))
+
+# FDR correction
+padj <- p.adjust(p, method = "fdr")
+
+AncSR2_missing_data <- AncSR2_missing_data %>%
+  mutate(p = p, padj = padj, 
+         sig = case_when(padj <= 0.1 ~ "significant", 
+                         padj > 0.1 ~ "not significant") %>%
+           factor(levels = c("not significant", "significant", "nonsense")))
+```
+
+Estimate prediction error for each missing variant by computing RMSE as
+a function of estimated fluorescence for the out-of-sample
+cross-validation predictions.
+
+``` r
+# get residuals from CV fits
+AncSR1.cv.residuals <- lapply(1:10, function(x)
+   y.AncSR1[AncSR1_foldid == x] - AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i])
+AncSR2.cv.residuals <- lapply(1:10, function(x)
+   y.AncSR2[AncSR2_foldid == x] - AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i])
+# concatenate residuals across CV folds
+AncSR1.cv.residuals.cat <- unlist(AncSR1.cv.residuals, use.names = FALSE)
+AncSR2.cv.residuals.cat <- unlist(AncSR2.cv.residuals, use.names = FALSE)
+# concatenate predictions across CV folds
+AncSR1.cv.pred.cat <- unlist(lapply(1:10, function(x) 
+  AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i]), use.names = FALSE)
+AncSR2.cv.pred.cat <- unlist(lapply(1:10, function(x) 
+  AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i]), use.names = FALSE)
+
+# plot absolute value of residual as a function of fluorescence
+# red line indicates mean abs(residual) as a function of predicted fluorescence
+breaks = seq(-4.5, -2.7, 0.2)  # bin breaks for computing mean abs(residual)
+data.frame(res = AncSR1.cv.residuals.cat,
+           pred = AncSR1.cv.pred.cat) %>% 
+  ggplot(aes(x = pred, y = abs(res))) +
+  geom_bin_2d() +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Variants + 1") +
+  stat_summary_bin(geom = "line", fun = "mean", breaks = breaks, color = "red") +
+  labs(title = "AncSR1 out-of-sample residuals", x = "Predicted fluorescence",
+       y = "abs(residual)") +
+  theme_classic()
+```
+
+![](mutation_effects_model_fitting_files/figure-gfm/RMSE-1.png)<!-- -->
+
+``` r
+data.frame(res = AncSR2.cv.residuals.cat,
+           pred = AncSR2.cv.pred.cat) %>% 
+  ggplot(aes(x = pred, y = abs(res))) +
+  geom_bin_2d() +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Variants + 1") +
+  stat_summary_bin(geom = "line", fun = "mean", breaks = breaks, color = "red") +
+  labs(title = "AncSR2 out-of-sample residuals", x = "Predicted fluorescence",
+       y = "abs(residual)") +
+  theme_classic()
+```
+
+![](mutation_effects_model_fitting_files/figure-gfm/RMSE-2.png)<!-- -->
+
+``` r
+# estimate RMSE as a function of predicted fluorescence for each model
+AncSR1.rmse <- data.frame(res = AncSR1.cv.residuals.cat,
+                          predF = AncSR1.cv.pred.cat) %>%
+  mutate(bin = cut(predF, breaks = breaks)) %>%
+  group_by(bin) %>%
+  summarize(rmse = sqrt(mean(res^2)))
+AncSR2.rmse <- data.frame(res = AncSR2.cv.residuals.cat,
+                          predF = AncSR2.cv.pred.cat) %>%
+  mutate(bin = cut(predF, breaks = breaks)) %>%
+  group_by(bin) %>%
+  summarize(rmse = sqrt(mean(res^2)))
+
+# for each missing variant, assign the estimated RMSE based on predicted
+# predicted fluorescence as "sd" of fluorescence (for joining with observed data)
+AncSR1_missing_data <- AncSR1_missing_data %>%
+  mutate(bin = cut(avg_meanF, breaks = breaks)) %>%
+  left_join(AncSR1.rmse, by = "bin") %>% 
+  select(-bin) %>%
+  dplyr::rename(sd_meanF = "rmse")
+AncSR2_missing_data <- AncSR2_missing_data %>%
+  mutate(bin = cut(avg_meanF, breaks = breaks)) %>%
+  left_join(AncSR2.rmse, by = "bin") %>% 
+  select(-bin) %>%
+  dplyr::rename(sd_meanF = "rmse")
+```
+
+Combine predictions for missing variants with data for observed variants
+and export complete datasets.
+
+``` r
+# combine predictions with observed data and add back per-replicate meanF
+AncSR1_complete_data <- AncSR1_model_data %>%
+  left_join(meanF_data %>%
+              filter(type == "exp", bg == "AncSR1") %>%
+              select(AA_var, RE, meanF_REP1:meanF_REP4, 
+                     avg_meanF, sd_meanF, p:sig)) %>%
+  bind_rows(mutate(AncSR1_missing_data, type = "predicted")) %>%
   arrange(AA_var, RE)
-AncSR2_complete_data <- missing_vars_AncSR2 %>%
-  mutate(avg_meanF = AncSR2.missing.pred, type = "predicted") %>%
-  rbind(AncSR2_model_data) %>%
+
+AncSR2_complete_data <- AncSR2_model_data %>%
+  left_join(meanF_data %>%
+              filter(type == "exp", bg == "AncSR2") %>%
+              select(AA_var, RE, meanF_REP1:meanF_REP3, 
+                     avg_meanF, sd_meanF, p:sig)) %>%
+  bind_rows(mutate(AncSR2_missing_data, type = "predicted")) %>%
   arrange(AA_var, RE)
+
+# assign new column "active" for whether variants are significantly more
+# fluorescent that nonsense variants ("debulk" variants are automatically not
+# active)
+AncSR1_complete_data <- AncSR1_complete_data %>%
+  mutate(active = ifelse(sig == "significant" & !is.na(sig), TRUE, FALSE)) %>%
+  select(-(p:sig))
+AncSR2_complete_data <- AncSR2_complete_data %>%
+  mutate(active = ifelse(sig == "significant" & !is.na(sig), TRUE, FALSE)) %>%
+  select(-(p:sig))
 
 # export complete datasets
 write.csv(AncSR1_complete_data, 
-          file = file.path(results_dir, "AncSR1_complete_data.csv"))
+          file = gzfile(file.path(results_dir, "AncSR1_complete_data.csv.gz")),
+          row.names = FALSE)
 write.csv(AncSR2_complete_data, 
-          file = file.path(results_dir, "AncSR2_complete_data.csv"))
+          file = gzfile(file.path(results_dir, "AncSR2_complete_data.csv.gz")),
+          row.names = FALSE)
+```
 
+Analyze the fluorescence distributions of the predicted vs. observed
+data, as well as the number of new functional variants predicted by the
+model.
+
+``` r
 # plot histogram of true and predicted fluorescences
 AncSR1_complete_data %>%
   mutate(type = factor(type, levels = c("predicted", "debulk", "binned"))) %>%
   ggplot(aes(x = avg_meanF, fill = type)) +
   geom_histogram() +
-  scale_y_log10() +
+  scale_y_continuous(trans = log10plus1, 
+                     name = "Count + 1") +
   geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
   labs(title = "AncSR1 fluorescence", x = "Fluorescence") +
   theme_classic()
 ```
 
-![](mutation_effects_model_fitting_files/figure-gfm/predictmissing-1.png)<!-- -->
+![](mutation_effects_model_fitting_files/figure-gfm/analyzemissing-1.png)<!-- -->
 
 ``` r
 AncSR2_complete_data %>%
   mutate(type = factor(type, levels = c("predicted", "debulk", "binned"))) %>%
   ggplot(aes(x = avg_meanF, fill = type)) +
   geom_histogram() +
-  scale_y_log10() +
+  scale_y_continuous(trans = log10plus1, 
+                     name = "Count + 1") +
   geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
   labs(title = "AncSR2 fluorescence", x = "Fluorescence") +
   theme_classic()
 ```
 
-![](mutation_effects_model_fitting_files/figure-gfm/predictmissing-2.png)<!-- -->
+![](mutation_effects_model_fitting_files/figure-gfm/analyzemissing-2.png)<!-- -->
 
 ``` r
 # plot number of predicted and observed variants with greater fluorescence than 
@@ -1825,7 +1991,7 @@ AncSR1_complete_data %>%
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
 ```
 
-![](mutation_effects_model_fitting_files/figure-gfm/predictmissing-3.png)<!-- -->
+![](mutation_effects_model_fitting_files/figure-gfm/analyzemissing-3.png)<!-- -->
 
 ``` r
 AncSR2_complete_data %>%
@@ -1840,114 +2006,243 @@ AncSR2_complete_data %>%
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
 ```
 
-![](mutation_effects_model_fitting_files/figure-gfm/predictmissing-4.png)<!-- -->
+![](mutation_effects_model_fitting_files/figure-gfm/analyzemissing-4.png)<!-- -->
 
 ``` r
 # print number of predicted and observed variants with greater fluorescence than 
 # WT AncSR2:SRE1 on each RE
-AncSR1_complete_data %>%
-  filter(avg_meanF > AncSR2.SRE1.f) %>%
-  group_by(RE, type) %>%
-  count() %>% 
-  pivot_wider(names_from = type, values_from = n) %>%
-  replace_na(list(predicted = 0)) %>%
-  print()
-```
-
-    ## # A tibble: 10 × 3
-    ## # Groups:   RE [10]
-    ##    RE        binned predicted
-    ##    <fct>      <int>     <int>
-    ##  1 AC            14         0
-    ##  2 AT            30         5
-    ##  3 CA            13         0
-    ##  4 CG             2         0
-    ##  5 ERE (GT)      55        17
-    ##  6 GG             2         2
-    ##  7 SRE1 (AA)     28         6
-    ##  8 SRE2 (GA)      1         0
-    ##  9 TA             7         4
-    ## 10 TT             1         2
-
-``` r
-# sum across REs
-AncSR1_complete_data %>%
-  filter(avg_meanF > AncSR2.SRE1.f) %>%
-  group_by(RE, type) %>%
-  count() %>% 
-  pivot_wider(names_from = type, values_from = n) %>%
-  replace_na(list(predicted = 0)) %>%
-  ungroup %>%
-  summarize(binned = sum(binned), predicted = sum(predicted)) %>%
-  print()
-```
-
-    ## # A tibble: 1 × 2
-    ##   binned predicted
-    ##    <int>     <int>
-    ## 1    153        36
-
-``` r
-AncSR2_complete_data %>%
-  filter(avg_meanF > AncSR2.SRE1.f) %>%
+AncSR1_complete_table <- AncSR1_complete_data %>%
+  filter(avg_meanF >= AncSR2.SRE1.f) %>%
   group_by(RE, type) %>%
   count() %>% 
   pivot_wider(names_from = type, values_from = n) %>%
   replace_na(list(binned = 0, predicted = 0)) %>%
-  print()
+  dplyr::rename(observed = binned) %>%
+  mutate(total = observed + predicted, prop.pred = predicted / total)
+knitr::kable(mutate(AncSR1_complete_table, prop.pred = round(prop.pred, 3)), 
+             caption = "AncSR1 functional variants")
 ```
 
-    ## # A tibble: 16 × 3
-    ## # Groups:   RE [16]
-    ##    RE        binned predicted
-    ##    <fct>      <int>     <int>
-    ##  1 AC           176        37
-    ##  2 AG           157        33
-    ##  3 AT           361        56
-    ##  4 CA           500        56
-    ##  5 CC             0         3
-    ##  6 CG            92         5
-    ##  7 CT            90        15
-    ##  8 ERE (GT)     152        31
-    ##  9 GC            81        18
-    ## 10 GG            22         3
-    ## 11 SRE1 (AA)   1078       129
-    ## 12 SRE2 (GA)    208        37
-    ## 13 TA           240       173
-    ## 14 TC             6         1
-    ## 15 TG            34        16
-    ## 16 TT           105        67
+| RE        | observed | predicted | total | prop.pred |
+|:----------|---------:|----------:|------:|----------:|
+| AC        |       14 |         0 |    14 |     0.000 |
+| AT        |       30 |         5 |    35 |     0.143 |
+| CA        |       13 |         0 |    13 |     0.000 |
+| CG        |        2 |         0 |     2 |     0.000 |
+| ERE (GT)  |       55 |        17 |    72 |     0.236 |
+| GG        |        2 |         2 |     4 |     0.500 |
+| SRE1 (AA) |       28 |         6 |    34 |     0.176 |
+| SRE2 (GA) |        1 |         0 |     1 |     0.000 |
+| TA        |        7 |         4 |    11 |     0.364 |
+| TT        |        1 |         2 |     3 |     0.667 |
+
+AncSR1 functional variants
 
 ``` r
 # sum across REs
-AncSR2_complete_data %>%
-  filter(avg_meanF > AncSR2.SRE1.f) %>%
+AncSR1_complete_table %>%
+  ungroup %>%
+  summarize(observed = sum(observed), predicted = sum(predicted),
+            total = sum(total), prop.pred = predicted / total) %>%
+  mutate(prop.pred = round(prop.pred, 3)) %>%
+  knitr::kable(caption = "AncSR1 functional variants (total)")
+```
+
+| observed | predicted | total | prop.pred |
+|---------:|----------:|------:|----------:|
+|      153 |        36 |   189 |      0.19 |
+
+AncSR1 functional variants (total)
+
+``` r
+AncSR2_complete_table <- AncSR2_complete_data %>%
+  filter(avg_meanF >= AncSR2.SRE1.f) %>%
   group_by(RE, type) %>%
   count() %>% 
   pivot_wider(names_from = type, values_from = n) %>%
   replace_na(list(binned = 0, predicted = 0)) %>%
-  ungroup %>%
-  summarize(binned = sum(binned), predicted = sum(predicted)) %>%
-  print()
+  dplyr::rename(observed = binned) %>%
+  mutate(total = observed + predicted, prop.pred = predicted / total)
+knitr::kable(mutate(AncSR2_complete_table, prop.pred = round(prop.pred, 3)), 
+             caption = "AncSR2 functional variants")
 ```
 
-    ## # A tibble: 1 × 2
-    ##   binned predicted
-    ##    <int>     <int>
-    ## 1   3302       680
+| RE        | observed | predicted | total | prop.pred |
+|:----------|---------:|----------:|------:|----------:|
+| AC        |      176 |        37 |   213 |     0.174 |
+| AG        |      157 |        33 |   190 |     0.174 |
+| AT        |      361 |        56 |   417 |     0.134 |
+| CA        |      500 |        56 |   556 |     0.101 |
+| CC        |        0 |         3 |     3 |     1.000 |
+| CG        |       92 |         5 |    97 |     0.052 |
+| CT        |       90 |        15 |   105 |     0.143 |
+| ERE (GT)  |      152 |        31 |   183 |     0.169 |
+| GC        |       81 |        18 |    99 |     0.182 |
+| GG        |       22 |         3 |    25 |     0.120 |
+| SRE1 (AA) |     1079 |       129 |  1208 |     0.107 |
+| SRE2 (GA) |      208 |        37 |   245 |     0.151 |
+| TA        |      240 |       173 |   413 |     0.419 |
+| TC        |        6 |         1 |     7 |     0.143 |
+| TG        |       34 |        16 |    50 |     0.320 |
+| TT        |      105 |        67 |   172 |     0.390 |
+
+AncSR2 functional variants
+
+``` r
+# sum across REs
+AncSR2_complete_table %>%
+  ungroup %>%
+  summarize(observed = sum(observed), predicted = sum(predicted),
+            total = sum(total), prop.pred = predicted / total) %>%
+  mutate(prop.pred = round(prop.pred, 3)) %>%
+  knitr::kable(caption = "AncSR1 functional variants (total)")
+```
+
+| observed | predicted | total | prop.pred |
+|---------:|----------:|------:|----------:|
+|     3303 |       680 |  3983 |     0.171 |
+
+AncSR1 functional variants (total)
+
+``` r
+# # What fraction of the total variants with greater fluorescence than  
+# # WT AncSR2:SRE1 come from observations vs. predictions? What is the number and
+# # fraction of variants that are expected to be false positives and false
+# # negatives given the out-of-sample error observed in the cross-validation?
+# 
+# ## AncSR1
+# 
+# # proportion of predicted negatives that are false negatives in CV models
+# AncSR1.FN.PN <- sapply(1:10, function(x)
+#    AncSR1.FN[x] / 
+#      sum(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i] < AncSR2.SRE1.f))
+# # proportion of predicted positives that are false positives in CV models
+# AncSR1.FP.PP <- sapply(1:10, function(x)
+#   AncSR1.FP[x] /
+#     sum(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i] >= AncSR2.SRE1.f))
+# 
+# AncSR1_complete_table %>%
+#   ungroup %>%
+#   summarize(observed = sum(observed), predicted = sum(predicted)) %>%
+#   mutate(total = observed + predicted,
+#          frac.pred = predicted / total,
+#          FN.exp = round(mean((length(AncSR1.missing.pred) - predicted) *
+#                                AncSR1.FN.PN)),
+#          FN.sd = round(sd((length(AncSR1.missing.pred) - predicted) *
+#                             AncSR1.FN.PN)),
+#          FP.exp = round(mean(predicted * AncSR1.FP.PP)),
+#          FP.sd = round(sd(predicted * AncSR1.FP.PP)),
+#          true.total.exp = round(mean(total +
+#                                        ((length(AncSR1.missing.pred) - predicted) *
+#                                           AncSR1.FN.PN) -
+#                                        (predicted * AncSR1.FP.PP))),
+#          true.total.sd = round(sd(total +
+#                                     ((length(AncSR1.missing.pred) - predicted) *
+#                                           AncSR1.FN.PN) -
+#                                     (predicted * AncSR1.FP.PP))),
+#          frac.missing.exp = round(mean((length(AncSR1.missing.pred) - predicted) *
+#                                          AncSR1.FN.PN / 
+#                                          (total +
+#                                             ((length(AncSR1.missing.pred) - predicted) *
+#                                                AncSR1.FN.PN) -
+#                                             (predicted * AncSR1.FP.PP))), 3),
+#          frac.missing.sd = round(sd((length(AncSR1.missing.pred) - predicted) *
+#                                       AncSR1.FN.PN / 
+#                                       (total +
+#                                          ((length(AncSR1.missing.pred) - predicted) *
+#                                             AncSR1.FN.PN) -
+#                                          (predicted * AncSR1.FP.PP))), 3),
+#          frac.FP.exp = round(mean(predicted * AncSR1.FP.PP / total), 3),
+#          frac.FP.sd = round(sd(predicted * AncSR1.FP.PP / total), 3)) %>%
+#   print()
+# 
+# ## AncSR2
+# 
+# # proportion of predicted negatives that are false negatives in CV models
+# AncSR2.FN.PN <- sapply(1:10, function(x)
+#    AncSR2.FN[x] / 
+#      sum(AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i] < AncSR2.SRE1.f))
+# # proportion of predicted positives that are false positives in CV models
+# AncSR2.FP.PP <- sapply(1:10, function(x)
+#   AncSR2.FP[x] /
+#     sum(AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i] >= AncSR2.SRE1.f))
+# 
+# AncSR2_complete_table %>%
+#   ungroup %>%
+#   summarize(observed = sum(observed), predicted = sum(predicted)) %>%
+#   mutate(total = observed + predicted,
+#          frac.pred = predicted / total,
+#          FN.exp = round(mean((length(AncSR2.missing.pred) - predicted) *
+#                                AncSR2.FN.PN)),
+#          FN.sd = round(sd((length(AncSR2.missing.pred) - predicted) *
+#                             AncSR2.FN.PN)),
+#          FP.exp = round(mean(predicted * AncSR2.FP.PP)),
+#          FP.sd = round(sd(predicted * AncSR2.FP.PP)),
+#          true.total.exp = round(mean(total +
+#                                        ((length(AncSR2.missing.pred) - predicted) *
+#                                           AncSR2.FN.PN) -
+#                                        (predicted * AncSR2.FP.PP))),
+#          true.total.sd = round(sd(total +
+#                                     ((length(AncSR2.missing.pred) - predicted) *
+#                                           AncSR2.FN.PN) -
+#                                     (predicted * AncSR2.FP.PP))),
+#          frac.missing.exp = round(mean((length(AncSR2.missing.pred) - predicted) *
+#                                          AncSR2.FN.PN / 
+#                                          (total +
+#                                             ((length(AncSR2.missing.pred) - predicted) *
+#                                                AncSR2.FN.PN) -
+#                                             (predicted * AncSR2.FP.PP))), 3),
+#          frac.missing.sd = round(sd((length(AncSR2.missing.pred) - predicted) *
+#                                       AncSR2.FN.PN / 
+#                                       (total +
+#                                          ((length(AncSR2.missing.pred) - predicted) *
+#                                             AncSR2.FN.PN) -
+#                                          (predicted * AncSR2.FP.PP))), 3),
+#          frac.FP.exp = round(mean(predicted * AncSR2.FP.PP / total), 3),
+#          frac.FP.sd = round(sd(predicted * AncSR2.FP.PP / total), 3)) %>%
+#   print()
+```
+
+<!-- In the AncSR1 complete dataset (observed + inferred phenotypes for all possible variants), the total number of variants with fluorescence greater than or equal to the WT AncSR2:SRE1 variant (hereafter "functional" variants) is 189, of which 36 (19%) are inferred from the model. Based on the frequency of false positive and false negative predictions in the 10-fold CV models, the estimated number of true functional variants is $254 \pm 24$, implying that we are missing $28 \pm 5.5\%$ of functional variants in this background due to prediction error ($71 \pm 19$ variants). The estimated percentage of functional variants that are false positives is much smaller at $3.3 \pm 3.7\%$ ($6 \pm 7$ variants). -->
+<!-- For the AncSR2 complete dataset, the total number of functional variants is 3983, of which 680 (21%) are inferred from the model. The estimated number of true functional variants based on the 10-fold CV error is $4578 \pm 81$, implying that we are missing $15 \pm 1.5\%$ of functional variants due to prediction error ($675 \pm 78$ variants). The estimated percentage of false positives is $2.0 \pm 0.2\%$ ($80 \pm 9$ variants). -->
+
+## Bias correction
 
 Let’s correct for the prediction bias that we observed during
-cross-validation.
+cross-validation. We will use a Box-Cox transformation on the predicted
+fluorescence values to make the distribution of residuals for the
+out-of-sample predictions closer to a normal distribution.
 
 ``` r
-### AncSR1
 # concatenate out-of-sample predictions across all 10 cross-validation sets
-lambdai <- which(AncSR1_path_fine == AncSR1.lambdamin)
+# AncSR1.cv.gs.cat <- unlist(lapply(AncSR1.cv.gs.fine, function(x)
+#   as.vector(x[,AncSR1.lambdamin.i])), use.names = FALSE)
 AncSR1.cv.pred.cat <- unlist(lapply(AncSR1.cv.pred.fine, function(x) 
-  as.vector(x[,lambdai])), use.names = FALSE)
+  as.vector(x[,AncSR1.lambdamin.i])), use.names = FALSE)
 y.AncSR1.cvsort <- unlist(lapply(1:10, function(x) 
   y.AncSR1[AncSR1_foldid == x]), use.names = FALSE)
 
+AncSR2.cv.pred.cat <- unlist(lapply(AncSR2.cv.pred.fine, function(x) 
+  as.vector(x[,AncSR2.lambdamin.i])), use.names = FALSE)
+y.AncSR2.cvsort <- unlist(lapply(1:10, function(x) 
+  y.AncSR2[AncSR2_foldid == x]), use.names = FALSE)
+
+# plot concatenated out-of-sample genetic scores vs. observed fluorescence
+data.frame(gs = AncSR1.cv.gs.cat,
+           obs = y.AncSR1.cvsort) %>%
+  ggplot(aes(x = gs, y = obs)) +
+  geom_bin_2d() +
+  geom_function(fun = logistic, args = list(U = AncSR1.U, L = AncSR1.L),
+                color = "red") +
+  geom_vline(xintercept = logit(AncSR2.SRE1.f, AncSR1.L, AncSR1.U),
+             color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR1 out-of-sample genetic scores",
+       x = "Predicted genetic score", y = "Observed fluorescence") +
+  theme_classic()
+
+# plot concatenated out-of-sample predictions vs. observed fluorescence
 data.frame(pred = AncSR1.cv.pred.cat,
            obs = y.AncSR1.cvsort) %>%
   ggplot(aes(x = pred, y = obs)) +
@@ -1959,15 +2254,23 @@ data.frame(pred = AncSR1.cv.pred.cat,
   labs(title = "AncSR1 out-of-sample predictions", 
        x = "Predicted fluorescence", y = "Observed fluorescence") +
   theme_classic()
-```
 
-![](mutation_effects_model_fitting_files/figure-gfm/biascorrection-1.png)<!-- -->
-
-``` r
+data.frame(pred = AncSR2.cv.pred.cat,
+           obs = y.AncSR2.cvsort) %>%
+  ggplot(aes(x = pred, y = obs)) +
+  geom_bin_2d() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR2 out-of-sample predictions", 
+       x = "Predicted fluorescence", y = "Observed fluorescence") +
+  theme_classic()
+  
+# find Box-Cox transformation that best normalizes the residuals
 AncSR1.cvfit.lm <- lm(obs + 5 ~ offset(pred + 5), 
                       data.frame(pred = AncSR1.cv.pred.cat, 
                                  obs = y.AncSR1.cvsort))
-
 if(!file.exists(file.path(results_dir, "AncSR1.cvfit.boxcox.rda"))) {
   AncSR1.cvfit.boxcox <- boxcox(AncSR1.cvfit.lm)
   save(AncSR1.cvfit.boxcox, 
@@ -1975,30 +2278,374 @@ if(!file.exists(file.path(results_dir, "AncSR1.cvfit.boxcox.rda"))) {
 } else load(file.path(results_dir, "AncSR1.cvfit.boxcox.rda"))
 plot(AncSR1.cvfit.boxcox, main = "AncSR1 Box-Cox fit", xlab = "lambda", 
      ylab = "log likelihood")
+abline(v = AncSR1.cvfit.boxcox$x[AncSR1.cvfit.boxcox$y == 
+                                   max(AncSR1.cvfit.boxcox$y)])
+
+AncSR2.cvfit.lm <- lm(obs + 5 ~ offset(pred + 5), 
+                      data.frame(pred = AncSR2.cv.pred.cat, 
+                                 obs = y.AncSR2.cvsort))
+if(!file.exists(file.path(results_dir, "AncSR2.cvfit.boxcox.rda"))) {
+  AncSR2.cvfit.boxcox <- boxcox(AncSR2.cvfit.lm)
+  save(AncSR2.cvfit.boxcox, 
+       file = file.path(results_dir, "AncSR2.cvfit.boxcox.rda"))
+} else load(file.path(results_dir, "AncSR2.cvfit.boxcox.rda"))
+plot(AncSR2.cvfit.boxcox, main = "AncSR2 Box-Cox fit", xlab = "lambda", 
+     ylab = "log likelihood")
+abline(v = AncSR2.cvfit.boxcox$x[AncSR2.cvfit.boxcox$y == 
+                                   max(AncSR2.cvfit.boxcox$y)])
 ```
 
-![](mutation_effects_model_fitting_files/figure-gfm/biascorrection-2.png)<!-- -->
+The maximum-likelihood Box-Cox $\lambda$ parameter is around -1 for the
+AncSR1 dataset and \<-2 for the AncSR2 dataset. Let’s start with using
+$\lambda = -1$, which corresponds to an inverse transform, for both
+datasets to transform the fitted fluorescence values for the held-out
+data and see what the fits look like.
 
 ``` r
-AncSR1.cvfit.boxcox.maxlambda <- 
-  AncSR1.cvfit.boxcox$x[AncSR1.cvfit.boxcox$y == max(AncSR1.cvfit.boxcox$y)]
+# apply correction
+AncSR1.cv.pred.cat.trans <- bc_trans(AncSR1.cv.pred.cat, 
+                                     range = c(AncSR1.L, AncSR1.U),
+                                     lambda = -1, offset = 5)
+AncSR2.cv.pred.cat.trans <- bc_trans(AncSR2.cv.pred.cat, 
+                                     range = c(AncSR2.L, AncSR2.U),
+                                     lambda = -1, offset = 5)
+AncSR1.cv.pred.trans <- lapply(1:10, function(x)
+  bc_trans(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i], 
+           range = c(AncSR1.L, AncSR1.U),
+           lambda = 0, offset = 5))
+AncSR2.cv.pred.trans <- lapply(1:10, function(x)
+  bc_trans(AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i], 
+           range = c(AncSR2.L, AncSR2.U),
+           lambda = 0, offset = 5))
 
-# correction <- function(x, range) {
-#   corrected <- 1 / (x + 5)
-#   c <- mean(range(corrected))
-#   reflected <- -(corrected - c) + c
-#   rescaled <- rescale(reflected, to = range)
-#   # reflected <- -(corrected - c) + c
-#   return(rescaled)
-# }
+# calculate out-of-sample R^2 for corrected models across all variants and 
+# active variants
+AncSR1.cv.pred.corrected.R2 <- sapply(1:10, function(x)
+  calc_R2(AncSR1.cv.pred.trans[[x]], y.AncSR1[AncSR1_foldid == x]))
+AncSR1.cv.pred.corrected.R2.active <- sapply(1:10, function(x)
+  calc_R2(AncSR1.cv.pred.trans[[x]][AncSR1.active[AncSR1_foldid == x]], 
+          y.AncSR1[AncSR1_foldid == x & AncSR1.active]))
 
-correction <- function(x, range) {
-  corrected <- log(x + 5)
-  rescaled <- rescale(corrected, to = range)
-  return(rescaled)
-}
+AncSR2.cv.pred.corrected.R2 <- sapply(1:10, function(x)
+  calc_R2(AncSR2.cv.pred.trans[[x]], y.AncSR2[AncSR2_foldid == x]))
+AncSR2.cv.pred.corrected.R2.active <- sapply(1:10, function(x)
+  calc_R2(AncSR2.cv.pred.trans[[x]][AncSR2.active[AncSR2_foldid == x]], 
+          y.AncSR2[AncSR2_foldid == x & AncSR2.active]))
 
-AncSR1.cv.pred.cat.trans <- correction(AncSR1.cv.pred.cat, range(AncSR1.cv.pred.cat))
+# plot corrected predicted vs. observed fluorescence for all CV folds
+lapply(1:10, function(x)
+  data.frame(pred = AncSR1.cv.pred.trans[[x]],
+             obs = y.AncSR1[AncSR1_foldid == x])) %>%
+  bind_rows(.id = "fold") %>% 
+  mutate(fold = factor(fold, levels = 1:10)) %>%
+  ggplot(aes(x = pred, y = obs)) +
+  geom_bin_2d() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
+  labs(title = bquote("AncSR1 out-of-sample corrected fits" ~ lambda[BC] == -1 ~ 
+                        (R^2 == .(round(mean(AncSR1.cv.pred.corrected.R2), 2))*''%+-%''*
+                         .(round(sd(AncSR1.cv.pred.corrected.R2), 2)) ~
+                           "," ~ {R^2}[active] == 
+                           .(round(mean(AncSR1.cv.pred.corrected.R2.active), 2))*''%+-%''*
+                         .(round(sd(AncSR1.cv.pred.corrected.R2.active), 2)))), 
+       x = "Corrected predicted fluorescence", y = "Observed fluorescence") +
+  facet_wrap(facets = vars(fold)) +
+  theme_classic()
+
+lapply(1:10, function(x)
+  data.frame(pred = AncSR2.cv.pred.trans[[x]],
+             obs = y.AncSR2[AncSR2_foldid == x])) %>%
+  bind_rows(.id = "fold") %>% 
+  mutate(fold = factor(fold, levels = 1:10)) %>%
+  ggplot(aes(x = pred, y = obs)) +
+  geom_bin_2d() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
+  labs(title = bquote("AncSR2 out-of-sample corrected fits" ~ lambda[BC] == -1 ~ 
+                        (R^2 == .(round(mean(AncSR2.cv.pred.corrected.R2), 2))*''%+-%''*
+                         .(round(sd(AncSR2.cv.pred.corrected.R2), 2)) ~
+                           "," ~ {R^2}[active] == 
+                           .(round(mean(AncSR2.cv.pred.corrected.R2.active), 2))*''%+-%''*
+                         .(round(sd(AncSR2.cv.pred.corrected.R2.active), 2)))), 
+       x = "Corrected predicted fluorescence", y = "Observed fluorescence") +
+  facet_wrap(facets = vars(fold)) +
+  theme_classic()
+
+# plot corrected predicted fluorescence vs. true fluorescence
+data.frame(pred = AncSR1.cv.pred.cat.trans,
+           obs = y.AncSR1.cvsort) %>%
+  ggplot(aes(x = pred, y = obs)) +
+  geom_bin_2d() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR1 corrected out-of-sample predictions", 
+       x = "Corrected predicted fluorescence", y = "Observed fluorescence") +
+  theme_classic()
+
+# calculate R^2 of corrected out-of-sample predictions
+AncSR1.cv.pred.trans <- sapply(1:10, function(x) 
+  correction(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i], 
+             range = c(AncSR1.L, AncSR1.U)))
+
+
+print(paste("AncSR1 out-of-sample corrected R^2:", 
+            round(mean(AncSR1.cv.pred.corrected.R2), 3),
+            "+/-", round(sd(AncSR1.cv.pred.corrected.R2), 3)))
+print(paste("AncSR1 out-of-sample corrected R^2 active variants:", 
+            round(mean(AncSR1.cv.pred.corrected.R2.active), 3),
+            "+/-", round(sd(AncSR1.cv.pred.corrected.R2.active), 3)))
+
+print(paste("AncSR1 corrected false negatives:", 
+            sum(AncSR1.cv.pred.cat.trans < AncSR2.SRE1.f &
+                  y.AncSR1.cvsort > AncSR2.SRE1.f)))
+print(paste("AncSR1 corrected false positives:", 
+            sum(AncSR1.cv.pred.cat.trans > AncSR2.SRE1.f & 
+                  y.AncSR1.cvsort < AncSR2.SRE1.f)))
+
+# plot residuals as a function of fitted fluorescence
+AncSR1.cv.residuals <- lapply(1:10, function(x)
+   y.AncSR1[AncSR1_foldid == x] - AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i])
+AncSR1.cv.residuals.active <- lapply(1:10, function(x)
+  y.AncSR1[AncSR1_foldid == x & AncSR1.active] - 
+    AncSR1.cv.pred.fine[[x]][AncSR1.active[AncSR1_foldid == x], AncSR1.lambdamin.i])
+AncSR1.cv.trans.residuals <- lapply(1:10, function(x)
+   y.AncSR1[AncSR1_foldid == x] - AncSR1.cv.pred.trans[[x]])
+
+data.frame(obs = AncSR1.cv.pred.cat.trans,
+           res = unlist(AncSR1.cv.trans.residuals, use.names = FALSE)) %>%
+  ggplot(aes(x = pred, y = res)) +
+  geom_bin_2d() +
+  scale_fill_viridis(trans = "log") +
+  stat_smooth(method = "lm", color = "red") +
+  labs(title = "AncSR1 corrected out-of-sample residuals", 
+       x = "Corrected predicted fluorescence", y = "Residual") +
+  theme_classic()
+
+lapply(1:10, function(x)
+  data.frame(pred = AncSR1.cv.pred.trans[[x]],
+             res = AncSR1.cv.trans.residuals[[x]])) %>%
+  bind_rows(.id = "fold") %>% 
+  mutate(fold = factor(fold, levels = 1:10)) %>%
+  ggplot(aes(x = pred, y = res)) +
+  geom_bin_2d() +
+  geom_hline(yintercept = 0, color = "gray", linetype = 2) +
+  # stat_smooth(col = "red") +
+  scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
+  labs(title = "AncSR1 corrected out-of-sample residuals", 
+       x = "Corrected predicted fluorescence", y = "Residual") +
+  facet_wrap(facets = vars(fold)) +
+  theme_classic()
+
+lapply(1:10, function(x)
+  data.frame(pred = AncSR1.cv.pred.fine[[x]][,lambdai],
+             res = AncSR1.cv.residuals[[x]])) %>%
+  bind_rows(.id = "fold") %>% 
+  mutate(fold = factor(fold, levels = 1:10)) %>%
+  ggplot(aes(x = pred, y = res)) +
+  geom_bin_2d() +
+  geom_hline(yintercept = 0, color = "gray", linetype = 2) +
+  # stat_smooth(col = "red") +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR1 out-of-sample residuals", 
+       x = "Predicted fluorescence", y = "Residual") +
+  theme_classic()
+
+lapply(1:10, function(x)
+  data.frame(pred = AncSR1.cv.pred.trans[[x]],
+             res = AncSR1.cv.trans.residuals[[x]])) %>%
+  bind_rows(.id = "fold") %>% 
+  mutate(fold = factor(fold, levels = 1:10)) %>%
+  ggplot(aes(x = pred, y = res)) +
+  geom_bin_2d() +
+  geom_hline(yintercept = 0, color = "gray", linetype = 2) +
+  # stat_smooth(col = "red") +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR1 corrected out-of-sample residuals", 
+       x = "Corrected predicted fluorescence", y = "Residual") +
+  theme_classic()
+
+
+## transform predictions for missing data
+AncSR1.missing.pred.trans <- correction(AncSR1.missing.pred,
+                                        c(AncSR1.L, AncSR1.U))
+
+# combine predictions with observed data
+AncSR1_complete_data_trans <- missing_vars_AncSR1 %>%
+  mutate(avg_meanF = AncSR1.missing.pred.trans, type = "predicted") %>%
+  rbind(AncSR1_model_data) %>%
+  arrange(AA_var, RE)
+
+# plot histogram of true and predicted fluorescences
+AncSR1_complete_data_trans %>%
+  mutate(type = factor(type, levels = c("predicted", "debulk", "binned"))) %>%
+  ggplot(aes(x = avg_meanF, fill = type)) +
+  geom_histogram() +
+  scale_y_log10() +
+  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  labs(title = "AncSR1 fluorescence", x = "Fluorescence") +
+  theme_classic()
+
+# plot number of predicted and observed variants with greater fluorescence than 
+# WT AncSR2:SRE1 on each RE
+AncSR1_complete_data_trans %>%
+  filter(avg_meanF > AncSR2.SRE1.f) %>%
+  group_by(RE, type) %>%
+  count() %>%
+  mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
+  ggplot(aes(x = RE, y = n, fill = type)) +
+  geom_col(position = "stack") +
+  labs(title = "AncSR1 active variants", y = "Number of variants") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+AncSR1_complete_table_trans <- AncSR1_complete_data_trans %>%
+  filter(avg_meanF >= AncSR2.SRE1.f) %>%
+  group_by(RE, type) %>%
+  count() %>% 
+  pivot_wider(names_from = type, values_from = n) %>%
+  replace_na(list(binned = 0, predicted = 0)) %>%
+  dplyr::rename(observed = binned)
+print(AncSR1_complete_table)
+
+# What fraction of the total variants with greater fluorescence than  
+# WT AncSR2:SRE1 come from observations vs. predictions? What is the number and
+# fraction of variants that are expected to be false positives and false
+# negatives given the out-of-sample error observed in the cross-validation?
+
+# proportion of predicted negatives that are false negatives in corrected CV models
+AncSR1.FN.PN.trans <- sapply(1:10, function(x)
+   sum(AncSR1.cv.pred.trans[[x]] < AncSR2.SRE1.f &
+         y.AncSR1[AncSR1_foldid == x] >= AncSR2.SRE1.f) / 
+     sum(AncSR1.cv.pred.trans[[x]] < AncSR2.SRE1.f))
+# proportion of predicted positives that are false positives in CV models
+AncSR1.FP.PP.trans <- sapply(1:10, function(x)
+  sum(AncSR1.cv.pred.trans[[x]] >= AncSR2.SRE1.f &
+        y.AncSR1[AncSR1_foldid == x] < AncSR2.SRE1.f) /
+    sum(AncSR1.cv.pred.trans[[x]] >= AncSR2.SRE1.f))
+
+AncSR1_complete_table_trans %>%
+  ungroup %>%
+  summarize(observed = sum(observed), predicted = sum(predicted)) %>%
+  mutate(total = observed + predicted,
+         frac.pred = predicted / total,
+         FN.exp = round(mean((length(AncSR1.missing.pred) - predicted) *
+                               AncSR1.FN.PN.trans)),
+         FN.sd = round(sd((length(AncSR1.missing.pred) - predicted) *
+                            AncSR1.FN.PN.trans)),
+         FP.exp = round(mean(predicted * AncSR1.FP.PP.trans)),
+         FP.sd = round(sd(predicted * AncSR1.FP.PP.trans)),
+         true.total.exp = round(mean(total +
+                                       ((length(AncSR1.missing.pred) - predicted) *
+                                          AncSR1.FN.PN.trans) -
+                                       (predicted * AncSR1.FP.PP.trans))),
+         true.total.sd = round(sd(total +
+                                    ((length(AncSR1.missing.pred) - predicted) *
+                                          AncSR1.FN.PN.trans) -
+                                    (predicted * AncSR1.FP.PP.trans))),
+         frac.missing.exp = round(mean((length(AncSR1.missing.pred) - predicted) *
+                                         AncSR1.FN.PN.trans / 
+                                         (total +
+                                            ((length(AncSR1.missing.pred) - predicted) *
+                                               AncSR1.FN.PN.trans) -
+                                            (predicted * AncSR1.FP.PP.trans))), 3),
+         frac.missing.sd = round(sd((length(AncSR1.missing.pred) - predicted) *
+                                      AncSR1.FN.PN.trans/ 
+                                      (total +
+                                         ((length(AncSR1.missing.pred) - predicted) *
+                                            AncSR1.FN.PN.trans) -
+                                         (predicted * AncSR1.FP.PP.trans))), 3),
+         frac.FP.exp = round(mean(predicted * AncSR1.FP.PP.trans / total), 3),
+         frac.FP.sd = round(sd(predicted * AncSR1.FP.PP.trans / total), 3)) %>%
+  print()
+
+
+### AncSR2
+# concatenate out-of-sample predictions across all 10 cross-validation sets
+AncSR2.cv.gs.cat <- unlist(lapply(AncSR2.cv.gs.fine, function(x)
+  as.vector(x[,AncSR2.lambdamin.i])), use.names = FALSE)
+AncSR2.cv.pred.cat <- unlist(lapply(AncSR2.cv.pred.fine, function(x) 
+  as.vector(x[,AncSR2.lambdamin.i])), use.names = FALSE)
+y.AncSR2.cvsort <- unlist(lapply(1:10, function(x) 
+  y.AncSR2[AncSR2_foldid == x]), use.names = FALSE)
+
+# plot concatenated out-of-sample genetic scores vs. observed fluorescence
+data.frame(gs = AncSR2.cv.gs.cat,
+           obs = y.AncSR2.cvsort) %>%
+  ggplot(aes(x = gs, y = obs)) +
+  geom_bin_2d() +
+  geom_function(fun = logistic, args = list(U = AncSR2.U, L = AncSR2.L),
+                color = "red") +
+  geom_vline(xintercept = logit(AncSR2.SRE1.f, AncSR2.L, AncSR2.U), 
+             color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR2 out-of-sample genetic scores", 
+       x = "Predicted genetic score", y = "Observed fluorescence") +
+  theme_classic()
+
+# plot concatenated out-of-sample predictions vs. observed fluorescence
+data.frame(pred = AncSR2.cv.pred.cat,
+           obs = y.AncSR2.cvsort) %>%
+  ggplot(aes(x = pred, y = obs)) +
+  geom_bin_2d() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR2 out-of-sample predictions", 
+       x = "Predicted fluorescence", y = "Observed fluorescence") +
+  theme_classic()
+```
+
+Rescale the link function by fitting additional parameters $a$ and $k$,
+which describe the midpoint and steepness of the logistic function,
+respectively.
+
+``` r
+a <- seq(-3, 0, 0.1)
+k <- seq(0, 5, 0.1)
+AncSR1.cv.gs.cat.active <- unlist(lapply(1:10, function(x)
+  AncSR1.cv.gs.fine[[x]][AncSR1.active[AncSR1_foldid == x], 
+                         AncSR1.lambdamin.i]), use.names = FALSE)
+y.AncSR1.cvsort.active <- unlist(lapply(1:10, function(x)
+  y.AncSR1[AncSR1.active & AncSR1_foldid == x]), use.names = FALSE)
+AncSR1.rescale.log.mse <- fit_rescaled_logistic(gs = AncSR1.cv.gs.cat.active,
+                                                y = y.AncSR1.cvsort.active,
+                                                a = a, k = k,
+                                                range = c(AncSR1.L, AncSR1.U))
+AncSR1.min.ak <- which(AncSR1.rescale.log.mse == min(AncSR1.rescale.log.mse), 
+                arr.ind = TRUE)
+contour(x = a, y = k, z = log(AncSR1.rescale.log.mse), nlevels = 20,
+        main = "AncSR1 logistic rescaling MSE", xlab = "a (midpoint)", 
+        ylab = "k (slope)")
+points(x = a[AncSR1.min.ak[1]], y = k[AncSR1.min.ak[2]], col = "red", pch = 19)
+
+AncSR1.cv.pred.cat.trans <- scaled_logistic(AncSR1.cv.gs.cat, 
+                                            a[AncSR1.min.ak[1]],
+                                            k[AncSR1.min.ak[2]], 
+                                            AncSR1.L, AncSR1.U)
+
+data.frame(gs = AncSR1.cv.gs.cat,
+           obs = y.AncSR1.cvsort) %>%
+  ggplot(aes(x = gs, y = obs)) +
+  geom_bin_2d() +
+  geom_function(fun = scaled_logistic, args = list(a = a[AncSR1.min.ak[1]],
+                                                   k = k[AncSR1.min.ak[2]],
+                                                   U = AncSR1.U, L = AncSR1.L),
+                color = "red") +
+  geom_vline(xintercept = logit(AncSR2.SRE1.f, AncSR1.L, AncSR1.U),
+             color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  scale_fill_viridis(trans = "log") +
+  labs(title = "AncSR1 out-of-sample genetic scores",
+       x = "Predicted genetic score", y = "Observed fluorescence") +
+  theme_classic()
 
 data.frame(pred = AncSR1.cv.pred.cat.trans,
            obs = y.AncSR1.cvsort) %>%
@@ -2012,93 +2659,3 @@ data.frame(pred = AncSR1.cv.pred.cat.trans,
        x = "Corrected predicted fluorescence", y = "Observed fluorescence") +
   theme_classic()
 ```
-
-![](mutation_effects_model_fitting_files/figure-gfm/biascorrection-3.png)<!-- -->
-
-``` r
-AncSR1.cv.pred.trans <- sapply(1:10, function(x) 
-  correction(AncSR1.cv.pred.fine[[x]][,lambdai], range = range(AncSR1.cv.pred.cat)))
-AncSR1.cv.pred.corrected.R2 <- sapply(1:10, function(x)
-  calc_R2(AncSR1.cv.pred.trans[[x]], y.AncSR1[AncSR1_foldid == x]))
-print(paste("AncSR1 out-of-sample corrected R^2:", 
-            round(mean(AncSR1.cv.pred.R2), 3),
-            "+/-", round(sd(AncSR1.cv.pred.R2)/sqrt(10), 3)))
-```
-
-    ## [1] "AncSR1 out-of-sample corrected R^2: 0.195 +/- 0.009"
-
-``` r
-print(paste("AncSR1 corrected false negatives:", 
-            sum(AncSR1.cv.pred.cat.trans < AncSR2.SRE1.f &
-                  y.AncSR1.cvsort > AncSR2.SRE1.f)))
-```
-
-    ## [1] "AncSR1 corrected false negatives: 58"
-
-``` r
-print(paste("AncSR1 corrected false positives:", 
-            sum(AncSR1.cv.pred.cat.trans > AncSR2.SRE1.f & 
-                  y.AncSR1.cvsort < AncSR2.SRE1.f)))
-```
-
-    ## [1] "AncSR1 corrected false positives: 70"
-
-``` r
-# plot residuals as a function of fitted fluorescence
-AncSR1.cv.residuals <- lapply(1:10, function(x)
-   y.AncSR1[AncSR1_foldid == x] - AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i])
-AncSR1.cv.trans.residuals <- lapply(1:10, function(x)
-   y.AncSR1[AncSR1_foldid == x] - AncSR1.cv.pred.trans[[x]])
-lapply(1:10, function(x)
-  data.frame(pred = AncSR1.cv.pred.trans[[x]],
-             res = AncSR1.cv.trans.residuals[[x]])) %>%
-  bind_rows(.id = "fold") %>% 
-  mutate(fold = factor(fold, levels = 1:10)) %>%
-  ggplot(aes(x = pred, y = res)) +
-  geom_bin_2d() +
-  geom_hline(yintercept = 0, color = "gray", linetype = 2) +
-  stat_smooth(col = "red") +
-  scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
-  labs(title = "AncSR1 corrected out-of-sample residuals", 
-       x = "Corrected predicted fluorescence", y = "Residual") +
-  facet_wrap(facets = vars(fold)) +
-  theme_classic()
-```
-
-![](mutation_effects_model_fitting_files/figure-gfm/biascorrection-4.png)<!-- -->
-
-``` r
-lapply(1:10, function(x)
-  data.frame(pred = AncSR1.cv.pred.fine[[x]][,lambdai],
-             res = AncSR1.cv.residuals[[x]])) %>%
-  bind_rows(.id = "fold") %>% 
-  mutate(fold = factor(fold, levels = 1:10)) %>%
-  ggplot(aes(x = pred, y = res)) +
-  geom_bin_2d() +
-  geom_hline(yintercept = 0, color = "gray", linetype = 2) +
-  stat_smooth(col = "red") +
-  scale_fill_viridis(trans = "log") +
-  labs(title = "AncSR1 out-of-sample residuals", 
-       x = "Predicted fluorescence", y = "Residual") +
-  theme_classic()
-```
-
-![](mutation_effects_model_fitting_files/figure-gfm/biascorrection-5.png)<!-- -->
-
-``` r
-lapply(1:10, function(x)
-  data.frame(pred = AncSR1.cv.pred.trans[[x]],
-             res = AncSR1.cv.trans.residuals[[x]])) %>%
-  bind_rows(.id = "fold") %>% 
-  mutate(fold = factor(fold, levels = 1:10)) %>%
-  ggplot(aes(x = pred, y = res)) +
-  geom_bin_2d() +
-  geom_hline(yintercept = 0, color = "gray", linetype = 2) +
-  stat_smooth(col = "red") +
-  scale_fill_viridis(trans = "log") +
-  labs(title = "AncSR1 corrected out-of-sample residuals", 
-       x = "Corrected predicted fluorescence", y = "Residual") +
-  theme_classic()
-```
-
-![](mutation_effects_model_fitting_files/figure-gfm/biascorrection-6.png)<!-- -->
