@@ -3,34 +3,13 @@ Data cleaning
 Jaeda Patton and Santiago Herrera
 2023-03-14
 
-## Functions
+## Loading data and functions
 
 ``` r
-# make factors with different levels for ordering of REs in plotting
-REs <- list()
-REs[[1]] <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", 
-                     "AG", "AT", "CA", "CC", 
-                     "CG", "CT", "GC", "GG", 
-                     "TA", "TC", "TG", "TT"), 
-                   levels=c("ERE (GT)", "SRE1 (AA)", "SRE2 (GA)", "AC", 
-                            "AG", "AT", "CA", "CC", 
-                            "CG", "CT","GC", "GG", 
-                            "TA", "TC", "TG", "TT"))
+# load general functions
+source(file.path("..", "scripts", "general_functions.R"))
 
-# convert REBC (RE barcode) to RE variant
-REBC_to_RE <- function(REBC, levels=1) {
-  if(is.character(REBC)) {
-    bc <- str_extract(REBC, "\\d+")
-    bc <- as.integer(bc)
-  }
-  RE <- REs[[levels]][bc]
-  return(RE)
-}
-```
-
-## Reading in data
-
-``` r
+# read in data from binned sort and debulk sort experiments
 if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   #### TODO: update file paths once we find a permanent place to store the data
   untar(file.path("..", "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), 
@@ -64,8 +43,9 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
   }
   
   # unlist meanF data and calculate current SE(meanF) per variant and REBC
-  meanF_data <- rbind(meanF_data$rep1, meanF_data$rep2, meanF_data$rep3, meanF_data$rep4) %>% 
-    select(AA_var,REBC,bg,RE,REP,meanF,Count_total,cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4) %>% 
+  meanF_data <- rbind(meanF_data$rep1, meanF_data$rep2, 
+                      meanF_data$rep3, meanF_data$rep4) %>% 
+    select(AA_var, REBC, bg, RE, REP, meanF, Count_total, cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4) %>% 
     # Re-organize the dataframe: each row is a variant-REBC combo
     pivot_wider(names_from = REP, values_from = c(meanF,Count_total,cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4)) %>%
     # Add summary statistics per varianr-REBC
@@ -107,14 +87,15 @@ meanF_data %>%
   ggplot(aes(x = Count_total, color = REP)) +
   geom_freqpoly() +
   theme_classic() +
-  scale_x_log10() +
+  scale_x_continuous(trans = log10plus1, name = "Reads + 1",
+                     labels = label_comma()) +
   theme(axis.title.x = element_text(size = 16), 
         axis.text.x = element_text(size = 14),
         axis.text.y = element_text(size = 14),
         axis.title=element_text(size = 16),
         legend.title = element_text(size = 14),
         legend.text = element_text(size = 14)) +
-  labs(x = "Reads", color = "replicate")
+  labs(color = "replicate")
 ```
 
 ![](data_cleaning_files/figure-gfm/exploratoryfigs-1.png)<!-- -->
@@ -139,13 +120,14 @@ meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
   ggplot(aes(x=min_read_count,y=se_meanF)) +
   stat_summary_bin(fun = "median", fun.min = "min", fun.max = "max") +
   theme_classic() + 
-  scale_x_log10() +
+  scale_x_continuous(trans = log10plus1, name = "Min. reads + 1",
+                     labels = label_comma()) +
   theme(axis.title.x = element_text(size = 16), 
         axis.text.x = element_text(size = 12),
         axis.text.y = element_text(size = 12),
         axis.title=element_text(size = 16)) +
   geom_hline(aes(yintercept = mean(se_meanF)), color="red", linetype="dashed") +
-  xlab("Min. read count") + ylab("SE(meanF)")
+  ylab("SE(meanF)")
 ```
 
 ![](data_cleaning_files/figure-gfm/exploratoryfigs-2.png)<!-- -->
@@ -174,7 +156,7 @@ meanF_data %>% filter(!(n_reps==1)) %>%
 DMS binned sort data is filtered based on two approaches. First, we
 filter out variants with low read count (across replicates) to reduce
 the global standard error; second, we correct use an I-spline to correct
-the nonlnearity between replicates, and remove variants with high
+the nonlinearity between replicates, and remove variants with high
 SE(meanF). These two procedures ensure that we keep variants for which
 we have high confidence in their meanF estimates.
 
@@ -215,9 +197,9 @@ choose_read_count <- function(r) {
 }
 
 # parallel processing:
-cores=detectCores()
+cores <- 4
 if(!file.exists(file.path("..", "results", "cleaned_data", "outliers.rda"))) {
-  cl <- parallel::makeCluster(cores[1]-3,"FORK",outfile="")
+  cl <- parallel::makeCluster(cores,"FORK",outfile="")
   doParallel::registerDoParallel(cl)
   outliers <- foreach(i = seq(1,100,1), .combine = 'rbind') %dopar% choose_read_count(i)
   stopCluster(cl)
@@ -840,11 +822,11 @@ if(!file.exists(file.path("..", "results", "cleaned_data", "meanF_p.rda"))) {
     nstop <- length(fstop)
     
     # parallel computing
-    cl <- parallel::makeCluster(cores-4, "FORK", outfile="")
+    cl <- parallel::makeCluster(cores, "FORK", outfile="")
     doParallel::registerDoParallel(cl)
-    p <- foreach(j = 1:(cores-4), .combine = "c") %dopar% {
+    p <- foreach(j = 1:cores, .combine = "c") %dopar% {
       size <- meanF_p[[i]] %>% filter(stop == F) %>% nrow()
-      chunk <- ceiling(size / (cores - 4))
+      chunk <- ceiling(size / cores)
       
       # compute fraction of nonsense variants whose meanF is above that of the test variant;
       # perform test for all non-nonsense variants
@@ -895,7 +877,7 @@ meanF_cutoffs <- meanF_p %>%
 meanF_p %>%
   ggplot(aes(x = avg_meanF, fill = sig)) +
   geom_histogram(position = "stack", bins = 50) +
-  scale_y_log10() +
+  scale_y_continuous(trans = log10plus1, name = "Count + 1") +
   theme_classic() +
   labs(x = "meanF", fill = "")
 ```
@@ -912,7 +894,7 @@ meanF_p %>%
   geom_histogram(bins = 30, position = "stack", color = "black") +
   facet_grid(rows = vars(bg), cols = vars(rcbin)) +
   scale_fill_manual(values = c("white", "gray30")) +
-  scale_y_log10() +
+  scale_y_continuous(trans = log10plus1, name = "Count + 1") +
   geom_vline(aes(xintercept = minF), color = "red") +
   theme_classic() +
   labs(x = "meanF", fill = "")
@@ -921,12 +903,55 @@ meanF_p %>%
 ![](data_cleaning_files/figure-gfm/meanFtest-2.png)<!-- -->
 
 ``` r
-# Save dataset of corrected mean fluorescence values with p-values.
+# Save dataset of corrected mean fluorescence values with fluorescence p-values
 meanF_data_corrected <- meanF_data_corrected %>%
-  left_join(meanF_p %>% select(AA_var:type, p:sig), by = c("AA_var", "REBC", "bg", "RE", "type"))
+  left_join(meanF_p %>% select(AA_var:type, p:sig), 
+            by = c("AA_var", "REBC", "bg", "RE", "type"))
 write.csv(meanF_data_corrected,
-          file=gzfile(file.path("..", "results", "cleaned_data", "meanF_data_corrected_NovaSeq.csv.gz"))) 
+          file=gzfile(file.path("..", "results", "cleaned_data", 
+                                "meanF_data_corrected_NovaSeq.csv.gz"))) 
 ```
+
+## Correlation between replicates for corrected data
+
+Let’s calculate the mean correlation between all replicates for all
+data, as well as for only those variants that are significantly
+different from null.
+
+``` r
+# Pearson correlation between all replicates
+cormat <- meanF_data_corrected %>%
+  filter(type == "exp") %>%
+  select(meanF_REP1:meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+# mean r^2 between all pairs of replicates
+print(paste("Mean Pearson's r^2 between replicates:", 
+            round(mean(cormat[upper.tri(cormat)]^2), 2)))
+```
+
+    ## [1] "Mean Pearson's r^2 between replicates: 0.29"
+
+``` r
+# mean r^2 between all pairs of replicates, excluding rep 4
+cormat.no4 <- cormat[1:3,1:3]
+print(paste("Mean Pearson's r^2 no rep 4:",
+            round(mean(cormat.no4[upper.tri(cormat.no4)]^2), 2)))
+```
+
+    ## [1] "Mean Pearson's r^2 no rep 4: 0.55"
+
+``` r
+# Pearson correlation between all replicates, active variants only
+cormat.active <- meanF_data_corrected %>%
+  filter(type == "exp", sig == "significant") %>%
+  select(meanF_REP1:meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+# mean r^2 between all pairs of replicates, active variants only
+print(paste("Mean Pearson's r^2 between replicates:", 
+            round(mean(cormat.active[upper.tri(cormat.active)]^2), 2)))
+```
+
+    ## [1] "Mean Pearson's r^2 between replicates: 0.95"
 
 ## Filtering debulk sort data
 
@@ -1069,32 +1094,54 @@ print(cor.test(~ REP4 + REP2,
 ``` r
 # average estimates of GFP+ cells across binned sort replicates, but not for the libraries
 # in rep 1 that were from a different debulk sorting experiment than the other replicates
-estGFPpos <- meanF_data_corrected_long %>%
-  ungroup() %>%
-  filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                     "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), REP == "1") %>%
-  select(AA_var:RE, avg_meanF, avg_Count_total, estGFPposcells) %>%
-  mutate(BinBC = "GFPneg")
-estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
-                     filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                                        "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), 
-                            REP != "1") %>%
-                     group_by(AA_var, REBC, bg, RE) %>%
-                     summarize(avg_meanF = mean(avg_meanF), 
-                               avg_Count_total = mean(avg_Count_total), 
-                               estGFPposcells = mean(estGFPposcells)) %>%
-                     mutate(BinBC = "GFPneg2"))
-estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
-                     filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                                         "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
-                     group_by(AA_var, REBC, bg, RE) %>%
-                     summarize(avg_meanF = mean(avg_meanF), 
-                               avg_Count_total = mean(avg_Count_total), 
-                               estGFPposcells = mean(estGFPposcells)) %>%
-                     mutate(BinBC = "GFPneg"))
+if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPpos.rda"))) {
+  estGFPpos <- meanF_data_corrected_long %>%
+    ungroup() %>%
+    filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                       "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), REP == "1") %>%
+    select(AA_var:RE, avg_meanF, avg_Count_total, estGFPposcells) %>%
+    mutate(BinBC = "GFPneg")
+  estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
+                       filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                                          "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), 
+                              REP != "1") %>%
+                       group_by(AA_var, REBC, bg, RE) %>%
+                       summarize(avg_meanF = mean(avg_meanF), 
+                                 avg_Count_total = mean(avg_Count_total), 
+                                 estGFPposcells = mean(estGFPposcells)) %>%
+                       mutate(BinBC = "GFPneg2"))
+  estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
+                       filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                                           "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
+                       group_by(AA_var, REBC, bg, RE) %>%
+                       summarize(avg_meanF = mean(avg_meanF), 
+                                 avg_Count_total = mean(avg_Count_total), 
+                                 estGFPposcells = mean(estGFPposcells)) %>%
+                       mutate(BinBC = "GFPneg"))
+  
+  save(estGFPpos, file = file.path("..", "results", "cleaned_data", "estGFPpos.rda"))
+} else load(file.path("..", "results", "cleaned_data", "estGFPpos.rda"))
+
 
 # now for libraries that underwent two different debulk sorts, average GFP+ cell count
 # estimates across the two debulk sorts
+if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPposave.rda"))) {
+  estGFPposave <- estGFPpos %>%
+    group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
+    summarize(estGFPposcells = mean(estGFPposcells))
+  
+  estGFPposave <- estGFPposave %>%
+    ungroup() %>%
+    mutate(rcbin = case_when(avg_Count_total < 100 ~ "<100",
+                             avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
+                             avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
+                             avg_Count_total >= 1000 ~ ">=1000") %>% 
+             factor(levels = c("<100", "100-500", "500-1000", ">=1000"))) %>%
+    left_join(meanF_cutoffs, by = c("bg", "rcbin"))
+  
+  save(estGFPposave, file = file.path("..", "results", "cleaned_data", "estGFPposave.rda"))
+} else load(file.path("..", "results", "cleaned_data", "estGFPposave.rda"))
+
 estGFPposave <- estGFPpos %>%
   group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
   summarize(estGFPposcells = mean(estGFPposcells))
@@ -1290,8 +1337,8 @@ debulk_data %>%
   mutate(sig = padj <= debulk.fdrthresh) %>%
   ggplot(aes(x = Count, fill = sig)) +
   geom_histogram(bins = 100, position = "stack") +
-  scale_x_log10() +
-  labs(x = "reads per variant", title = "Debulk GFP- data") +
+  scale_x_continuous(trans = log10plus1, name = "Reads per variant + 1") +
+  labs(title = "Debulk GFP- data") +
   theme_classic()
 ```
 

@@ -8,12 +8,12 @@ output: github_document
 ```{r setup, include=FALSE, message=FALSE}
 require("knitr")
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(fig.width=5, fig.height=5, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(fig.width=6, fig.height=5, warning = FALSE, message = FALSE)
 
 # check for packages and install any that are missing
 packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble", 
               "patchwork", "foreach", "doParallel", "ggpubr", 
-              "splines2", "matrixStats", "forcats", "dplyr")
+              "splines2", "matrixStats", "forcats", "dplyr", "scales")
 installed_packages <- packages %in% rownames(installed.packages())
 
 if(any(installed_packages == F)) {
@@ -112,14 +112,15 @@ meanF_data %>%
   ggplot(aes(x = Count_total, color = REP)) +
   geom_freqpoly() +
   theme_classic() +
-  scale_x_log10() +
+  scale_x_continuous(trans = log10plus1, name = "Reads + 1",
+                     labels = label_comma()) +
   theme(axis.title.x = element_text(size = 16), 
         axis.text.x = element_text(size = 14),
         axis.text.y = element_text(size = 14),
         axis.title=element_text(size = 16),
         legend.title = element_text(size = 14),
         legend.text = element_text(size = 14)) +
-  labs(x = "Reads", color = "replicate")
+  labs(color = "replicate")
 
 # SE(meanF) as a function of minimum read depth per variant
 # meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
@@ -140,13 +141,14 @@ meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
   ggplot(aes(x=min_read_count,y=se_meanF)) +
   stat_summary_bin(fun = "median", fun.min = "min", fun.max = "max") +
   theme_classic() + 
-  scale_x_log10() +
+  scale_x_continuous(trans = log10plus1, name = "Min. reads + 1",
+                     labels = label_comma()) +
   theme(axis.title.x = element_text(size = 16), 
         axis.text.x = element_text(size = 12),
         axis.text.y = element_text(size = 12),
         axis.title=element_text(size = 16)) +
   geom_hline(aes(yintercept = mean(se_meanF)), color="red", linetype="dashed") +
-  xlab("Min. read count") + ylab("SE(meanF)")
+  ylab("SE(meanF)")
   
 
 # Gruop variants by Avg. Min Read Depth (RC) and plot SE(meanF) by n_reps. This shows that variants with a minimum read count of ~15
@@ -683,7 +685,7 @@ meanF_cutoffs <- meanF_p %>%
 meanF_p %>%
   ggplot(aes(x = avg_meanF, fill = sig)) +
   geom_histogram(position = "stack", bins = 50) +
-  scale_y_log10() +
+  scale_y_continuous(trans = log10plus1, name = "Count + 1") +
   theme_classic() +
   labs(x = "meanF", fill = "")
 
@@ -696,7 +698,7 @@ meanF_p %>%
   geom_histogram(bins = 30, position = "stack", color = "black") +
   facet_grid(rows = vars(bg), cols = vars(rcbin)) +
   scale_fill_manual(values = c("white", "gray30")) +
-  scale_y_log10() +
+  scale_y_continuous(trans = log10plus1, name = "Count + 1") +
   geom_vline(aes(xintercept = minF), color = "red") +
   theme_classic() +
   labs(x = "meanF", fill = "")
@@ -803,32 +805,54 @@ print(cor.test(~ REP4 + REP2,
 
 # average estimates of GFP+ cells across binned sort replicates, but not for the libraries
 # in rep 1 that were from a different debulk sorting experiment than the other replicates
-estGFPpos <- meanF_data_corrected_long %>%
-  ungroup() %>%
-  filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                     "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), REP == "1") %>%
-  select(AA_var:RE, avg_meanF, avg_Count_total, estGFPposcells) %>%
-  mutate(BinBC = "GFPneg")
-estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
-                     filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                                        "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), 
-                            REP != "1") %>%
-                     group_by(AA_var, REBC, bg, RE) %>%
-                     summarize(avg_meanF = mean(avg_meanF), 
-                               avg_Count_total = mean(avg_Count_total), 
-                               estGFPposcells = mean(estGFPposcells)) %>%
-                     mutate(BinBC = "GFPneg2"))
-estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
-                     filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                                         "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
-                     group_by(AA_var, REBC, bg, RE) %>%
-                     summarize(avg_meanF = mean(avg_meanF), 
-                               avg_Count_total = mean(avg_Count_total), 
-                               estGFPposcells = mean(estGFPposcells)) %>%
-                     mutate(BinBC = "GFPneg"))
+if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPpos.rda"))) {
+  estGFPpos <- meanF_data_corrected_long %>%
+    ungroup() %>%
+    filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                       "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), REP == "1") %>%
+    select(AA_var:RE, avg_meanF, avg_Count_total, estGFPposcells) %>%
+    mutate(BinBC = "GFPneg")
+  estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
+                       filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                                          "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), 
+                              REP != "1") %>%
+                       group_by(AA_var, REBC, bg, RE) %>%
+                       summarize(avg_meanF = mean(avg_meanF), 
+                                 avg_Count_total = mean(avg_Count_total), 
+                                 estGFPposcells = mean(estGFPposcells)) %>%
+                       mutate(BinBC = "GFPneg2"))
+  estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
+                       filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                                           "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
+                       group_by(AA_var, REBC, bg, RE) %>%
+                       summarize(avg_meanF = mean(avg_meanF), 
+                                 avg_Count_total = mean(avg_Count_total), 
+                                 estGFPposcells = mean(estGFPposcells)) %>%
+                       mutate(BinBC = "GFPneg"))
+  
+  save(estGFPpos, file = file.path("..", "results", "cleaned_data", "estGFPpos.rda"))
+} else load(file.path("..", "results", "cleaned_data", "estGFPpos.rda"))
+
 
 # now for libraries that underwent two different debulk sorts, average GFP+ cell count
 # estimates across the two debulk sorts
+if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPposave.rda"))) {
+  estGFPposave <- estGFPpos %>%
+    group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
+    summarize(estGFPposcells = mean(estGFPposcells))
+  
+  estGFPposave <- estGFPposave %>%
+    ungroup() %>%
+    mutate(rcbin = case_when(avg_Count_total < 100 ~ "<100",
+                             avg_Count_total >= 100 & avg_Count_total < 500 ~ "100-500",
+                             avg_Count_total >= 500 & avg_Count_total < 1000 ~ "500-1000",
+                             avg_Count_total >= 1000 ~ ">=1000") %>% 
+             factor(levels = c("<100", "100-500", "500-1000", ">=1000"))) %>%
+    left_join(meanF_cutoffs, by = c("bg", "rcbin"))
+  
+  save(estGFPposave, file = file.path("..", "results", "cleaned_data", "estGFPposave.rda"))
+} else load(file.path("..", "results", "cleaned_data", "estGFPposave.rda"))
+
 estGFPposave <- estGFPpos %>%
   group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
   summarize(estGFPposcells = mean(estGFPposcells))
@@ -984,8 +1008,8 @@ debulk_data %>%
   mutate(sig = padj <= debulk.fdrthresh) %>%
   ggplot(aes(x = Count, fill = sig)) +
   geom_histogram(bins = 100, position = "stack") +
-  scale_x_log10() +
-  labs(x = "reads per variant", title = "Debulk GFP- data") +
+  scale_x_continuous(trans = log10plus1, name = "Reads per variant + 1") +
+  labs(title = "Debulk GFP- data") +
   theme_classic()
 
 debulk_data_filter <- debulk_data %>%
