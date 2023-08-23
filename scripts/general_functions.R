@@ -50,6 +50,48 @@ calc_R2 <- function(pred, y) {
   return(1 - ssr/sst)
 }
 
+# breaks for log10plus1 transformation
+log_breaksplus1 <- function (n = 5, base = 10) {
+  # force_all(n, base)
+  n_default <- n
+  function(x, n = n_default) {
+    raw_rng <- suppressWarnings(range(x + 1, na.rm = TRUE))
+    if (any(!is.finite(raw_rng))) {
+      return(numeric())
+    }
+    rng <- log(raw_rng, base = base)
+    min <- floor(rng[1])
+    max <- ceiling(rng[2])
+    if (max == min) {
+      return(base^min)
+    }
+    by <- floor((max - min)/n) + 1
+    breaks <- base^seq(min, max, by = by)
+    relevant_breaks <- base^rng[1] <= breaks & breaks <= 
+      base^rng[2]
+    if (sum(relevant_breaks) >= (n - 2)) {
+      return(breaks)
+    }
+    while (by > 1) {
+      by <- by - 1
+      breaks <- base^seq(min, max, by = by)
+      relevant_breaks <- base^rng[1] <= breaks & breaks <= 
+        base^rng[2]
+      if (sum(relevant_breaks) >= (n - 2)) {
+        return(breaks)
+      }
+    }
+    log_sub_breaks(rng, n = n, base = base)
+  }
+}
+
+# log10 of count + 1 transformation
+log10plus1 <- scales::trans_new(name = "log10plus1",
+                                transform = function(x) log10(x+1),
+                                inverse = function(x) 10^x-1,
+                                breaks = log_breaksplus1(base = 10),
+                                domain = c(1e-100, Inf))
+
 
 # get colors for ancestral backgrounds
 # bg: character vector of ancestral backgrounds
