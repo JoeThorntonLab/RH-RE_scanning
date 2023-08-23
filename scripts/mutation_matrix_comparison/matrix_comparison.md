@@ -5,13 +5,20 @@ Santiago Herrera
 
 ## Transition probability matrices: Comparing mutation matrices
 
-We are modeling the transition probabilities between DBD variant genotypes as a markov process of the form
+We are modeling the evolution between DBD variant genotypes as a markov process with transition probabilities of the form
+
 *P*(*i*, *j*)∝*ρ*<sub>*i**j*</sub> × *P*<sub>fix</sub>(*j*)
- where *ρ*<sub>*i**j*</sub> represents the mutation rate from genotype *i* to *j*. This rate can be specified in multiple ways but we will compare the transition matrices *P* generated via two specifications: - All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability equal to the fraction of codons from amino acid *i* that can access amino acid *j* via single nucleotide mutations (mutational propensity: matrix type A/B). - All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability proportional to the number of nucleotide changes that can encode each amino acid change (codon bias: matrix type C) - accounting for all the possible synonymous backgrounds.
+
+where *ρ*<sub>*i**j*</sub> represents the mutation rate from genotype *i* to *j*. This rate can be specified in multiple ways but we will compare the transition matrices *P* generated via two specifications:
+
+-   All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability equal to the fraction of codons from amino acid *i* that can access amino acid *j* via single nucleotide mutations (mutational propensity: matrix type A/B).
+-   All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability proportional to the number of nucleotide changes that can encode each amino acid change (codon bias: matrix type C) - accounting for all the possible synonymous backgrounds.
 
 *Note:* *P*<sub>fix</sub>(*j*) are the same across all matrices, because it only depends on the imposed fitness function, which is the same in all cases. Any differences in *P*(*i*, *j*) is therefore due to differences in the mutation rates.
 
 ## Reading in data
+
+*Note:* The file `matrix_comparison.RData` was produced by running the R script `matrix_comparison.R` in the Midway3 computing cluster.
 
 ``` r
 load("./matrix_comparison.RData") # loading the matrices
@@ -34,7 +41,7 @@ Mutational propensities are a convenient way of modeling the mutation process at
 
 ### Matrix correlations
 
-As a first analysis, we will determine how correlated is the structure of the transition matrices. We will use the inner product correlation between two matrices to determine how colinear are their structures.
+As a first analysis, we will determine how correlated is the structure of the transition matrices. We will use the inner product correlation between two matrices to determine how colinear are their structures; and their similarity (SSE).
 
 ``` r
 # Generated P matrices for drift scenario under three approaches:
@@ -55,6 +62,13 @@ inner_product_matrix_cor <- function(matA,matB){
   return(cor)
 }
 
+SSE_for_matrices <- function(matA, matB){
+  #element-wise SE --> SSE
+  SSE <- sum((matA - matB)^2)
+  return(SSE)
+}
+
+# Correlations
 print(paste("Correlation between matrix A and B for AncSR1 bg:",inner_product_matrix_cor(M_drift_sr1_A,M_drift_sr1_B)))
 ```
 
@@ -78,7 +92,32 @@ print(paste("Correlation between matrix B and C for AncSR2 bg:",inner_product_ma
 
     ## [1] "Correlation between matrix B and C for AncSR2 bg: 0.97425783999587"
 
-As expected, matrices A and B are exactly the same (cor = 1). Matrices B and C are highly colinear as well (cor &gt;= 0.97), suggesting that mutational propensities and codon bias capture essentially the same information about the mutation process.
+``` r
+# Difference (SSE)
+print(paste("SSE between matrix A and B for AncSR1 bg:",SSE_for_matrices(M_drift_sr1_A,M_drift_sr1_B)))
+```
+
+    ## [1] "SSE between matrix A and B for AncSR1 bg: 0"
+
+``` r
+print(paste("SSE between matrix B and C for AncSR1 bg:",SSE_for_matrices(M_drift_sr1_B,M_drift_sr1_C)))
+```
+
+    ## [1] "SSE between matrix B and C for AncSR1 bg: 3.6660708007818"
+
+``` r
+print(paste("SSE between matrix A and B for AncSR2 bg:",SSE_for_matrices(M_drift_sr2_A,M_drift_sr2_B)))
+```
+
+    ## [1] "SSE between matrix A and B for AncSR2 bg: 0"
+
+``` r
+print(paste("SSE between matrix B and C for AncSR2 bg:",SSE_for_matrices(M_drift_sr2_B,M_drift_sr2_C)))
+```
+
+    ## [1] "SSE between matrix B and C for AncSR2 bg: 24.1668594329626"
+
+As expected, matrices A and B are exactly the same (cor = 1; SSE = 0). Matrices B and C are highly colinear (cor &gt;= 0.97), but not exactly the same (3 &lt; SSE &lt; 25), suggesting that mutational propensities and codon bias capture the same general trend about the mutation process, but each contains distinct information. Let's see whether these differences affect the evolutionary inferences on the GP maps.
 
 ### Stationary distribution of genotypes
 
@@ -107,7 +146,7 @@ typeC_sr2 <- extract_main_ntwrk(net_sr2,M_drift_sr2_C)
 typeC_sr2_statdist <- stationary_dist(typeC_sr2)
 
 
-# CORRELATIONS BETWEEN STATIONARY DISTS. OF GENOTYPES 
+# CORRELATIONS and SSE BETWEEN STATIONARY DISTS. OF GENOTYPES 
 # AncSR1
 print(paste("Correlation between stat. dists. between A and B for AncSR1 bg:",cor(typeA_sr1_statdist,typeB_sr1_statdist)))
 ```
@@ -119,6 +158,18 @@ print(paste("Correlation between stat. dists. between B and C for AncSR1 bg:",co
 ```
 
     ## [1] "Correlation between stat. dists. between B and C for AncSR1 bg: 0.954834378006883"
+
+``` r
+print(paste("SSE between stat. dists. between A and B for AncSR1 bg:",sum((typeA_sr1_statdist-typeB_sr1_statdist)^2)))
+```
+
+    ## [1] "SSE between stat. dists. between A and B for AncSR1 bg: 0"
+
+``` r
+print(paste("SSE between stat. dists. between B and C for AncSR1 bg:",sum((typeB_sr1_statdist-typeC_sr1_statdist)^2)))
+```
+
+    ## [1] "SSE between stat. dists. between B and C for AncSR1 bg: 0.000372285380505169"
 
 ``` r
 ab_statdist <- data.frame(X=typeA_sr1_statdist,Y=typeB_sr1_statdist) %>% ggplot(aes(x=X,y=Y)) + geom_point(fill="black") + 
@@ -147,6 +198,18 @@ print(paste("Correlation between stat. dists. between B and C for AncSR2 bg:",co
     ## [1] "Correlation between stat. dists. between B and C for AncSR2 bg: 0.968897247355983"
 
 ``` r
+print(paste("SSE between stat. dists. between A and B for AncSR2 bg:",sum((typeA_sr2_statdist-typeB_sr2_statdist)^2)))
+```
+
+    ## [1] "SSE between stat. dists. between A and B for AncSR2 bg: 0"
+
+``` r
+print(paste("SSE between stat. dists. between B and C for AncSR2 bg:",sum((typeB_sr2_statdist-typeC_sr2_statdist)^2)))
+```
+
+    ## [1] "SSE between stat. dists. between B and C for AncSR2 bg: 2.48078155759098e-05"
+
+``` r
 ab_statdist <- data.frame(X=typeA_sr2_statdist,Y=typeB_sr2_statdist) %>% ggplot(aes(x=X,y=Y)) + geom_point(fill="black") + 
   geom_abline(slope = 1,intercept = 0,col="red") + theme_classic() + xlab("Genotype prob. (A)") + ylab("Genotype prob. (B)") + 
   ggtitle("Mutation matrix type A vs. B")
@@ -159,7 +222,7 @@ ab_statdist + bc_statdist
 
 ![](matrix_comparison_files/figure-markdown_github/stationarydist-2.png)
 
-These figures show that the stationary distributions of genotype variants for the main network components in each background is highly correlated between the two mutation rate specifications. However, they are not exactly the same, so next we will evaluate how do these differences affect the inferred *phenotypic* evolutionary outcomes.
+The stationary distributions of genotype variants for the main network components in each background is highly correlated and highly simialr between the two mutation rate specifications (cor &gt;= 0.95; SSE =&lt; 10^-3). However, they are not exactly the same, so next we will evaluate how do these differences affect the inferred *phenotypic* evolutionary outcomes.
 
 ## Evolution of phenotypes
 
@@ -180,6 +243,13 @@ print(paste("Correlation of the prob. of phenotypic outcomes at equilibrium for 
     ## [1] "Correlation of the prob. of phenotypic outcomes at equilibrium for AncSR1 bg: 0.99375901070937"
 
 ``` r
+print(paste("SSE of the prob. of phenotypic outcomes at equilibrium for AncSR1 bg:",
+            inner_join(typeB_sr1_pdfv,typeC_sr1_pdfv,by="RE") %>% with(sum((Norm_F_prob.x-Norm_F_prob.y)^2)))) # SSE
+```
+
+    ## [1] "SSE of the prob. of phenotypic outcomes at equilibrium for AncSR1 bg: 0.00134960046067692"
+
+``` r
 a <- inner_join(typeB_sr1_pdfv,typeC_sr1_pdfv,by="RE") %>% ggplot(aes(x=Norm_F_prob.x,y=Norm_F_prob.y)) + geom_point(fill="black") +
   geom_abline(slope = 1,intercept = 0,col="red") + theme_classic() + xlab("Phenotype prob. (B)") + ylab("Phenotype prob. (C)") + 
   ggtitle("Mutation matrix type B vs. C (Stat. dist.)")
@@ -196,6 +266,13 @@ print(paste("Correlation of the prob. of phenotypic outcomes at equilibrium for 
     ## [1] "Correlation of the prob. of phenotypic outcomes at equilibrium for AncSR2 bg: 0.998688672405487"
 
 ``` r
+print(paste("SSE of the prob. of phenotypic outcomes at equilibrium for AncSR2 bg:",
+            inner_join(typeB_sr2_pdfv,typeC_sr2_pdfv,by="RE") %>% with(sum((Norm_F_prob.x-Norm_F_prob.y)^2)))) # SSE
+```
+
+    ## [1] "SSE of the prob. of phenotypic outcomes at equilibrium for AncSR2 bg: 0.000286299136059083"
+
+``` r
 c <- inner_join(typeB_sr2_pdfv,typeC_sr2_pdfv,by="RE") %>% ggplot(aes(x=Norm_F_prob.x,y=Norm_F_prob.y)) + geom_point(fill="black") +
   geom_abline(slope = 1,intercept = 0,col="red") + theme_classic() + xlab("Phenotype prob. (B)") + ylab("Phenotype prob. (C)") + 
   ggtitle("Mutation matrix type B vs. C (Stat. dist.)")
@@ -206,7 +283,7 @@ d <- circular_PDFV_v2(list(typeB_sr2_pdfv,typeC_sr2_pdfv),cols = cols[2:3],title
 
 ![](matrix_comparison_files/figure-markdown_github/pdfv_statdist-1.png)
 
-We can see that the probabilities of evolving each phenotypic at equilibrium are highly correlated.
+We can see that the probabilities of evolving each phenotypic at equilibrium are highly correlated and almost identical.
 
 Now, let's compare the probabilities of evolving each phenotypic outcome from EGKA after 3 mutation steps.
 
@@ -233,6 +310,13 @@ print(paste("Correlation of the prob. of phenotypic outcomes from EGKA for AncSR
     ## [1] "Correlation of the prob. of phenotypic outcomes from EGKA for AncSR1 bg: 1"
 
 ``` r
+print(paste("SSE of the prob. of phenotypic outcomes from EGKA for AncSR1 bg:",
+            inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% with(sum((Norm_F_prob.x-Norm_F_prob.y)^2)))) #SSE
+```
+
+    ## [1] "SSE of the prob. of phenotypic outcomes from EGKA for AncSR1 bg: 1.54074395550979e-33"
+
+``` r
 e <- inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% 
   ggplot(aes(x=Norm_F_prob.x,y=Norm_F_prob.y)) + geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + 
   theme_classic() + xlab("Phenotype prob. (B)") + ylab("Phenotype prob. (C)") + 
@@ -251,6 +335,13 @@ print(paste("Correlation of the prob. of phenotypic outcomes from EGKA for AncSR
     ## [1] "Correlation of the prob. of phenotypic outcomes from EGKA for AncSR2 bg: 0.998099982439449"
 
 ``` r
+print(paste("SSE of the prob. of phenotypic outcomes from EGKA for AncSR2 bg:",
+            inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% with(sum((Norm_F_prob.x-Norm_F_prob.y)^2)))) #SSE
+```
+
+    ## [1] "SSE of the prob. of phenotypic outcomes from EGKA for AncSR2 bg: 0.000248715939056408"
+
+``` r
 g <- inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% 
   ggplot(aes(x=Norm_F_prob.x,y=Norm_F_prob.y)) + geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + 
   theme_classic() + xlab("Phenotype prob. (B)") + ylab("Phenotype prob. (C)") + 
@@ -262,7 +353,7 @@ h <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_geno
 
 ![](matrix_comparison_files/figure-markdown_github/pdfv_mc-1.png)
 
-We can see that the probabilities of evolving each phenotypic after 3 amino acid mutation steps from EGKA are highly correlated.
+We can see that the probabilities of evolving each phenotypic after 3 amino acid mutation steps from EGKA are highly correlated and almost identical.
 
 Finally, let's see how similar are the phenotypic transition probabilities - the probability of evolving a given RE specificity given that evolution begins from certain RE specific phenotype.
 
@@ -296,6 +387,20 @@ print(paste("Correlation for phenotypic transitions between B and C for AncSR2 b
 ```
 
     ## [1] "Correlation for phenotypic transitions between B and C for AncSR2 bg: 0.998735401174108"
+
+``` r
+print(paste("SSE for phenotypic transitions between B and C for AncSR1 bg:",
+            SSE_for_matrices(na.omit(pheno_transition_sr1_spec_scaled_B),na.omit(pheno_transition_sr1_spec_scaled_C))))
+```
+
+    ## [1] "SSE for phenotypic transitions between B and C for AncSR1 bg: 1.95930240050555"
+
+``` r
+print(paste("SSE for phenotypic transitions between B and C for AncSR2 bg:",
+            SSE_for_matrices(na.omit(pheno_transition_sr2_spec_scaled_B),na.omit(pheno_transition_sr2_spec_scaled_C))))
+```
+
+    ## [1] "SSE for phenotypic transitions between B and C for AncSR2 bg: 0.531131506874762"
 
 ``` r
 # Heatmaps
