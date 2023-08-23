@@ -49,7 +49,7 @@ where $\rho_{ij}$ represents the mutation rate from genotype $i$ to $j$. This ra
 
 ## Reading in data
 
-```{r readrda, include=FALSE, message=FALSE}
+```{r readrda, message=FALSE}
 load("./matrix_comparison.RData") # loading the matrices
 source("../MC_MutSel_functions.R") # loading functions
 ```
@@ -214,7 +214,8 @@ pdfv_Drift_ref_genotype_sr1_typeB <- get_PDFV_v2(mc_Drift_ref_genotype_sr1_typeB
                                                  model = "From EGKA (B)",specific = F,type="simulated mc")
 pdfv_Drift_ref_genotype_sr1_typeC <- get_PDFV_v2(mc_Drift_ref_genotype_sr1_typeC,Bg = "AncSR1",
                                                   model = "From EGKA (C)",specific = F,type="simulated mc")
-inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)) # correlation
+print(paste("Correlation of the prob. of phenotypic outcomes from EGKA for AncSR1 bg:",
+            inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)))) # correlation
 
 e <- inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% 
   ggplot(aes(x=Norm_F_prob.x,y=Norm_F_prob.y)) + geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + 
@@ -227,7 +228,8 @@ pdfv_Drift_ref_genotype_sr2_typeB <- get_PDFV_v2(mc_Drift_ref_genotype_sr2_typeB
                                                  model = "From EGKA (B)",specific = F,type="simulated mc")
 pdfv_Drift_ref_genotype_sr2_typeC <- get_PDFV_v2(mc_Drift_ref_genotype_sr2_typeC,Bg = "AncSR2",
                                                   model = "From EGKA (C)",specific = F,type="simulated mc")
-inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)) # correlation
+print(paste("Correlation of the prob. of phenotypic outcomes from EGKA for AncSR2 bg:",
+            inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)))) # correlation
 
 g <- inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% 
   ggplot(aes(x=Norm_F_prob.x,y=Norm_F_prob.y)) + geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + 

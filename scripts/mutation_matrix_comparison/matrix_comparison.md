@@ -14,6 +14,11 @@ We are modeling the transition probabilities between DBD variant genotypes as a 
 ## Reading in data
 
 ``` r
+load("./matrix_comparison.RData") # loading the matrices
+source("../MC_MutSel_functions.R") # loading functions
+```
+
+``` r
 ## GLOBAL PARAMETERS ##
 # Phenotypes of reference wild-type ancestral genotypes:
 AncSR1_ERE_ref <- meanF_data %>% filter(AA_var == "EGKA" & REBC == "AncSR1_REBC3") %>% pull(avg_meanF)
@@ -221,10 +226,11 @@ pdfv_Drift_ref_genotype_sr1_typeB <- get_PDFV_v2(mc_Drift_ref_genotype_sr1_typeB
                                                  model = "From EGKA (B)",specific = F,type="simulated mc")
 pdfv_Drift_ref_genotype_sr1_typeC <- get_PDFV_v2(mc_Drift_ref_genotype_sr1_typeC,Bg = "AncSR1",
                                                   model = "From EGKA (C)",specific = F,type="simulated mc")
-inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)) # correlation
+print(paste("Correlation of the prob. of phenotypic outcomes from EGKA for AncSR1 bg:",
+            inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)))) # correlation
 ```
 
-    ## [1] 1
+    ## [1] "Correlation of the prob. of phenotypic outcomes from EGKA for AncSR1 bg: 1"
 
 ``` r
 e <- inner_join(pdfv_Drift_ref_genotype_sr1_typeB,pdfv_Drift_ref_genotype_sr1_typeC,by="RE") %>% 
@@ -238,10 +244,11 @@ pdfv_Drift_ref_genotype_sr2_typeB <- get_PDFV_v2(mc_Drift_ref_genotype_sr2_typeB
                                                  model = "From EGKA (B)",specific = F,type="simulated mc")
 pdfv_Drift_ref_genotype_sr2_typeC <- get_PDFV_v2(mc_Drift_ref_genotype_sr2_typeC,Bg = "AncSR2",
                                                   model = "From EGKA (C)",specific = F,type="simulated mc")
-inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)) # correlation
+print(paste("Correlation of the prob. of phenotypic outcomes from EGKA for AncSR2 bg:",
+            inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% with(cor(Norm_F_prob.x,Norm_F_prob.y)))) # correlation
 ```
 
-    ## [1] 0.9981
+    ## [1] "Correlation of the prob. of phenotypic outcomes from EGKA for AncSR2 bg: 0.998099982439449"
 
 ``` r
 g <- inner_join(pdfv_Drift_ref_genotype_sr2_typeB,pdfv_Drift_ref_genotype_sr2_typeC,by="RE") %>% 
