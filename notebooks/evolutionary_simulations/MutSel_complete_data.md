@@ -78,7 +78,10 @@ $$
 
 Although we are assuming no mutation bias and reversibility, we can weight the fixation probablities by a *mutation rate*. The mutation rate aims to capture an important aspect of the mutation process: the mapping from codon-to-amino acid, thus capturing the accessibility of genotype variants through the structure of the genetic code.
 
-Mutation rates (*ρ*<sub>*i**j*</sub>) can be defined in multiple ways, but we use two equivalent definitions: - All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability equal to the *fraction of codons* from amino acid *i* that can access amino acid *j* via single nucleotide mutations (i.e., mutational propensity). - All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability proportional to the *number of nucleotide changes* that can encode each amino acid change - accounting for all the possible synonymous backgrounds (i.e., codon bias).
+Mutation rates (*ρ*<sub>*i**j*</sub>) can be defined in multiple ways, but we use two equivalent definitions:
+
+-   All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability equal to the *fraction of codons* from amino acid *i* that can access amino acid *j* via single nucleotide mutations (i.e., mutational propensity).
+-   All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability proportional to the *number of nucleotide changes* that can encode each amino acid change - accounting for all the possible synonymous backgrounds (i.e., codon bias).
 
 A reasonable assumption in both cases is that a population fixed for a given amino acid genotype, may explore all synonymous codons; i.e., the population is *delocalized* at the nucleotide level but fixed at the amino acid level.
 
@@ -342,14 +345,18 @@ For the first question, we are interested in the PDFV that arises through random
 
 ``` r
 # Variational propensities
-var.prop_AncSR1_df <- get_PDFV_v2(type="network",Bg="AncSR1",model="Prop.Exp.")
-var.prop_AncSR2_df <- get_PDFV_v2(type="network",Bg="AncSR2",model="Prop.Exp.")
+var.prop_AncSR1_df <- get_PDFV_v2(type="network",Bg="AncSR1",model="Binding")
+var.prop_AncSR1_df2 <- get_PDFV_v2(type="network",Bg="AncSR1",model="Specific Binding",specific = TRUE) %>% filter(RE != "Promiscuous") %>% 
+                                    mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
+var.prop_AncSR2_df <- get_PDFV_v2(type="network",Bg="AncSR2",model="Binding")
+var.prop_AncSR2_df2 <- get_PDFV_v2(type="network",Bg="AncSR2",model="Specific Binding",specific = TRUE) %>% filter(RE != "Promiscuous") %>% 
+                                    mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
 
-# Plot proportional expectations for each DBD
-prop_sr1 <- circular_PDFV_v2(var.prop_AncSR1_df,title="AncSR1\nVariational propensity",legend=F)
-prop_sr2 <- circular_PDFV_v2(var.prop_AncSR2_df,title="AncSR2\nVariational propensity",legend=F)
+# Plot variational propensities for each DBD
+a <- circular_PDFV_v2(list(var.prop_AncSR1_df,var.prop_AncSR1_df2),cols = c("#1D1D35","#00ACBF"),fill=F,title = "AncSR1\nVariational propensity")
+b <- circular_PDFV_v2(list(var.prop_AncSR2_df,var.prop_AncSR2_df2),cols = c("#1D1D35","#00ACBF"),fill=F,legend = F,title = "AncSR2\nVariational propensity")
 
-prop_sr1 + prop_sr2
+a + b
 ```
 
 ![](MutSel_complete_data_files/figure-markdown_github/variational_prop-1.png)
@@ -396,7 +403,7 @@ These figures show the PDFV that arises from random mutation in each DBD backgro
 
 -   The AncSR1 background only produces 10/16 phenotypes upon random mutation, while AncSR2 can produce all 16 phenotypes (Note that this is using AncSR2/SRE1 wt as the functional reference).
 -   The PDFV for each DBD background are aligned with the wild-type phenotypes. The most frequently produced phenotype is the wild type-phenotype of each ancestral protein, ERE and SRE1, respectively.
--   The shape of the PDFV changed along the phylogenetic trajectory. The variational properties of AncSR1 and AncSR2 are significantly different (Goodness of fit P-values = 0).
+-   The shape of the PDFV changed along the phylogenetic trajectory. The variational properties of AncSR1 and AncSR2 are significantly different (Goodness of fit *P-values* = 0).
 
 Now let's explore the second question. Since we have already computed the stationary distributions of genotypes for each `P` matrix, we can use these distributions to compute the PDFV at equilibrium.
 
@@ -407,13 +414,13 @@ Now let's explore the second question. Since we have already computed the statio
 stat_pdfv_drift_sr1 <- get_PDFV_v2(P_drift_sr1_ntwrk_statdist,type="simulated mc",Bg="AncSR1",model="Drift")
 stat_pdfv_dir_sr1 <- get_PDFV_v2(P_dir_sr1_ntwrk_statdist,type="simulated mc",Bg="AncSR1",model="Dir. sln.")
 
-p1 <- circular_PDFV_v2(list(var.prop_AncSR1_df,stat_pdfv_drift_sr1,stat_pdfv_dir_sr1),cols = c(cols[2:3],"gray60"),title = "AncSR1: Stationary PDFVs")
+p1 <- circular_PDFV_v2(list(var.prop_AncSR1_df,stat_pdfv_drift_sr1,stat_pdfv_dir_sr1),cols = c(cols[2:3],"gray60"),title = "AncSR1: Stationary PDFVs",fill = F)
 
 # AncSR2
 stat_pdfv_drift_sr2 <- get_PDFV_v2(P_drift_sr2_ntwrk_statdist,type="simulated mc",Bg="AncSR2",model="Drift")
 stat_pdfv_dir_sr2 <- get_PDFV_v2(P_dir_sr2_ntwrk_statdist,type="simulated mc",Bg="AncSR2",model="Dir. sln.")
 
-p2 <- circular_PDFV_v2(list(var.prop_AncSR2_df,stat_pdfv_drift_sr2,stat_pdfv_dir_sr2),cols = c(cols[2:3],"gray60"),title = "AncSR2: Stationary PDFVs",legend = F)
+p2 <- circular_PDFV_v2(list(var.prop_AncSR2_df,stat_pdfv_drift_sr2,stat_pdfv_dir_sr2),cols = c(cols[2:3],"gray60"),title = "AncSR2: Stationary PDFVs",legend = F,fill = F)
 
 p1+p2
 ```
@@ -512,8 +519,8 @@ pdfv_Drift_ref_genotype_sr2 <- get_PDFV_v2(mc_Drift_ref_genotype_sr2,Bg = "AncSR
 pdfv_DirSln_ref_genotype_sr2 <- get_PDFV_v2(mc_DirSln_ref_genotype_sr2,Bg = "AncSR2",model = "Dir. Sln.",specific = TRUE,type="simulated mc")
 
 # plots inclusing promiscuous as extra phenotype
-p1 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1,pdfv_DirSln_ref_genotype_sr1),cols = cols[2:3],title = "AncSR1:EGKA")
-p2 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2,pdfv_DirSln_ref_genotype_sr2),cols = cols[2:3],title = "AncSR2:EGKA",legend = F)
+p1 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1,pdfv_DirSln_ref_genotype_sr1),cols = cols[2:3],title = "AncSR1:EGKA",fill = F)
+p2 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2,pdfv_DirSln_ref_genotype_sr2),cols = cols[2:3],title = "AncSR2:EGKA",legend = F,fill = F)
 p1 + p2
 ```
 
@@ -527,8 +534,8 @@ pdfv_DirSln_ref_genotype_sr1_b <- pdfv_DirSln_ref_genotype_sr1 %>% filter(RE != 
 pdfv_Drift_ref_genotype_sr2_b <- pdfv_Drift_ref_genotype_sr2 %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
 pdfv_DirSln_ref_genotype_sr2_b <- pdfv_DirSln_ref_genotype_sr2 %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
 
-p3 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1_b,pdfv_DirSln_ref_genotype_sr1_b),cols = cols[2:3],title = "AncSR1:EGKA")
-p4 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2_b,pdfv_DirSln_ref_genotype_sr2_b),cols = cols[2:3],title = "AncSR2:EGKA",legend = F)
+p3 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1_b,pdfv_DirSln_ref_genotype_sr1_b),cols = cols[2:3],title = "AncSR1:EGKA",fill = F)
+p4 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2_b,pdfv_DirSln_ref_genotype_sr2_b),cols = cols[2:3],title = "AncSR2:EGKA",legend = F,fill = F)
 p3 + p4
 ```
 
