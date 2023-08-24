@@ -48,8 +48,10 @@ source("../../scripts/MC_MutSel_functions.R")
 ### Strong Selection-Weak Mutation (SSWM) regime
 
 Under the SSWM regime, the mutation rate is low enough such that the time to fixation of a mutation is much lower than the time between subsequent mutations (Gillespie, 1984). Thus, trajectories on a genotype landscape can be modeled as an stepwise, origin-fixation process. Specifically, the rate of fixation from allele *i* to *j* is a product of the rate of introduction of allele *j* in the population and the probability that it goes to fixation, like so
+
 *Q*(*i*, *j*)=2*N*<sub>*e*</sub>*μ*<sub>*i**j*</sub> × *P*<sub>fix</sub>(*j*; *s*<sub>*i**j*</sub>, *N*<sub>*e*</sub>),
- where *μ*<sub>*i**j*</sub> is the mutation rate from allele *i* to *j*, *s*<sub>*i**j*</sub> is the selection coefficient, and *N*<sub>*e*</sub> is the effective population size. When *s*<sub>*i**j*</sub> ≠ 0, the fixation probability, *P*<sub>fix</sub>(*j*; *s*<sub>*i**j*</sub>, *N*<sub>*e*</sub>) is given by the Kimura equation (Kimura, 1962):
+
+where *μ*<sub>*i**j*</sub> is the mutation rate from allele *i* to *j*, *s*<sub>*i**j*</sub> is the selection coefficient, and *N*<sub>*e*</sub> is the effective population size. When *s*<sub>*i**j*</sub> ≠ 0, the fixation probability, *P*<sub>fix</sub>(*j*; *s*<sub>*i**j*</sub>, *N*<sub>*e*</sub>) is given by the Kimura equation (Kimura, 1962):
 
 $$
 P\_{\\text{fix}}(j) = \\begin{cases}
@@ -59,12 +61,15 @@ P\_{\\text{fix}}(j) = \\begin{cases}
 $$
 
 To precisely model an origin-fixation walk on an empirical genotype-phenotype (GP) map, we need to compute *P*(*i*, *j*), the probability that the *next* mutation will be *j*. That is, we need to account for the local structure of the network around the focal node *i*. Thus,
+
 $$
 P(i,j) = \\frac{Q(i,j)}{ \\sum\_{k \\neq i} Q(i,k)} ,
 $$
- where *k* are all nodes connected to node *i* (McCandlish and Stoltzfus, 2014).
+
+where *k* are all nodes connected to node *i* (McCandlish and Stoltzfus, 2014).
 
 **Some assumptions:** Assuming a constant population size (*N*<sub>*e*</sub>), and no mutation bias and reversibility ($ *{ij} = *{ji} = \_{ik} $), the probability that the next mutation will be *j* becomes a function of the rescaled fixation probabilities alone, such that
+
 $$
 P(i,j) = \\frac{2N\_e\\mu\_{ij} \\times P\_{\\text{fix}}(j)}{\\sum\_{k \\neq i}2N\_e\\mu\_{ik} \\times P\_{\\text{fix}}(k)} \\
 = (\\frac{2N\_e\\mu\_{ij}}{2N\_e\\mu\_{ik}}) \\times \\frac{P\_{\\text{fix}}(j)}{\\sum\_{k \\neq i} P\_{\\text{fix}}(k)} \\\\
@@ -108,16 +113,19 @@ We used Muñiz et al.'s dataset to estimate the parameters of two relevant fitne
 $$
 F(g)\_{\\text{Log}} = \\frac{L}{1 + e^{-k(\\Delta F - \\Delta F\_0)}}
 $$
- where, *L* is the maximum fitness, *k* is the steepness, and *Δ**F*<sub>0</sub> is the midpoint.
+
+where, *L* is the maximum fitness, *k* is the steepness, and *Δ**F*<sub>0</sub> is the midpoint.
 
 $$
 F(g)\_{\\text{Norm}} = S .e^{\\frac{1}{2}(\\frac{(\\Delta F - \\bar{\\Delta F}}{\\sigma})^2}
 $$
- where *S* is a scaling factor that determines the maximum fitness, $\\bar{\\Delta F}$ is the average effect on phenotype, and *σ* is the standard deviation of the effect on phenotype.
+
+where *S* is a scaling factor that determines the maximum fitness, $\\bar{\\Delta F}$ is the average effect on phenotype, and *σ* is the standard deviation of the effect on phenotype.
 
 The phylogenetic mutation-selection model assumes exponential growth, continuous time, overlapping generations, and no density- or frequency-dependent selection. Under these assumptions the fitness corresponds to the 'normalized' growth rate, *N*<sub>*e*</sub> × *r*<sub>*i*</sub>, where *N*<sub>*e*</sub> is population size and *r*<sub>*i*</sub> is the variant-specific instantaneous growth rate.
 
 We also specified a step function that models the scenario of random walk. In this case, fitness of functional variants are the same:
+
 $$
 F(g)\_{\\text{step}} = \\begin{cases}
 0 & \\text{when } \\hat F &lt; F\_{\\text{ref. genotype}} \\\\
@@ -126,6 +134,7 @@ F(g)\_{\\text{step}} = \\begin{cases}
 $$
 
 For a population with two competing genotypes, *i* and *j*, with respective fitnesses (i.e., growth rates) *N*<sub>*e*</sub>*r*<sub>*i*</sub> and *N*<sub>*e*</sub>*r*<sub>*j*</sub>, we can define the selection coefficient *s*<sub>*i**j*</sub> as:
+
 $$
 N\_e \\times s\_{ij} = (N\_e \\times r\_j) - (N\_e \\times r\_i) \\\\ 
 = N\_e \\times (r\_j - r\_i)
@@ -140,14 +149,18 @@ We are interested in understanding how likely was each of the 16 DNA binding phe
 The evolution of a DNA binding phenotype depends on two features of the genotype-phenotype map: 1) the number of accessible neighbors, at each mutation step, with the new function, and 2) the total number of genotypes that encode the function. Let {*G*} be the complete set of genotypes in the network. Thus, the probability of evolving *R**E*<sub>*i*</sub> (*P*(*R**E*<sub>*i*</sub>)) is conditional on the starting set of genotypes {*G*<sub>0</sub>}, the length of the mutational trajectory *S*, and the structure of the genotype-phenotye map.
 
 We need to find the probabilty distribution over the states of {*G*} after N steps of a Markov chain. That is, the probability that the substitution process will result in each genotype given the origin-fixation dynamics given by the transition matrix *P* (where the probability of moving from genotype *i* to genotype *j* is *P*(*i*, *j*)). The row vector *π*<sub>(*S*)</sub> containing the distribution over the states of {*G*} after *S* substitutions is:
+
 *π*<sub>(*S*)</sub> = *π*<sub>(0)</sub> × *P*<sup>*S*</sup>
- for *S* &gt; 0, where *π*<sub>(0)</sub> is the vector of state frequencies at time step = 0 for every state in {*G*}. Since the transition matrices *P* can be specified under different selection scenarios, this effectively captures the probabilities of the possible realizations of the process for each biological scenario.
+
+for *S* &gt; 0, where *π*<sub>(0)</sub> is the vector of state frequencies at time step = 0 for every state in {*G*}. Since the transition matrices *P* can be specified under different selection scenarios, this effectively captures the probabilities of the possible realizations of the process for each biological scenario.
 
 We can use the DMS data to assign a function to each genotype of the vector *π*<sub>(*S*)</sub>. Thus, the conditional probability of evolving any DNA binding funciton expressed in terms of the Markov chain becomes:
+
 $$
 P(RE\_i|\\pi\_{(0)},S,P) = \\frac{\\sum\_{j \\in RE\_i} \\pi\_{(S)j}}{\\sum\_{i=1}^{k} (\\sum\_{j \\in RE\_i} \\pi\_{(S)j})\_i}
 $$
- where the numerator is the sum of the probailities of all the genotypes encoding the DNA binding function *R**E*<sub>*i*</sub> after *S* substitutions, and the denominator is a normalization constant with *k* = 16 such that ∑<sub>*i*</sub>*P*(*R**E*<sub>*i*</sub>|*π*<sub>(0)</sub>, *S*, *P*)=1.
+
+where the numerator is the sum of the probailities of all the genotypes encoding the DNA binding function *R**E*<sub>*i*</sub> after *S* substitutions, and the denominator is a normalization constant with *k* = 16 such that ∑<sub>*i*</sub>*P*(*R**E*<sub>*i*</sub>|*π*<sub>(0)</sub>, *S*, *P*)=1.
 
 For *k* different DNA binding phenotypes, we obtain a probability distribution of functional variation (PDFV), a multinomial probability distribution, around any set of starting genotypes {*G*<sub>0</sub>} that quantifies the likelihood that evolution will produce a particular phenotypic outcome given a set of conditions.
 
@@ -259,6 +272,68 @@ We can explore how each molecular evolutionary scenario interacts with the struc
 
 Because the scenario of purifying selection + drift treats all functional variants as equally fit, this scenario is a purely mutation-driven process and we should expect the stationary distributions of genotypes from the `M` and `P` matrices to be the same. In contrast, directional selection can introduce deviations because of fitness differences between variants.
 
+``` r
+print("Statonary distribution of genotypes:")
+```
+
+    ## [1] "Statonary distribution of genotypes:"
+
+``` r
+# AncSR1
+print(paste("Correlation between M and P matrices for AncSR1 bg under drift:",cor(M_mat_sr1_ntwrk_statdist,P_drift_sr1_ntwrk_statdist)))
+```
+
+    ## [1] "Correlation between M and P matrices for AncSR1 bg under drift: 1"
+
+``` r
+print(paste("Correlation between M and P matrices for AncSR1 bg under directional sln:",
+            cor(M_mat_sr1_ntwrk_statdist,P_dir_sr1_ntwrk_statdist)))
+```
+
+    ## [1] "Correlation between M and P matrices for AncSR1 bg under directional sln: 0.811314422033006"
+
+``` r
+a <- data.frame(X=M_mat_sr1_ntwrk_statdist,Y=P_drift_sr1_ntwrk_statdist) %>% ggplot(aes(x=X,y=Y)) + 
+  geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + theme_classic() + xlab("Genotype prob. (M matrix)") +
+  ylab("Genotype prob. (P matrix)") + ggtitle("Drift")
+
+b <- data.frame(X=M_mat_sr1_ntwrk_statdist,Y=P_dir_sr1_ntwrk_statdist) %>% ggplot(aes(x=X,y=Y)) + 
+  geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + theme_classic() + xlab("Genotype prob. (M matrix)") +
+  ylab("Genotype prob. (P matrix)") + ggtitle("Directional sln.")
+
+a+b
+```
+
+![](MutSel_complete_data_files/figure-markdown_github/m_p_matrices-1.png)
+
+``` r
+# AncSR2
+print(paste("Correlation between M and P matrices for AncSR2 bg under drift:",cor(M_mat_sr2_ntwrk_statdist,P_drift_sr2_ntwrk_statdist)))
+```
+
+    ## [1] "Correlation between M and P matrices for AncSR2 bg under drift: 0.999918991741479"
+
+``` r
+print(paste("Correlation between M and P matrices for AncSR2 bg under directional sln:",
+            cor(M_mat_sr2_ntwrk_statdist,P_dir_sr2_ntwrk_statdist)))
+```
+
+    ## [1] "Correlation between M and P matrices for AncSR2 bg under directional sln: 0.866236719978004"
+
+``` r
+c <- data.frame(X=M_mat_sr2_ntwrk_statdist,Y=P_drift_sr2_ntwrk_statdist) %>% ggplot(aes(x=X,y=Y)) + 
+  geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + theme_classic() + xlab("Genotype prob. (M matrix)") +
+  ylab("Genotype prob. (P matrix)") + ggtitle("Drift")
+
+d <- data.frame(X=M_mat_sr2_ntwrk_statdist,Y=P_dir_sr2_ntwrk_statdist) %>% ggplot(aes(x=X,y=Y)) + 
+  geom_point(fill="black") + geom_abline(slope = 1,intercept = 0,col="red") + theme_classic() + xlab("Genotype prob. (M matrix)") +
+  ylab("Genotype prob. (P matrix)") + ggtitle("Directional sln.")
+
+c+d
+```
+
+![](MutSel_complete_data_files/figure-markdown_github/m_p_matrices-2.png)
+
 As expected, we see that the stationary distribution of genotypes from `M` and `P` matrices for the random walk scenario are the same. In contrast, directional selection reduces the correlation by ~15-20%.
 
 Let's now explore the questions in more detail. For this, we are interested in characterizing the **Probability Distribution of Functional Variation (PDFV)**, that is, the relative probability of accessing any of the 16 DNA binding elements by single mutations.
@@ -317,7 +392,11 @@ chisq.test(x=as.vector(d$count.y),p=as.vector(d$mod_prop))
     ## data:  as.vector(d$count.y)
     ## X-squared = 1.1568e+308, df = 15, p-value < 2.2e-16
 
-These figures show the PDFV that arises from random mutation in each DBD background. There are three key results here: - The AncSR1 background only produces 10/16 phenotypes upon random mutation, while AncSR2 can produce all 16 phenotypes (Note that this is using AncSR2/SRE1 wt as the functional reference). - The PDFV for each DBD background are aligned with the wild-type phenotypes. The most frequently produced phenotype is the wild type-phenotype of each ancestral protein, ERE and SRE1, respectively. - The shape of the PDFV changed along the phylogenetic trajectory. The variational properties of AncSR1 and AncSR2 are significantly different (Goodness of fit P-values = 0).
+These figures show the PDFV that arises from random mutation in each DBD background. There are three key results here:
+
+-   The AncSR1 background only produces 10/16 phenotypes upon random mutation, while AncSR2 can produce all 16 phenotypes (Note that this is using AncSR2/SRE1 wt as the functional reference).
+-   The PDFV for each DBD background are aligned with the wild-type phenotypes. The most frequently produced phenotype is the wild type-phenotype of each ancestral protein, ERE and SRE1, respectively.
+-   The shape of the PDFV changed along the phylogenetic trajectory. The variational properties of AncSR1 and AncSR2 are significantly different (Goodness of fit P-values = 0).
 
 Now let's explore the second question. Since we have already computed the stationary distributions of genotypes for each `P` matrix, we can use these distributions to compute the PDFV at equilibrium.
 
@@ -575,11 +654,6 @@ p2 <- do.call(rbind,genotype_types_sr2) %>% rbind(.,s0_type) %>%
   scale_x_continuous(breaks=seq(0,10,1),labels=c(seq(0,10,1)))
 p1 + p2
 ```
-
-    ## Don't know how to automatically pick scale for object of type <table>.
-    ## Defaulting to continuous.
-    ## Don't know how to automatically pick scale for object of type <table>.
-    ## Defaulting to continuous.
 
 ![](MutSel_complete_data_files/figure-markdown_github/mc_chains_ref_genotype_c-1.png)
 
