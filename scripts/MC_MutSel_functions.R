@@ -309,6 +309,19 @@ fitness_logistic <- function(mF,L,k,x_o){
   f
 }
 
+# Logistic function: For scenario of directional selection and drift using a reference genotype
+fitness_logistic_ref <- function(mF,L,k,x_o,mF_ref){
+  # mF = meanF of allele, i.e., phenotype (dbl)
+  # L = maximum fitness (dbl)
+  # x_o = midpoint (dbl)
+  # k = logistic grouth rate (steepness) (dbl)
+  # Fitness corresponds to the exponential growth rate = N*r
+  mF <- mF - AncSR1_ERE_ref # transform deltaF values to phenotypic values. dF = 0 --> meanF = AncSR1_ERE_ref
+  mF_ref <- mF_ref - AncSR1_ERE_ref
+  f <- ifelse(mF < mF_ref,0, L / (1 + exp(-k*(mF-x_o))))
+  f
+}
+
 # Normal ('bell shaped') curve: For scenario of stabilizing selection
 fitness_normal <- function(mF,u,sd,scale){
   # mF = meanF of allele, i.e., phenotype (dbl)
@@ -317,6 +330,17 @@ fitness_normal <- function(mF,u,sd,scale){
   # scale = scaling factor to specify the maximum height (max fitness) (dbl)
   # Fitness corresponds to the exponential growth rate = N*r
   f <- exp(-0.5 * ((mF - u) / sd)^2) * scale
+  f
+}
+
+# Normal ('bell shaped') curve: For scenario of stabilizing selection using a reference genotype
+fitness_normal_ref <- function(mF,u,sd,scale,mF_ref){
+  # mF = meanF of allele, i.e., phenotype (dbl)
+  # u = mean of the distribution (dbl)
+  # sd = standard deviation (dbl)
+  # scale = scaling factor to specify the maximum height (max fitness) (dbl)
+  # Fitness corresponds to the exponential growth rate = N*r
+  f <- ifelse(mF < mF_ref,0, exp(-0.5 * ((mF - u) / sd)^2) * scale)
   f
 }
 
