@@ -84,10 +84,10 @@ source("../../scripts/MC_MutSel_functions.R")
 Under the SSWM regime, the mutation rate is low enough such that the time to fixation of a mutation is much lower than the time between subsequent mutations (Gillespie, 1984). Thus, trajectories on a genotype landscape can be modeled as an stepwise, origin-fixation process. Specifically, the rate of fixation from allele $i$ to $j$ is a product of the rate of introduction of allele $j$ in the population and the probability that it goes to fixation, like so 
 
 $$
-Q(i,j) = 2N_e\mu_{ij} \times P_{\text{fix}}(j;s_{ij},N_e) ,
+Q(i,j)=2N_e\mu_{ij} \times P_{\text{fix}}(j;s_{ij},N_e),
 $$
 
-where $\mu_{ij}$ is the mutation rate from allele $i$ to $j$, $s_{ij}$ is the selection coefficient, and $N_e$ is the effective population size. When $s_{ij} \neq 0$, the fixation probability, $P_{\text{fix}}(j;s_{ij},N_e)$ is given by the Kimura equation (Kimura, 1962):
+where $\mu_ {ij}$ is the mutation rate from allele $i$ to $j$, $s_ {ij}$ is the selection coefficient, and $N_e$ is the effective population size. When $s_ {ij} \neq 0$, the fixation probability, $P_{\text{fix}}(j;s_ {ij},N_e)$ is given by the Kimura equation (Kimura, 1962):
 
 $$
 P_{\text{fix}}(j) = \begin{cases}
@@ -104,7 +104,7 @@ $$
 
 where $k$ are all nodes connected to node $i$ (McCandlish and Stoltzfus, 2014).
 
-**Some assumptions:** Assuming a constant population size ($N_e$), and no mutation bias and reversibility ($ \mu_{ij} = \mu_{ji} = \mu_{ik} $), the probability that the next mutation will be $j$ becomes a function of the rescaled fixation probabilities alone, such that 
+**Some assumptions:** Assuming a constant population size ($N_e$), and no mutation bias and reversibility ($\mu_ {ij} = \mu_ {ji} = \mu_ {ik}$), the probability that the next mutation will be $j$ becomes a function of the rescaled fixation probabilities alone, such that 
 
 $$
 P(i,j) = \frac{2N_e\mu_{ij} \times P_{\text{fix}}(j)}{\sum_{k \neq i}2N_e\mu_{ik} \times P_{\text{fix}}(k)} \
@@ -112,9 +112,9 @@ P(i,j) = \frac{2N_e\mu_{ij} \times P_{\text{fix}}(j)}{\sum_{k \neq i}2N_e\mu_{ik
 = \frac{P_{\text{fix}}(j)}{\sum_{k \neq i}P_{\text{fix}}(k)}
 $$
 
-Although we are assuming no mutation bias and reversibility, we can weight the fixation probablities by a *mutation rate*. The mutation rate aims to capture an important aspect of the mutation process: the mapping from codon-to-amino acid, thus capturing the accessibility of genotype variants through the structure of the genetic code.
+Although we are assuming no mutation bias and reversibility, we can weight the fixation probablities by a *mutational accessibility rate* (MAR). The MAR aims to capture an important aspect of the mutation process: the mapping from codon-to-amino acid, thus capturing the accessibility of genotype variants through the structure of the genetic code.
 
-Mutation rates ($\rho_{ij}$) can be defined in multiple ways, but we use two equivalent definitions:
+MARs ($\rho_ {ij}$) can be defined in multiple ways, but we use two equivalent definitions:
 
 - All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability equal to the *fraction of codons* from amino acid $i$ that can access amino acid $j$ via single nucleotide mutations (i.e., mutational propensity).
 - All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability proportional to the *number of nucleotide changes* that can encode each amino acid change - accounting for all the possible synonymous backgrounds (i.e., codon bias).
@@ -148,7 +148,7 @@ We will simulate walks on the GP map under three selective regimes: 1) Random wa
 
 There are effectively infinite ways of relating a phenotype to fitness. Two key aspects of the phenotype-to-fitness map are 1) the shape of the function and 2) the values of the parameters of the funciton. To find the parameters of the fitness functions, we relied on a previous study that performed ancestral sequence reconstruction on the steroid receptor (SR) phylogeny using experimentally informed models of sequence evolution (Muñiz et al. in prep). Briefly, the study used a DMS library of AncSR1, the ancestor of the SR family, which measured the functional effect of every single amino acid substitution at every site in the protein, and used this information to build a mutation-selection model to optimize branch lengths and reconstruct ancestral sequences on the tree. The method infers the maximum likelihood estimates of the relevant population-level parameters of the model given the experimental data and the tree topology.
 
-We used Muñiz et al.'s dataset to estimate the parameters of two relevant fitness functions: 1) a logistic function ($F(g)_{\text{Log}}$) and 2) a bell-shaped function ($F(g)_{\text{Norm}}$) (see the section below on *Molecular evolutionary scenarios* for details on the selection of these functions). Each function has three parameters that can be estimated via maximum likelihood, and are defined in terms of the effect of mutations on the phenotype relative to the AncSR1 reference, i.e. mean fluorescence ($\Delta F$):
+We used Muñiz et al.'s dataset to estimate the parameters of two relevant fitness functions: 1) a logistic function ($F(g)_{\text{Log}}$) and 2) a bell-shaped function ($F(g)_{\text{Norm}}$) (see the section above on *Molecular evolutionary scenarios* for details on the selection of these functions). Each function has three parameters that can be estimated via maximum likelihood, and are defined in terms of the effect of mutations on the phenotype relative to the AncSR1 reference, i.e. mean fluorescence ($\Delta F$):
 
 $$
 F(g)_{\text{Log}} = \frac{L}{1 + e^{-k(\Delta F - \Delta F_0)}}
@@ -173,7 +173,7 @@ F(g)_{\text{step}} = \begin{cases}
 \end{cases}
 $$
 
-For a population with two competing genotypes, $i$ and $j$, with respective fitnesses (i.e., growth rates) $N_er_i$ and $N_er_j$, we can define the selection coefficient $s_{ij}$ as:
+For a population with two competing genotypes, $i$ and $j$, with respective fitnesses (i.e., growth rates) $N_er_i$ and $N_er_j$, we can define the selection coefficient $s_ {ij}$ as:
 
 $$
 N_e \times s_{ij} = (N_e \times r_j) - (N_e \times r_i) \\ 
@@ -182,7 +182,7 @@ $$
 
 Let's have a look at the shape of the fitness functions. Note that AncSR2/SRE1 (green dashed line) is the reference genotype for clasifying a genotype as functional (green region):
 
-```{r fitness_functions, include=FALSE, eval=TRUE, fig.width=9,fig.height=4}
+```{r fitness_functions, include=FALSE, eval=TRUE, fig.width=7,fig.height=4}
 # LOGISTIC FUNCTION PARAMETERS:
 # Initial parameters of the logistic curve based on maximum likelihood estimates from DMS+ASR on SR phylogeny (fiting deltaF values with respect to AncSR1 reference)
 # Fitness corresponds to the exponential growth rate = N*r
@@ -246,7 +246,7 @@ step.ft.fn <- data.frame(mFs = mFs, fitness = fitness_purifying(mFs,MIN_ACTIVE))
   geom_vline(xintercept = AncSR2_SRE_ref,col="#14b009",linetype="dashed",linewidth=1.2) # AncSR2/SRE reference phenotype and fitness
 
 # Visualize fitness functions
-step.ft.fn + log.ft.fn + norm.ft.fn
+step.ft.fn + log.ft.fn #+ norm.ft.fn
 
 ```
 
@@ -254,7 +254,7 @@ step.ft.fn + log.ft.fn + norm.ft.fn
 
 We are interested in understanding how likely was each of the 16 DNA binding phenotypes to evolve under different biologically relevant evolutionary scenarios. Conceptually, the problem can be stated as follows: Under a given scenario, proteins traverse the sequence space by mutations, the GP map determines the effect of a mutation on phenotype, and the phenotype-fitness map defines its probability of fixation. Thus, the evolution of a DNA binding phenotype can be formulated in terms of its probability of occurring: What is the probability of evolving any given DNA binding phenotype from a specific starting genotype(s) after a number of substitutions, without losing function? 
 
-The evolution of a DNA binding phenotype depends on two features of the genotype-phenotype map: 1) the number of accessible neighbors, at each mutation step, with the new function, and 2) the total number of genotypes that encode the function. Let $\{G\}$ be the complete set of genotypes in the network. Thus, the probability of evolving $RE_i$ ($P(RE_i)$) is conditional on the starting set of genotypes $\{G_0\}$, the length of the mutational trajectory $S$, and the structure of the genotype-phenotye map.
+The evolution of a DNA binding phenotype depends on two features of the genotype-phenotype map: 1) the number of accessible neighbors, at each mutation step, with the new function, and 2) the total number of genotypes that encode the function. Let $\{G\}$ be the complete set of genotypes in the network. Thus, the probability of evolving ${RE}_i$ ($P({RE}_i)$) is conditional on the starting set of genotypes $\{G_0\}$, the length of the mutational trajectory $S$, and the structure of the genotype-phenotye map.
 
 We need to find the probabilty distribution over the states of $\{G\}$ after N steps of a Markov chain. That is, the probability that the substitution process will result in each genotype given the origin-fixation dynamics given by the transition matrix $P$ (where the probability of moving from genotype $i$ to genotype $j$ is $P(i,j)$). The row vector $\pi_{(S)}$ containing the distribution over the states of $\{G\}$ after $S$ substitutions is:
 
@@ -270,7 +270,7 @@ $$
 P(RE_i|\pi_{(0)},S,P) = \frac{\sum_{j \in RE_i} \pi_{(S)j}}{\sum_{i=1}^{k} (\sum_{j \in RE_i} \pi_{(S)j})_i}
 $$
 
-where the numerator is the sum of the probailities of all the genotypes encoding the DNA binding function $RE_i$ after $S$ substitutions, and the denominator is a normalization constant with $k = 16$ such that $\sum_i P(RE_i|\pi_{(0)},S,P) = 1$.
+where the numerator is the sum of the probailities of all the genotypes encoding the DNA binding function ${RE}_i$ after $S$ substitutions, and the denominator is a normalization constant with $k = 16$ such that $\sum_i P({RE}_i|\pi_{(0)},S,P) = 1$.
 
 For $k$ different DNA binding phenotypes, we obtain a probability distribution of functional variation (PDFV), a multinomial probability distribution, around any set of starting genotypes $\{G_0\}$ that quantifies the likelihood that evolution will produce a particular phenotypic outcome given a set of conditions.  
 

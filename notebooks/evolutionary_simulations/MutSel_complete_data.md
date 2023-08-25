@@ -68,7 +68,7 @@ $$
 
 where *k* are all nodes connected to node *i* (McCandlish and Stoltzfus, 2014).
 
-**Some assumptions:** Assuming a constant population size (*N*<sub>*e*</sub>), and no mutation bias and reversibility ($ *{ij} = *{ji} = \_{ik} $), the probability that the next mutation will be *j* becomes a function of the rescaled fixation probabilities alone, such that
+**Some assumptions:** Assuming a constant population size (*N*<sub>*e*</sub>), and no mutation bias and reversibility (*μ*<sub>*i**j*</sub> = *μ*<sub>*j**i*</sub> = *μ*<sub>*i**k*</sub>), the probability that the next mutation will be *j* becomes a function of the rescaled fixation probabilities alone, such that
 
 $$
 P(i,j) = \\frac{2N\_e\\mu\_{ij} \\times P\_{\\text{fix}}(j)}{\\sum\_{k \\neq i}2N\_e\\mu\_{ik} \\times P\_{\\text{fix}}(k)} \\
@@ -76,9 +76,9 @@ P(i,j) = \\frac{2N\_e\\mu\_{ij} \\times P\_{\\text{fix}}(j)}{\\sum\_{k \\neq i}2
 = \\frac{P\_{\\text{fix}}(j)}{\\sum\_{k \\neq i}P\_{\\text{fix}}(k)}
 $$
 
-Although we are assuming no mutation bias and reversibility, we can weight the fixation probablities by a *mutation rate*. The mutation rate aims to capture an important aspect of the mutation process: the mapping from codon-to-amino acid, thus capturing the accessibility of genotype variants through the structure of the genetic code.
+Although we are assuming no mutation bias and reversibility, we can weight the fixation probablities by a *mutational accessibility rate* (MAR). The MAR aims to capture an important aspect of the mutation process: the mapping from codon-to-amino acid, thus capturing the accessibility of genotype variants through the structure of the genetic code.
 
-Mutation rates (*ρ*<sub>*i**j*</sub>) can be defined in multiple ways, but we use two equivalent definitions:
+MARs (*ρ*<sub>*i**j*</sub>) can be defined in multiple ways, but we use two equivalent definitions:
 
 -   All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability equal to the *fraction of codons* from amino acid *i* that can access amino acid *j* via single nucleotide mutations (i.e., mutational propensity).
 -   All single-step amino acid mutations to functional genotypes given the genetic code are accessible, with probability proportional to the *number of nucleotide changes* that can encode each amino acid change - accounting for all the possible synonymous backgrounds (i.e., codon bias).
@@ -111,7 +111,7 @@ We will simulate walks on the GP map under three selective regimes: 1) Random wa
 
 There are effectively infinite ways of relating a phenotype to fitness. Two key aspects of the phenotype-to-fitness map are 1) the shape of the function and 2) the values of the parameters of the funciton. To find the parameters of the fitness functions, we relied on a previous study that performed ancestral sequence reconstruction on the steroid receptor (SR) phylogeny using experimentally informed models of sequence evolution (Muñiz et al. in prep). Briefly, the study used a DMS library of AncSR1, the ancestor of the SR family, which measured the functional effect of every single amino acid substitution at every site in the protein, and used this information to build a mutation-selection model to optimize branch lengths and reconstruct ancestral sequences on the tree. The method infers the maximum likelihood estimates of the relevant population-level parameters of the model given the experimental data and the tree topology.
 
-We used Muñiz et al.'s dataset to estimate the parameters of two relevant fitness functions: 1) a logistic function (*F*(*g*)<sub>Log</sub>) and 2) a bell-shaped function (*F*(*g*)<sub>Norm</sub>) (see the section below on *Molecular evolutionary scenarios* for details on the selection of these functions). Each function has three parameters that can be estimated via maximum likelihood, and are defined in terms of the effect of mutations on the phenotype relative to the AncSR1 reference, i.e. mean fluorescence (*Δ**F*):
+We used Muñiz et al.'s dataset to estimate the parameters of two relevant fitness functions: 1) a logistic function (*F*(*g*)<sub>Log</sub>) and 2) a bell-shaped function (*F*(*g*)<sub>Norm</sub>) (see the section above on *Molecular evolutionary scenarios* for details on the selection of these functions). Each function has three parameters that can be estimated via maximum likelihood, and are defined in terms of the effect of mutations on the phenotype relative to the AncSR1 reference, i.e. mean fluorescence (*Δ**F*):
 
 $$
 F(g)\_{\\text{Log}} = \\frac{L}{1 + e^{-k(\\Delta F - \\Delta F\_0)}}
