@@ -40,6 +40,8 @@ DBD_color <- function(names=T){
 
 # Determine whether two amino acid sequences can be connected by a single nucleotide change given the genetic code
 connect_aa_variants <- function(var1,var2){
+  # var1, var2 = amino acid variants
+  
   # Returns "1" if aa variants can be connected by single step mutation given genetic code, "0" otherwise
   var1 <- unlist(strsplit(var1,''))
   var2 <- unlist(strsplit(var2,''))
@@ -62,6 +64,8 @@ connect_aa_variants <- function(var1,var2){
 # The returned values can be interpreted as the relatiive propensity to go from v1-->v2 via single nucleotide mutations
 # due to the genetic code.
 connect_aa_variants_fraction <- function(var1,var2){
+  # var1, var2 = amino acid variants
+  
   # If aa variants can be connected by single step mutation given genetic code, returns the fraction of codons
   # of 'var1' that can access 'var2'; "0" otherwise.
   var1 <- unlist(strsplit(var1,''))
@@ -84,33 +88,60 @@ connect_aa_variants_fraction <- function(var1,var2){
   return(link)
 }
 
+# Function to calculate number of nucleotide mutations between 2 amino acids
+connect_single_aa_count <- function(aa1,aa2){
+  # aa1, aa2 = amino acids to compare
+  
+  codons_aa1 <- names(GENETIC_CODE[GENETIC_CODE==aa1])
+  codons_aa2 <- names(GENETIC_CODE[GENETIC_CODE==aa2])
+  # Compare all possible codon pairs: If there is at least one pair that can be interchanged by *a single* nuc change, 
+  # then the link exists between AAs
+  pairs <- expand.grid(codons_aa1,codons_aa2) %>% rowwise() %>%
+    mutate(nuc_mismatches = mapply(function(c1,c2) sum(c1!=c2), strsplit(as.character(Var1),''), strsplit(as.character(Var2),'')))
+  # Compute number of codon paths
+  n <- sum(pairs$nuc_mismatches == 1)
+  return(n)
+}
+
 # Determine whether two amino acid sequences can be connected by a single nucleotide change given the genetic code
 # The returned value is the total number of mutations by which codons of var1 can access codons of var2
-connect_aa_variants_count <- function(var1,var2){
-  # If aa variants can be connected by single step mutation given genetic code, returns the fraction of codons
-  # of 'var1' that can access 'var2'; "0" otherwise.
+connect_aa_variants_count <- function(var1,var2,syn=FALSE){
+  # var1, var2 = amino acid variants
+  # syn = whether synonymous mutations (between the same amino acid) are incorporated or not (default: FALSE)
+  
+  # If aa variants can be connected by single step mutation given genetic code, returns the number of 
+  # single nuc. mutations between codons of 'var1' and 'var2'; "0" otherwise.
+  
   var1 <- unlist(strsplit(var1,''))
   var2 <- unlist(strsplit(var2,''))
+  
+  if(length(var1) == 1 || length(var2) == 1){
+    stop("For single amino acid comparison use the function `connect_single_aa_count` instead.")
+  }
+  
   aa_mismatches <- sum(var1 != var2)
   link <- 0
   if(aa_mismatches == 1){ #If not the same variant and not more than 2 aa diffs
     aa_diff <- which(var1 != var2) # position where variants differ
-    codons_aa1 <- names(GENETIC_CODE[GENETIC_CODE==var1[aa_diff]])
-    codons_aa2 <- names(GENETIC_CODE[GENETIC_CODE==var2[aa_diff]])
-    # Compare all possible codon pairs: If there is at least one pair that can be interchanged by *a single* nuc change, 
-    # then the link exists between AA variants
-    pairs <- expand.grid(codons_aa1,codons_aa2) %>% rowwise() %>%
-      mutate(nuc_mismatches = mapply(function(c1,c2) sum(c1!=c2), strsplit(as.character(Var1),''), strsplit(as.character(Var2),'')))
-    # Compute number of codon paths
-    n <- sum(pairs$nuc_mismatches == 1)
+    
+    # compute number of nucleotide mutations between amino acids
+    n <- connect_single_aa_count(var1[aa_diff],var2[aa_diff])
+    
     # we have to multiply the number of codon paths across all invariant amino acid positions to get the total number of “backgrounds” 
     # that each amino acid mutation can occur in.
-    if(length(var1 != 1)){
-      bg_codons <- lapply(var1[-aa_diff],function(x) names(GENETIC_CODE)[GENETIC_CODE == x])
-      nbg <- do.call(prod, lapply(bg_codons, length))
-      link <- n * nbg
-    }
-    else link <- n
+    bg_codons <- map(var1[-aa_diff],function(x) names(GENETIC_CODE)[GENETIC_CODE == x])
+    nbg <- do.call(prod, map(bg_codons, length))
+    link <- n * nbg
+  }
+  else if(aa_mismatches == 0 && syn == TRUE){ #If the same amino acid AND we want to incorporate syn mutations
+    # get number of synonymous mutations for each amino acid
+    n_mut_aa <- map2_int(var1,var2,connect_single_aa_count)
+    
+    # Number of synonymous backgrounds per position
+    bgs <- map(var1, function(x) names(GENETIC_CODE)[GENETIC_CODE == x])
+    nbgaa <- map(bgs, length)
+    npaths <- n_mut_aa * sapply(1:length(aaseq1),function(x) do.call(prod, nbgaa[-x]))
+    link <- sum(npaths)
   }
   return(link)
 }
@@ -126,18 +157,29 @@ hamming_d <- function(var1,var2){
 # Function to connect protein-DNA complex variants. A link exists whether protein genotypes can be be connected by a single 
 # nucleotide change given the genetic code, OR DNA variants differ by a hamming distance of one. Variants are given as 
 # prot+DNA genotypes (e.g., EGKAGT)
-#connect_complex <- functiona(var1,var2){
-#  # split variants into protein and DNA genotypes.
-#  var1_prot <- unlist(strsplit(var1,''))[1:4]
-#  var1_dna <- unlist(strsplit(var1,''))[5:6]
-#  var2_prot <- unlist(strsplit(var2,''))[1:4]
-#  var2_dna <- unlist(strsplit(var2,''))[5:6]
-#  
-#  # compute links
-#  link_prot <- connect_aa_variants(var1_prot,var2_prot)
-#  link_dna <- hamming_d(var1_dna,var2_dna)
-#  if()
-#}
+connect_complex <- function(var1,var2){
+  # split variants into protein and DNA genotypes.
+  var1_prot <- unlist(strsplit(var1,''))[1:4]
+  var1_dna <- unlist(strsplit(var1,''))[5:6]
+  var2_prot <- unlist(strsplit(var2,''))[1:4]
+  var2_dna <- unlist(strsplit(var2,''))[5:6]
+  
+  link <- 0
+  # compute links for each side of the complex
+  link_prot <- connect_aa_variants(var1_prot,var2_prot)
+  link_dna <- hamming_d(var1_dna,var2_dna)
+  
+  # Check that complexes are *one* change appart, either in DNA or protein
+  if(link_prot+link_dna == 1){
+    if(link_prot == 1) link <- connect_aa_variants_count(var1_prot,var2_prot)
+    else if(link_dna == 1){
+      # find all the protein backgrounds in which mutation at the DNA can occur
+      bgs <- map(var1_prot, function(x) names(GENETIC_CODE)[GENETIC_CODE == x])
+      link <- do.call(prod, map(bgs, length)) * link_dna
+    }
+  }
+  return(link)
+}
 
 # Function to conect codons. Note that we are assuming no mutation bias, therefore, transitions between codons are encoded as 0 or 1.
 connect_codons <- function(var1,var2){
@@ -162,15 +204,15 @@ pi_codon_to_aa <- function(pi_codon){
 build_mutation_matrix <- function(nodes,type=1,cores=1){
   # nodes: a vector with vertex character names or data.frame (see argument 'node_attributes')
   # type: specify how to build the adjacency matrix. 1 - simple link through genetic code; 2 - fraction
-    # of codons; 3 - mutational paths (default: 1)
+    # of codons; 3 - mutational paths; 4 - mutational paths between prot-DNA complexes (default: 1)
   # cores: specify the number of cores to use in to use for parallel computing (default: 1)
   
   # Check for inconistent arguments
   if(is.null(nodes)){
     stop("Provide a vector of nodes to build the matrix")
   }
-  if(!(type %in% seq(1,3,1))){
-    stop("Invalid matrix type. Valid matrix options: 1, 2, or 3")
+  if(!(type %in% seq(1,4,1))){
+    stop("Invalid matrix type. Valid matrix options: 1, 2, 3, or 4")
   }
   
   # Create adjacency matrix
@@ -196,17 +238,23 @@ build_mutation_matrix <- function(nodes,type=1,cores=1){
     adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
                         mapply(connect_aa_variants_count,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
   }
+  else if(type == 4){
+    # number of mutational paths from between protein-DNA complexes
+    adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
+                        mapply(connect_complex,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
+  }
   stopCluster(cl)
   
   return(adj_mat)
 }
 
 # Build a genotype network (igraph object)
-build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,weighted=FALSE,node_attributes=FALSE,cores=1){
+build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,type=1,node_attributes=FALSE,cores=1){
   # nodes = a vector with vertex character names or data.frame (see argument 'node_attributes')
   # build_mat = logical value to indicate whether to generate adjacency matrix (default: TRUE)
   # adj_mat = if build_mat=FALSE, then pass the corresponding adjacency matrix to generate the network (default: NULL)
-  # weigthed = a string to indicate whether adjacency matrix has weighted edges: "fraction","count",FALSE (default: FALSE)
+  # type: specify how to build the adjacency matrix. 1 - simple link through genetic code; 2 - fraction
+    # of codons; 3 - mutational paths (default: 1)
   # node_attributes = logical value to indicate whether the nodes contain annotations. If TRUE 'nodes' should be a data frame containing
     # the attrbitues per node (each column contains a node attribute). This option is mostly for plotting the network, so only undirected 
     # networks will be built. Can also work with build_mat=TRUE/FALSE.
@@ -219,13 +267,16 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,weighted=
   if(node_attributes && is.null(dim(nodes))){
     stop("Nodes have no attributes. Provide a data frame with annotations per node.")
   }
+  if(!(type %in% seq(1,4,1))){
+    stop("Invalid matrix type. Valid matrix options: 1, 2, 3, or 4")
+  }
   
   if(build_mat==FALSE){
     # Build networks using supplied adjacency matrix
-    if(weighted != FALSE){
+    if(type != 1){
       net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
     }
-    else{
+    else if(type == 1){
       if(node_attributes){
         links <- graph.adjacency(adj_mat,mode = "undirected")
         edges <- get.edgelist(links) # generate edgelist from matrix
@@ -234,49 +285,22 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,weighted=
       else net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
     }
   }
-  
   else if(build_mat){
-    # Create adjacency matrix and build genotype network
-    # Adjacency matrices are substantially sparse because they only store values amongst one-mutant neighbors, 
-    # with the rest of cells being 0 --> Coerce outputs to to sparse matrices. Saves a significant amount of 
-    # memory and speed up the processing of that data.
-    # Adj. matrix --> From = rows, to = cols
-    cl <- parallel::makeCluster(cores,"FORK",outfile="")
-    doParallel::registerDoParallel(cl)
+    if(node_attributes){
+      nodes_v <- nodes %>% pull(AA_var)
+      adj_mat <- build_mutation_matrix(nodes_v,type=type,cores=cores)
+      links <- graph.adjacency(adj_mat,mode = "undirected")
+      edges <- get.edgelist(links) # generate edgelist from matrix
+      net <- graph_from_data_frame(d=edges, vertices=nodes, directed=F) # network with annotations per node
+    }
     
-    if(weighted=="fraction"){
-      # weights correspond to "mutational propensity" of change from var1 to var2
-      adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
-                          mapply(connect_aa_variants_fraction,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
-      
-      net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
-    }
-    else if(weighted=="count"){
-      # weights correspond to the number of mutations from var1 to var2
-      adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
-                          mapply(connect_aa_variants_count,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
-      
-      net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
-    }
-    else{
-      if(node_attributes){
-        nodes_v <- nodes %>% pull(AA_var)
-        adj_mat <- Matrix(foreach(i = 1:length(nodes_v), .combine = 'cbind') %dopar%
-                            mapply(connect_aa_variants,nodes_v,nodes_v[i]) %>% `colnames<-`(nodes_v), sparse = T)
-        links <- graph.adjacency(adj_mat,mode = "undirected")
-        edges <- get.edgelist(links) # generate edgelist from matrix
-        net <- graph_from_data_frame(d=edges, vertices=nodes, directed=F) # network with annotations per node
-      }
-      else{
-        adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
-                            mapply(connect_aa_variants,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
-        net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
-      }
-    }
-    stopCluster(cl)
-  }
+    # Build adjacency matrix and network
+    adj_mat <- build_mutation_matrix(nodes,type=type,cores=cores)
+    if(type == 1) net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
+    else if(type != 1) net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
+  }  
   return(net)
-}
+}    
 
 # Extract a variant's phenotypic value
 get_phenotype <- function(aa_var,Bg,pheno_table,phenotype="mean"){
