@@ -145,6 +145,75 @@ $$
 
 Let's have a look at the shape of the fitness functions. Note that AncSR2/SRE1 (green dashed line) is the reference genotype for clasifying a genotype as functional (green region):
 
+``` r
+# LOGISTIC FUNCTION PARAMETERS:
+# Initial parameters of the logistic curve based on maximum likelihood estimates from DMS+ASR on SR phylogeny (fiting deltaF values with respect to AncSR1 reference)
+# Fitness corresponds to the exponential growth rate = N*r
+L = 2.7915391 # maximum fitness
+k = 4.33760376 # logistic grouth rate (steepness)
+x_o = -0.54577352 # midpoint
+LOG.PARAM = c(L,k,x_o)
+
+# NORMAL FUNCTION PARAMETERS:
+# Initial parameters correspond to the mean (and sd) fluorescence of ERE specific variants.
+# Fitness corresponds to the exponential growth rate = N*r
+u = phenotypes_tbl %>% filter(specific == "YES" & bound_REs == "ERE (GT)") %>% with(mean(max_meanF_bREs)) # mean
+sd = phenotypes_tbl %>% filter(specific =="YES" & bound_REs == "ERE (GT)") %>% with(sd(max_meanF_bREs)) # stdev
+scale = L # make the maximum fitness match the maximum fitness of logistic function
+NORM.PARAM = c(u,sd,scale)
+
+# STEP FUNCTION PARAMETERS:
+# Initial parameters correspond to the same as the logistic function. 'mF_ref' = Minimal meanF for active variants
+# Fitness corresponds to the exponential growth rate = N*r
+MIN_ACTIVE <- phenotypes_tbl %>% with(min(min_meanF_bREs))
+STEP.PARAM = c(MIN_ACTIVE)
+
+mFs <- seq(min(meanF_data$avg_meanF),max(meanF_data$avg_meanF),0.01)
+
+# Logistic fitness function
+log.ft.fn <- data.frame(mFs = mFs, fitness = fitness_logistic_ref(mFs,L,k,x_o,AncSR2_SRE_ref)) %>%
+  ggplot(aes(x=mFs,y=fitness)) + ggtitle("Purifying + Drift + Directional") +
+  annotate(geom = "rect", xmin =  min(meanF_data$avg_meanF), xmax = MIN_ACTIVE, ymin = 0, ymax = 3,
+           fill = "#e37f74", alpha = 0.2) +
+  annotate(geom = "rect", xmin =  MIN_ACTIVE, xmax = max(meanF_data$avg_meanF), ymin = 0, ymax = 3,
+           fill = "#35a831", alpha = 0.2) +
+  geom_line(linewidth=1.3) + theme_classic() + 
+  xlab("meanF (phenotype)") + ylab("Fitness (Ne*r)") + 
+  scale_fill_manual(values=c("#91c9a8","#c99591")) +
+  geom_vline(xintercept = AncSR1_ERE_ref,col="#7710b3",linetype="dashed",linewidth=1.2) + # AncSR1/ERE reference phenotype and fitness
+  geom_vline(xintercept = AncSR2_SRE_ref,col="#14b009",linetype="dashed",linewidth=1.2) # AncSR2/SRE reference phenotype and fitness
+
+
+# Normal fitness function
+norm.ft.fn <- data.frame(mFs = mFs, fitness = fitness_normal_ref(mFs,u,sd,scale,AncSR2_SRE_ref)) %>%
+  ggplot(aes(x=mFs,y=fitness)) + ggtitle("Purifying + Stabilizing + Drift") +
+  annotate(geom = "rect", xmin =  min(meanF_data$avg_meanF), xmax = MIN_ACTIVE, ymin = 0, ymax = 3,
+           fill = "#e37f74", alpha = 0.2) +
+  annotate(geom = "rect", xmin =  MIN_ACTIVE, xmax = max(meanF_data$avg_meanF), ymin = 0, ymax = 3,
+           fill = "#35a831", alpha = 0.2) +
+  geom_line(linewidth=1.3) + theme_classic() + 
+  xlab("meanF (phenotype)") + ylab("Fitness (Ne*r)") + 
+  geom_vline(xintercept = AncSR1_ERE_ref,col="#7710b3",linetype="dashed",linewidth=1.2) + # AncSR1/ERE reference phenotype and fitness
+  geom_vline(xintercept = AncSR2_SRE_ref,col="#14b009",linetype="dashed",linewidth=1.2) # AncSR2/SRE reference phenotype and fitness
+
+# Step fitness function
+step.ft.fn <- data.frame(mFs = mFs, fitness = fitness_purifying(mFs,MIN_ACTIVE)) %>%
+  ggplot(aes(x=mFs,y=fitness)) + ggtitle("Purifying + Drift") +
+  annotate(geom = "rect", xmin =  min(meanF_data$avg_meanF), xmax = MIN_ACTIVE, ymin = 0, ymax = 3,
+           fill = "#e37f74", alpha = 0.2) +
+  annotate(geom = "rect", xmin =  MIN_ACTIVE, xmax = max(meanF_data$avg_meanF), ymin = 0, ymax = 3,
+           fill = "#35a831", alpha = 0.2) +
+  geom_line(linewidth=1.3) + theme_classic() + 
+  xlab("meanF (phenotype)") + ylab("Fitness (Ne*r)") + 
+  geom_vline(xintercept = AncSR1_ERE_ref,col="#7710b3",linetype="dashed",linewidth=1.2) + # AncSR1/ERE reference phenotype and fitness
+  geom_vline(xintercept = AncSR2_SRE_ref,col="#14b009",linetype="dashed",linewidth=1.2) # AncSR2/SRE reference phenotype and fitness
+
+# Visualize fitness functions
+step.ft.fn + log.ft.fn #+ norm.ft.fn
+```
+
+![](MutSel_complete_data_files/figure-markdown_github/fitness_functions-1.png)
+
 ### Discrete Markov process on a GP map
 
 We are interested in understanding how likely was each of the 16 DNA binding phenotypes to evolve under different biologically relevant evolutionary scenarios. Conceptually, the problem can be stated as follows: Under a given scenario, proteins traverse the sequence space by mutations, the GP map determines the effect of a mutation on phenotype, and the phenotype-fitness map defines its probability of fixation. Thus, the evolution of a DNA binding phenotype can be formulated in terms of its probability of occurring: What is the probability of evolving any given DNA binding phenotype from a specific starting genotype(s) after a number of substitutions, without losing function?

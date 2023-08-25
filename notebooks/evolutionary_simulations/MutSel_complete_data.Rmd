@@ -182,7 +182,7 @@ $$
 
 Let's have a look at the shape of the fitness functions. Note that AncSR2/SRE1 (green dashed line) is the reference genotype for clasifying a genotype as functional (green region):
 
-```{r fitness_functions, include=FALSE, eval=TRUE, fig.width=7,fig.height=4}
+```{r fitness_functions, fig.width=7,fig.height=4}
 # LOGISTIC FUNCTION PARAMETERS:
 # Initial parameters of the logistic curve based on maximum likelihood estimates from DMS+ASR on SR phylogeny (fiting deltaF values with respect to AncSR1 reference)
 # Fitness corresponds to the exponential growth rate = N*r
