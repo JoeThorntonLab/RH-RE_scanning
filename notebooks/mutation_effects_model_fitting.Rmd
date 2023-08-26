@@ -137,6 +137,9 @@ AncSR2_model_data <- meanF_data %>%
   distinct(AA_var, RE, .keep_all = TRUE) %>%  # remove debulk sort variants if they are in the binned sort dataset
   arrange(AA_var, RE)
 
+save(AncSR1_model_data, file = file.path(results_dir, "AncSR1_model_data.rda"))
+save(AncSR2_model_data, file = file.path(results_dir, "AncSR2_model_data.rda"))
+
 rm(debulk_data)  # clearing space
 ```
 
@@ -393,9 +396,11 @@ nfolds <- 10
 AncSR1_foldid <- rep_len(1:nfolds, nrow(AncSR1_full_mat))
 set.seed(230703)
 AncSR1_foldid <- sample(AncSR1_foldid, nrow(AncSR1_full_mat))
+save(AncSR1_foldid, file = file.path(results_dir, "AncSR1_foldid.rda"))
 AncSR2_foldid <- rep_len(1:nfolds, nrow(AncSR2_full_mat))
 set.seed(230703)
 AncSR2_foldid <- sample(AncSR2_foldid, nrow(AncSR2_full_mat))
+save(AncSR2_foldid, file = file.path(results_dir, "AncSR2_foldid.rda"))
 
 # regularization paths
 AncSR1_path <- full.fit.AncSR1$lambda
@@ -1023,34 +1028,49 @@ if(!file.exists(file.path(results_dir, "cv.fold10.fine.fit.AncSR2.rda"))) {
 Get out-of-sample predicted genetic scores and fluorescence for all fine-grained cross validation models.
 
 ```{r cvfinepreds, purl = TRUE}
-AncSR1.cv.fits.fine <- list()
-AncSR1.cv.gs.fine <- list()
-AncSR1.cv.pred.fine <- list()
-AncSR2.cv.fits.fine <- list()
-AncSR2.cv.gs.fine <- list()
-AncSR2.cv.pred.fine <- list()
-for(i in 1:10) {
-  # load and store AncSR1 glmnet object and get predictions for test set
-  print(paste("AncSR1 fold", i))
-  load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR1.rda")))
-  which <- AncSR1_foldid == i
-  gs <- predict(fold_fit, AncSR1_full_mat[which,])
-  pred <- apply(gs, 2, logistic, L = AncSR1.L, U = AncSR1.U)
-  AncSR1.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
-  AncSR1.cv.gs.fine[[paste0("fold", i)]] <- gs
-  AncSR1.cv.pred.fine[[paste0("fold", i)]] <- pred
-  
-  # load and store AncSR2 glmnet object and get predictions for test set
-  print(paste("AncSR2 fold", i))
-  load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR2.rda")))
-  which <- AncSR2_foldid == i
-  gs <- predict(fold_fit, AncSR2_full_mat[which,])
-  pred <- apply(gs, 2, logistic, L = AncSR2.L, U = AncSR2.U)
-  AncSR2.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
-  AncSR2.cv.gs.fine[[paste0("fold", i)]] <- gs
-  AncSR2.cv.pred.fine[[paste0("fold", i)]] <- pred
+if(!file.exists(file.path(results_dir, "AncSR1.cv.gs.fine.rda"))) {
+  AncSR1.cv.fits.fine <- list()
+  AncSR1.cv.gs.fine <- list()
+  AncSR1.cv.pred.fine <- list()
+  AncSR2.cv.fits.fine <- list()
+  AncSR2.cv.gs.fine <- list()
+  AncSR2.cv.pred.fine <- list()
+  for(i in 1:10) {
+    # load and store AncSR1 glmnet object and get predictions for test set
+    print(paste("AncSR1 fold", i))
+    load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR1.rda")))
+    which <- AncSR1_foldid == i
+    gs <- predict(fold_fit, AncSR1_full_mat[which,])
+    pred <- apply(gs, 2, logistic, L = AncSR1.L, U = AncSR1.U)
+    AncSR1.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
+    AncSR1.cv.gs.fine[[paste0("fold", i)]] <- gs
+    AncSR1.cv.pred.fine[[paste0("fold", i)]] <- pred
+    
+    # load and store AncSR2 glmnet object and get predictions for test set
+    print(paste("AncSR2 fold", i))
+    load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR2.rda")))
+    which <- AncSR2_foldid == i
+    gs <- predict(fold_fit, AncSR2_full_mat[which,])
+    pred <- apply(gs, 2, logistic, L = AncSR2.L, U = AncSR2.U)
+    AncSR2.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
+    AncSR2.cv.gs.fine[[paste0("fold", i)]] <- gs
+    AncSR2.cv.pred.fine[[paste0("fold", i)]] <- pred
+  }
+  rm(fold_fit, gs, pred)
+  save(AncSR1.cv.gs.fine, 
+       file = file.path(results_dir, "AncSR1.cv.gs.fine.rda"))
+  save(AncSR1.cv.pred.fine, 
+       file = file.path(results_dir, "AncSR1.cv.pred.fine.rda"))
+  save(AncSR2.cv.gs.fine, 
+       file = file.path(results_dir, "AncSR2.cv.gs.fine.rda"))
+  save(AncSR2.cv.pred.fine, 
+       file = file.path(results_dir, "AncSR2.cv.pred.fine.rda"))
+} else {
+  load(file.path(results_dir, "AncSR1.cv.gs.fine.rda"))
+  load(file.path(results_dir, "AncSR1.cv.pred.fine.rda"))
+  load(file.path(results_dir, "AncSR2.cv.gs.fine.rda"))
+  load(file.path(results_dir, "AncSR2.cv.pred.fine.rda"))
 }
-rm(fold_fit, gs, pred)
 ```
 
 
