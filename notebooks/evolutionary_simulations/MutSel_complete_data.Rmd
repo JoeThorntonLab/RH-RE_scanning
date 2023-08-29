@@ -66,10 +66,13 @@ if(!file.exists(file.path(".", "MutSel_matrices_complete_data.RData"))) {
               specific = ifelse(n_bound_REs == 1, "YES","NO"), # functional binding to only one DNA element?
               specificity = ifelse(n_bound_REs == 1, RE, "Promiscuous"), # Determine the type of specificity
               bound_REs = list(RE)) # assign DNA elements bound
+  
+  phenotypes_tbl_prot <- phenotypes_tbl # save it for later
 
 } else {
   # load matrices if already created
   load("./MutSel_matrices_complete_data.RData")
+  phenotypes_tbl_prot <- phenotypes_tbl # save it for later
 }
 
 # load functions
@@ -280,6 +283,7 @@ For $k$ different DNA binding phenotypes, we obtain a probability distribution o
 ## GLOBAL PARAMETERS FOR MARKOV CHAINS ##
 PATH_LENGTH = 3 # path length (neighborhood size) to find mutational trajectoties
 REF_GENOTYPE = "EGKA" # EGKA (historical genotype) 
+REF_GENOTYPE_COMPLEX = "EGKAGT" #EGKA/GT (historical protein-DNA complex)
 N_CORES=detectCores()-1 # number of cores for parallel processing
 cols <- RColorBrewer::brewer.pal(8, name="Dark2") # color palette
 ```
@@ -349,7 +353,7 @@ Before delving into the neighborhoods around a focal node, let's take a look at 
 
 Answering the first question allows us to understand what is the variational propensity of each DBD background, that is, how likely is each phenotype to arise by random mutation. Answering the second question allows us to understand how the structure of the GP map determines the probability distribution of phenotypic variation at equilibrium (after suficiently long time has passed). Answering the third question can tell us whether the the mutation process is more likely to produce high fitness genotypes due the structure of the GP map. 
 
-To answer these questions, first, we can use the transition probablity (`P`) matrices to determine all the possible single-step probabilities from all the nodes in the GP map and compute the relative probability of evolving each DNA binding funtion. Second, we can use the `P` matrices to compute the stationary distribution of all genotypes (an their phenotypes) in the network. Third, we will use the `M` to ask whether the stationary distributoin of states generated from this matrix correlates with the fitness of those RH variants.
+To answer these questions, first, we can use the transition probablity (`P`) matrices to determine the probabilities of every mutational trajectory in the GP map and compute the relative probability of evolving each DNA binding funtion. Second, we can use the `P` matrices to compute the stationary distribution of all genotypes (an their phenotypes) in the network. Third, we will use the mutation accessibility matrix (`M`) to ask whether the stationary distributoin of states generated from this matrix correlates with the fitness of those RH variants.
 
 The transition matrices of Markov chains describe the probabilities of change between every state of the system at each step - the probability distribution of the states evolves over time ($X_{t}$). The stationary distribution of a Markov chain describes the distribution of states after suficiently long time has passed ($t\rightarrow\infty$) such that $X_{t}$ does noth change any longer (i.e., the system has reached an equilibrium).
 
@@ -420,18 +424,22 @@ c+d
 
 As expected, we see that the stationary distribution of genotypes from `M` and `P` matrices for the random walk scenario are the same. In contrast, directional selection reduces the correlation by ~15-20%.
 
+---
+
 Let's now explore the questions in more detail. For this, we are interested in characterizing the **Probability Distribution of Functional Variation (PDFV)**, that is, the relative probability of accessing any of the 16 DNA binding elements by single mutations. 
 
-For the first question, we are interested in the PDFV that arises through random mutation. That is, the likelihood of a DNA binding phentoype is equal to the proportion of genotypes encoding each function. By including the amino acid-to-function mapping, this can give us an idea of the variational properties of the system.
+For the first question, we are interested in the PDFV that arises through random mutation, the *variational PDFV*. That is, the likelihood of a DNA binding phentoype is equal to the proportion of genotypes encoding each function. This distribution is only computed from the functional genotypes - it incorporates the effects of strong truncation selection - and therefore represents the probability that a random mutation to a functional genotype will produce a given phenotype. By including the amino acid-to-function mapping, this can give us an idea of the variational properties of the system.
 
 ```{r variational_prop, fig.height=4,fig.width=9,warning=FALSE}
 # Variational propensities
 var.prop_AncSR1_df <- get_PDFV_v2(type="network",Bg="AncSR1",model="Binding")
-var.prop_AncSR1_df2 <- get_PDFV_v2(type="network",Bg="AncSR1",model="Specific Binding",specific = TRUE) %>% filter(RE != "Promiscuous") %>% 
-                                    mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
+var.prop_AncSR1_df2 <- get_PDFV_v2(type="network",Bg="AncSR1",model="Specific Binding",specific = TRUE) %>% 
+  filter(RE != "Promiscuous") %>% 
+  mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
 var.prop_AncSR2_df <- get_PDFV_v2(type="network",Bg="AncSR2",model="Binding")
-var.prop_AncSR2_df2 <- get_PDFV_v2(type="network",Bg="AncSR2",model="Specific Binding",specific = TRUE) %>% filter(RE != "Promiscuous") %>% 
-                                    mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
+var.prop_AncSR2_df2 <- get_PDFV_v2(type="network",Bg="AncSR2",model="Specific Binding",specific = TRUE) %>% 
+  filter(RE != "Promiscuous") %>% 
+  mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
 
 # Plot variational propensities for each DBD
 a <- circular_PDFV_v2(list(var.prop_AncSR1_df,var.prop_AncSR1_df2),cols = c("#1D1D35","#00ACBF"),fill=F,title = "AncSR1\nVariational propensity")
@@ -547,33 +555,47 @@ mc_Drift_ref_genotype_sr2 <- simulate_markov_chain(REF_GENOTYPE,P_drift_sr2_ntwr
 mc_DirSln_ref_genotype_sr2 <- simulate_markov_chain(REF_GENOTYPE,P_dir_sr2_ntwrk,n_steps = PATH_LENGTH)
 
 # Compute the PDFV from the Markov chains
-pdfv_Drift_ref_genotype_sr1 <- get_PDFV_v2(mc_Drift_ref_genotype_sr1,Bg = "AncSR1",model = "Random walk",specific = TRUE,type="simulated mc")
-pdfv_DirSln_ref_genotype_sr1 <- get_PDFV_v2(mc_DirSln_ref_genotype_sr1,Bg = "AncSR1",model = "Dir. Sln.",specific = TRUE,type="simulated mc")
+pdfv_Drift_ref_genotype_sr1 <- get_PDFV_v2(mc_Drift_ref_genotype_sr1,Bg = "AncSR1",
+                                           model = "Random walk",specific = TRUE,type="simulated mc")
+pdfv_DirSln_ref_genotype_sr1 <- get_PDFV_v2(mc_DirSln_ref_genotype_sr1,Bg = "AncSR1",
+                                            model = "Dir. Sln.",specific = TRUE,type="simulated mc")
 
-pdfv_Drift_ref_genotype_sr2 <- get_PDFV_v2(mc_Drift_ref_genotype_sr2,Bg = "AncSR2",model = "Random walk",specific = TRUE,type="simulated mc")
-pdfv_DirSln_ref_genotype_sr2 <- get_PDFV_v2(mc_DirSln_ref_genotype_sr2,Bg = "AncSR2",model = "Dir. Sln.",specific = TRUE,type="simulated mc")
+pdfv_Drift_ref_genotype_sr2 <- get_PDFV_v2(mc_Drift_ref_genotype_sr2,Bg = "AncSR2",
+                                           model = "Random walk",specific = TRUE,type="simulated mc")
+pdfv_DirSln_ref_genotype_sr2 <- get_PDFV_v2(mc_DirSln_ref_genotype_sr2,Bg = "AncSR2",
+                                            model = "Dir. Sln.",specific = TRUE,type="simulated mc")
 
-# plots inclusing promiscuous as extra phenotype
-p1 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1,pdfv_DirSln_ref_genotype_sr1),cols = cols[2:3],title = "AncSR1:EGKA",fill = F)
-p2 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2,pdfv_DirSln_ref_genotype_sr2),cols = cols[2:3],title = "AncSR2:EGKA",legend = F,fill = F)
+# plots including promiscuous as extra phenotype
+p1 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1,pdfv_DirSln_ref_genotype_sr1),
+                       cols = cols[2:3],title = "AncSR1:EGKA",fill = F)
+p2 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2,pdfv_DirSln_ref_genotype_sr2),
+                       cols = cols[2:3],title = "AncSR2:EGKA",legend = F,fill = F)
 p1 + p2
 
-# plot without promiscuous (re-normalize probs.)
-pdfv_Drift_ref_genotype_sr1_b <- pdfv_Drift_ref_genotype_sr1 %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
-pdfv_DirSln_ref_genotype_sr1_b <- pdfv_DirSln_ref_genotype_sr1 %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
+# plot without promiscuous (including all binders)
+pdfv_Drift_ref_genotype_sr1_b <- get_PDFV_v2(mc_Drift_ref_genotype_sr1,Bg = "AncSR1",
+                                           model = "Random walk",specific = F,type="simulated mc")
+pdfv_DirSln_ref_genotype_sr1_b <- get_PDFV_v2(mc_DirSln_ref_genotype_sr1,Bg = "AncSR1",
+                                            model = "Dir. Sln.",specific = F,type="simulated mc")
 
-pdfv_Drift_ref_genotype_sr2_b <- pdfv_Drift_ref_genotype_sr2 %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
-pdfv_DirSln_ref_genotype_sr2_b <- pdfv_DirSln_ref_genotype_sr2 %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
+pdfv_Drift_ref_genotype_sr2_b <- get_PDFV_v2(mc_Drift_ref_genotype_sr2,Bg = "AncSR2",
+                                           model = "Random walk",specific = F,type="simulated mc")
+pdfv_DirSln_ref_genotype_sr2_b <- get_PDFV_v2(mc_DirSln_ref_genotype_sr2,Bg = "AncSR2",
+                                            model = "Dir. Sln.",specific = F,type="simulated mc")
 
-p3 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1_b,pdfv_DirSln_ref_genotype_sr1_b),cols = cols[2:3],title = "AncSR1:EGKA",fill = F)
-p4 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2_b,pdfv_DirSln_ref_genotype_sr2_b),cols = cols[2:3],title = "AncSR2:EGKA",legend = F,fill = F)
+p3 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1_b,pdfv_DirSln_ref_genotype_sr1_b),
+                       cols = cols[2:3],title = "AncSR1:EGKA",fill = F)
+p4 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2_b,pdfv_DirSln_ref_genotype_sr2_b),
+                       cols = cols[2:3],title = "AncSR2:EGKA",legend = F,fill = F)
 p3 + p4
 
 ```
 
 The figures above showed that after 3 mutation steps, the ancestral RH genotype, EGKA, had very different PDFVs on each GP map. From AncSR1 to AncSR2 the probability of retaining the ancestral function decreased, and the probability of evolving SRE1 binding increased. Interestingly, the probability of evolving ATRE binding, a non-historical phenotype, was higher than that of SRE1 on the AncSR2 background. 
 
-Let's now explore how the probability of each DNA binding phenotype changes at each step along the Markov chain. We're particularly interested in tracking the change in probability of the derived historical function SRE1 on both DBD backgrounds. We will focus for now on the `P` matrix from the Drift scenario.
+---
+
+Let's now explore the temporal dynamics of pehenotypic variation: how the probability of each DNA binding phenotype changes at each step along the Markov chain. We're particularly interested in tracking the change in probability of the derived historical function SRE1 on both DBD backgrounds. We will focus for now on the `P` matrix from the Drift scenario.
 
 ```{r mc_chains_ref_genotype_b, fig.width=11,fig.height=5}
 # Number of iterations to run the Markov chain
@@ -594,7 +616,7 @@ if(!PROMISCUOUS){
                                     mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob)))
 }
 
-# Plot the trajectory: Include stationary distributoins and proportional expectations as "extra mutation steps"
+# Plot the trajectory: Include stationary distributoins as "extra mutation steps"
 stationary_PDFV_sr1 <- get_PDFV_v2(P_drift_sr1_ntwrk_statdist,Bg = "AncSR1",model = mc_iter+1,specific = T,type="simulated mc")
 stationary_PDFV_sr2 <- get_PDFV_v2(P_drift_sr2_ntwrk_statdist,Bg = "AncSR2",model = mc_iter+1,specific = T,type="simulated mc")
 #s0 <- data.frame(RE=REs[[1]],Norm_F_prob=c(rep(0,2),1,rep(0,13)),model=0)
@@ -654,7 +676,9 @@ p1 + p2
 #         breaks = breaksList, legend_labels = seq(-1,4,0.1),scale="row")
 ```
 
-The first figure shows the change in the probability of evolving each phenotype over time when evolution begins from the ancestral EKGA genotype. We see that SRE1 (green+black background) is inaccesible during the first 10 mutation steps on the AncSR1 background, whereas it becomes quickly accessible on the AncSR2 background. However, it becomes the most accessible specificity only 6 mutation steps. This implies that, under the historical conditions, the evolution of SRE1 was not the most likey outcome and, therefore, there was an important role for chance (*results are robust if we use the directional sln. `P` matrix). 
+The figure shows the change in the probability of evolving each phenotype over time when evolution begins from the ancestral EKGA genotype. We see that SRE1 (green+black background) is inaccesible during the first 10 mutation steps on the AncSR1 background, whereas it becomes quickly accessible on the AncSR2 background. However, it becomes the most accessible specificity only after 6 mutation steps. By the third mutation step, the most likely phenotypic outcome is ATRE, whereas ERE and SRE1 are equally likely. This implies that, under the historical conditions, the evolution of SRE1 was not the most likey outcome and, therefore, there was an important role for chance (*results are robust if we use the directional sln. `P` matrix). 
+
+---
 
 We also know that the AncSR2 network has more promiscuous genotypes, so we can ask what is the effect of accessing promiscuous genotypes for phenotypic evolution.
 
@@ -726,6 +750,61 @@ p3 + p4
 
 We see that EGKA can access more promiscuous genotypes on AncSR2, and also faster - within few mutations it gains access to more promiscuous genotypes. The second figure shows the effects of accessing promiscuous genotypes for how the ancestral genotype can explore the phenotypic space. First, we see that EGKA quickly explores the phenotypic space on the AncSR2 netwrok: by the third mutation step it has explord 15/16 phenotypes, compared to only 2/16 on the AncSR1 network. Second, we can see that at each step on the AncSR2 network, at least 50% of the new phenotypes are due to access to promiscuous genotypes.
 
+---
+
+Lastly, we can ask two things about the historical mutational trajectory: 1) Was the derived RH genotype - GSKV - accessible on AncSR1 and AncSR2? and 2) Why did GSKV evolve? Answering these questions can give some insight into the effects of chance and contingency.
+
+```{r mut_trajectory, warning=FALSE, fig.width=8,fig.height=4}
+# 3-step mutational neighborhood around EGKA
+mut_neighborhood_sr1 <- extract_network_paths(graph = net_sr1,from_i = REF_GENOTYPE,cores=N_CORES,path_length = PATH_LENGTH)
+
+mut_neighborhood_sr2 <- extract_network_paths(graph = net_sr2,from_i = REF_GENOTYPE,cores=N_CORES,path_length = PATH_LENGTH)
+
+print("3-step mutational neighborhood for EGKA on AncSR1:")
+head(mut_neighborhood_sr1)
+
+print("3-step mutational neighborhood for EGKA on AncSR2:")
+head(mut_neighborhood_sr2)
+
+# Check whether GSKV is accessible in 3 mutation steps from both backgrounds
+print("Mutational trajectory from EGKA to GSKV on AncSR1:")
+mut_neighborhood_sr1 %>% filter(step3 == "GSKV")
+
+print("Mutational trajectory from EGKA to GSKV on AncSR2:")
+mut_neighborhood_sr2 %>% filter(step3 == "GSKV")
+
+# Plot probability of every genotype accessible after 3 amino acid substitutions (from markov chains) --> only for AncSR2
+# to compare probability of GSKV
+df_mut_traj_probs_sr2_drift <- data.frame(AA_var=names(mc_Drift_ref_genotype_sr2),prob=mc_Drift_ref_genotype_sr2,
+                                          scenario="Random walk") %>% mutate(rank = dense_rank(prob))
+
+p1 <- ggplot(df_mut_traj_probs_sr2_drift,aes(x=rank,y=prob)) + geom_point(col="black") + 
+  geom_point(data=df_mut_traj_probs_sr2_drift %>% filter(AA_var=="GSKV"),color="red",size=3) +
+  geom_text(data = df_mut_traj_probs_sr2_drift %>% filter(AA_var=="GSKV"), 
+            aes(x = rank, y = prob + 0.002, label = "GSKV"),angle=45,hjust=0) +
+  xlab("Genotype rank") + ylab("Probability") + ggtitle("AncSR2: Random walk") +
+  theme_classic()
+
+df_mut_traj_probs_sr2_dir <- data.frame(AA_var=names(mc_DirSln_ref_genotype_sr2),prob=mc_DirSln_ref_genotype_sr2,
+                                          scenario="Dir Sln") %>% mutate(rank = dense_rank(prob))
+
+p2 <- ggplot(df_mut_traj_probs_sr2_dir,aes(x=rank,y=prob)) + geom_point(col="black") + 
+  geom_point(data=df_mut_traj_probs_sr2_dir %>% filter(AA_var=="GSKV"),color="red",size=3) +
+  geom_text(data = df_mut_traj_probs_sr2_dir %>% filter(AA_var=="GSKV"), 
+            aes(x = rank, y = prob + 0.002, label = "GSKV"),angle=45,hjust=0) +
+  xlab("Genotype rank") + ylab("Probability") + ggtitle("Directional sln") +
+  theme_classic()
+
+p1 + p2
+```
+
+These results show three interesting things:
+- GSKV was not accessible from EGKA on the AncSR1 background, under the historical conditions.
+- GSKV becomes accessible from EGKA on the AncSR2 background, and the single trajectory recapitulates that of Anderson, McKeown & Thornton (2015).
+- While GSKV was accessible on AncSR2, it was not amongst the most likely genotypes to evolve. Under random walk, DGKA an ATRE-specific binder was the most likely to evolve; under directional selection, was EGRA, a promiscuous genotype that binds ERE, GGRE and TTRE.
+
+Thus, the evolution of GSKV ws highly contingent on change events.
+
 ### Phenotypic transitions
 
 Besides asking what phenotypic variation was accessible to the ancestral genotype - EGKA -, we can also ask which phenotypic transitions where more likely to happen at each point in the evolutionary trajectory. That is, we know that the transition ERE-->SRE is what happened during evolution, but we still can ask: 1) what was the likelihood of this transition? and 2) What was the likelihood of all possible phenotypic transitions?
@@ -788,6 +867,372 @@ These plots show two very contrasting patterns: On the one hand, on AncSR1 genet
 We can also see that in almost every case (on both backgrounds), the most likely event is to remain with the same DNA binding specificity. This suggests that robustness is an intrinsic feature of these GP maps, and need not be a "selected" feature.
 
 Overall, the AncSR2 genetic background has two interesting patterns: First, we observed before pattern of *phenotype bias* where SRE1 is the most likely phenotype to arise by random mutation; second, we can now observe a pattern of *phenotypic transition bias* where the evolutionary transition X --> SRE1 is the most likely to occur. This highlights the importance of the structure of the GP map on phenotypic evolution (* all the results are robust if we use the directional sln. `P` matrix).
+
+
+## Evolution of protein-DNA complexes
+
+Thus far we have only considered the GP map from the perspective of the protein. However, in reality, the SR regulatory module evolves as a protein-DNA complex, where both interacting partners can mutate. In this scenario, each node of the GP map coresponds to a protein-DNA complex genotype (instead of a protein genotype), and two complexes are neighbors if they are one mutation appart at the protein OR DNA side (note that there are no "promiscuous" genotypes anymore, because each complex is a unique genotype).
+
+This co-evolutionary process can have important implications for the evolution of novel regulatory phenotypes, because it might drastically change the dymaics of the mutation process on the genotype network.
+
+### Reading in the data
+
+*Note:* The transition matrices and genotype networks contained in the `MutSel_matrices_complete_data_complexes.RData` file were generated in the Midway3 cluster using the R script `MutSel_matrices_complete_data_complexes.R`.
+
+```{r readrda2, message=FALSE}
+# Check whether the matrices have been created already
+if(!file.exists(file.path(".", "MutSel_matrices_complete_data_complexes.RData"))) {
+  # Load complete data from mutation effects model
+  # Complete data: measured + predicted meanF (`mutation_effects_model` folder)
+  data_sr1 <- readr::read_csv(file.path("..","mutation_effects_model","AncSR1_complete_data.csv.gz")) %>%
+    mutate(bg = "AncSR1")
+  data_sr2 <- readr::read_csv(file.path("..","mutation_effects_model","AncSR2_complete_data.csv.gz")) %>%
+    mutate(bg = "AncSR2")
+
+  meanF_data <- rbind(data_sr1,data_sr2)
+
+  # Add column of protein-DNA complexes
+  meanF_data <- meanF_data %>% mutate(RE_mod = case_when(RE == "ERE (GT)" ~ "GT",
+                                                         RE == "SRE1 (AA)" ~ "AA",
+                                                         RE == "SRE2 (GA)" ~ "GA",
+                                                         TRUE ~ RE),
+                                      complex = paste(AA_var,RE_mod,sep=""))
+
+  
+  # Reference wild-type ancestral genotypes:
+  AncSR1_ERE_ref <- meanF_data %>% filter(AA_var == "EGKA" & bg == "AncSR1" & RE == "ERE (GT)") %>% pull(avg_meanF)
+  AncSR2_SRE_ref <- meanF_data %>% filter(AA_var == "GSKV" & bg == "AncSR2" & RE == "SRE1 (AA)") %>% pull(avg_meanF)
+  
+  # BUILD PHENOTYPE TABLE #
+  # For each *functional* complex (those with meanF >= AncSR2_SRE_ref):
+  phenotypes_tbl <- meanF_data %>% filter(avg_meanF >= AncSR2_SRE_ref) %>%
+    group_by(complex, bg) %>%
+    summarise(n_bound_REs = n(), # how many DNA elements can bind
+              meanF_bREs = avg_meanF, # the average meanF for the prot-DNA complex
+              specific = ifelse(n_bound_REs == 1, "YES","NO"), # functional binding to only one DNA element?
+              specificity = ifelse(n_bound_REs == 1, RE, "Promiscuous"), # Determine the type of specificity
+              bound_REs = list(RE)) # assign DNA elements bound
+  
+  phenotypes_tbl_complex <- phenotypes_tbl # save it for later
+
+} else {
+  # load matrices if already created
+  load("./MutSel_matrices_complete_data_complexes.RData")
+  phenotypes_tbl_complex <- phenotypes_tbl # save it for later
+}
+
+# load functions
+source("../../scripts/MC_MutSel_functions.R")
+```
+
+
+### Global properties of ancestral protein-DNA genotype networks
+
+Like before, let's explore some global properties of the networks of protein-DNA genotypes. First, let's evaluate the PDFVs. The variational PDFV should be the same as the *specific binding PDFV* from the protein GP maps, because the functional complexes are still the same. However, the stationary PDFV under each evolutionary scenario might be different because structure of the genotype networks is different. 
+
+```{r global_prop_complexes, fig.height=4,fig.width=9,warning=FALSE}
+## Extract main components of each network and build the corresponding square P matrices
+# Drift
+P_drift_sr1_ntwrk_complex <- extract_main_ntwrk(as.undirected(net_sr1_complex),M_drift_sr1)
+P_drift_sr1_ntwrk_statdist_complex <- stationary_dist(P_drift_sr1_ntwrk_complex) 
+
+P_drift_sr2_ntwrk_complex <- extract_main_ntwrk(as.undirected(net_sr2_complex),M_drift_sr2) 
+P_drift_sr2_ntwrk_statdist_complex <- stationary_dist(P_drift_sr2_ntwrk_complex)
+
+# Directional selection
+P_dir_sr1_ntwrk_complex <- extract_main_ntwrk(as.undirected(net_sr1_complex),M_dir_sr1) 
+P_dir_sr1_ntwrk_statdist_complex <- stationary_dist(P_dir_sr1_ntwrk_complex) 
+
+P_dir_sr2_ntwrk_complex <- extract_main_ntwrk(as.undirected(net_sr2_complex),M_dir_sr2) 
+P_dir_sr2_ntwrk_statdist_complex <- stationary_dist(P_dir_sr2_ntwrk_complex)
+
+##########
+
+## Variational properties of the complexes should be the same as the "binding PDFV" of the protein-only GP map
+var.prop_AncSR1_complex_df <- get_PDFV_v2(type="network",Bg="AncSR1",model="Binding (complex)")
+var.prop_AncSR2_complex_df <- get_PDFV_v2(type="network",Bg="AncSR2",model="Binding (complex)")
+
+# Plot variational propensities for each DBD
+a <- circular_PDFV_v2(list(var.prop_AncSR1_complex_df,var.prop_AncSR1_df),
+                      cols = c("#1D1D35",cols[1]),fill=F,title = "AncSR1\nVariational propensity")
+b <- circular_PDFV_v2(list(var.prop_AncSR2_complex_df,var.prop_AncSR2_df),
+                      cols = c("#1D1D35",cols[1]),fill=F,legend = F,title = "AncSR2\nVariational propensity")
+
+a + b
+
+# Multinomial Exact test
+n_functional_prot_genotypes_sr1 <- 164
+n_functional_complexes_sr1 <- 189
+n_functional_prot_genotypes_sr2 <- 2036
+n_functional_complexes_sr2 <- 3983
+
+var.prop_AncSR1 <- inner_join(var.prop_AncSR1_complex_df,var.prop_AncSR1_df,by="RE") %>%
+  mutate(Norm_F_prob.x = ifelse(Norm_F_prob.x==0,.Machine$double.xmin,Norm_F_prob.x),
+         Norm_F_prob.y = ifelse(Norm_F_prob.y==0,.Machine$double.xmin,Norm_F_prob.y),
+         obs_complexes = Norm_F_prob.x * n_functional_complexes_sr1, exp_prot = Norm_F_prob.y * n_functional_prot_genotypes_sr1)
+
+var.prop_AncSR2 <- inner_join(var.prop_AncSR2_complex_df,var.prop_AncSR2_df,by="RE") %>%
+  mutate(Norm_F_prob.x = ifelse(Norm_F_prob.x==0,.Machine$double.xmin,Norm_F_prob.x),
+         Norm_F_prob.y = ifelse(Norm_F_prob.y==0,.Machine$double.xmin,Norm_F_prob.y),
+         obs_complexes = Norm_F_prob.x * n_functional_complexes_sr1, exp_prot = Norm_F_prob.y * n_functional_prot_genotypes_sr1)
+
+print("MET - Variational properties AncSR1:")
+xmonte(obs = var.prop_AncSR1$obs_complexes, expr = var.prop_AncSR1$exp_prot)
+print("MET - Variational properties AncSR2:")
+xmonte(obs = var.prop_AncSR2$obs_complexes, expr = var.prop_AncSR2$exp_prot)
+
+##########
+
+# STATIONARY PDFVs
+# AncSR1
+stat_pdfv_complex_drift_sr1 <- get_PDFV_v2(P_drift_sr1_ntwrk_statdist_complex,type="simulated mc",
+                                           Bg="AncSR1",model="Drift (complex)",complex = TRUE)
+stat_pdfv_complex_dir_sr1 <- get_PDFV_v2(P_dir_sr1_ntwrk_statdist_complex,type="simulated mc",
+                                         Bg="AncSR1",model="Dir. sln. (complex)",complex = TRUE)
+
+p1 <- circular_PDFV_v2(list(var.prop_AncSR1_complex_df,stat_pdfv_complex_drift_sr1,stat_pdfv_complex_dir_sr1),
+                       cols = c(cols[2:3],"gray60"),title = "AncSR1: Stationary PDFVs",fill = F)
+
+# AncSR2
+stat_pdfv_complex_drift_sr2 <- get_PDFV_v2(P_drift_sr2_ntwrk_statdist_complex,type="simulated mc",
+                                           Bg="AncSR2",model="Drift (complex)",complex = TRUE)
+stat_pdfv_complex_dir_sr2 <- get_PDFV_v2(P_dir_sr2_ntwrk_statdist_complex,type="simulated mc",
+                                         Bg="AncSR2",model="Dir. sln. (complex)",complex = TRUE)
+
+p2 <- circular_PDFV_v2(list(var.prop_AncSR2_complex_df,stat_pdfv_complex_drift_sr2,stat_pdfv_complex_dir_sr2),
+                       cols = c(cols[2:3],"gray60"),title = "AncSR2: Stationary PDFVs",legend = F,fill = F)
+
+p1+p2
+
+##########
+
+# Comparison of stationary PDFVs: protein vs. prot-DNA networks.
+p3 <- circular_PDFV_v2(list(stat_pdfv_drift_sr1,stat_pdfv_complex_drift_sr1), cols = cols[1:2],
+                       title = "AncSR1: Random walk PDFVs",fill = F)
+
+p4 <- circular_PDFV_v2(list(stat_pdfv_dir_sr1,stat_pdfv_complex_dir_sr1), cols = cols[3:4],
+                       title = "AncSR1: Directional sln PDFVs",fill = F)
+
+p5 <- circular_PDFV_v2(list(stat_pdfv_drift_sr2,stat_pdfv_complex_drift_sr2), cols = cols[1:2],
+                       title = "AncSR2: Random walk PDFVs",fill = F,legend = F)
+
+p6 <- circular_PDFV_v2(list(stat_pdfv_dir_sr2,stat_pdfv_complex_dir_sr2), cols = cols[3:4],
+                       title = "AncSR2: Directional sln PDFVs",fill = F,legend = F)
+
+
+p3 + p5
+p4 + p6
+
+# Multinomial Exact test (MET)
+rdm_walk_sr1_df <- inner_join(stat_pdfv_complex_drift_sr1,stat_pdfv_drift_sr1,by="RE") %>% 
+  mutate(Norm_F_prob.x = ifelse(Norm_F_prob.x==0,.Machine$double.xmin,Norm_F_prob.x),
+         Norm_F_prob.y = ifelse(Norm_F_prob.y==0,.Machine$double.xmin,Norm_F_prob.y),
+         obs_complexes = Norm_F_prob.x * n_functional_complexes_sr1, exp_prot = Norm_F_prob.y * n_functional_prot_genotypes_sr1)
+
+dirsln_sr1_df <- inner_join(stat_pdfv_complex_dir_sr1,stat_pdfv_dir_sr1,by="RE") %>% 
+  mutate(Norm_F_prob.x = ifelse(Norm_F_prob.x==0,.Machine$double.xmin,Norm_F_prob.x),
+         Norm_F_prob.y = ifelse(Norm_F_prob.y==0,.Machine$double.xmin,Norm_F_prob.y),
+         obs_complexes = Norm_F_prob.x * n_functional_complexes_sr1, exp_prot = Norm_F_prob.y * n_functional_prot_genotypes_sr1)
+
+rdm_walk_sr2_df <- inner_join(stat_pdfv_complex_drift_sr2,stat_pdfv_drift_sr2,by="RE") %>% 
+  mutate(Norm_F_prob.x = ifelse(Norm_F_prob.x==0,.Machine$double.xmin,Norm_F_prob.x),
+         Norm_F_prob.y = ifelse(Norm_F_prob.y==0,.Machine$double.xmin,Norm_F_prob.y),
+         obs_complexes = Norm_F_prob.x * n_functional_complexes_sr2, exp_prot = Norm_F_prob.y * n_functional_prot_genotypes_sr2)
+
+dirsln_sr2_df <- inner_join(stat_pdfv_complex_dir_sr2,stat_pdfv_dir_sr2,by="RE") %>% 
+  mutate(Norm_F_prob.x = ifelse(Norm_F_prob.x==0,.Machine$double.xmin,Norm_F_prob.x),
+         Norm_F_prob.y = ifelse(Norm_F_prob.y==0,.Machine$double.xmin,Norm_F_prob.y),
+         obs_complexes = Norm_F_prob.x * n_functional_complexes_sr2, exp_prot = Norm_F_prob.y * n_functional_prot_genotypes_sr2)
+
+print("MET - Drift AncSR1:")
+xmonte(obs = rdm_walk_sr1_df$obs_complexes, expr = rdm_walk_sr1_df$exp_prot)
+print("MET - Directional sln AncSR1:")
+xmonte(obs = rdm_walk_sr2_df$obs_complexes, expr = rdm_walk_sr2_df$exp_prot)
+print("MET - Drift AncSR2:")
+xmonte(obs = dirsln_sr1_df$obs_complexes, expr = dirsln_sr1_df$exp_prot)
+print("MET - Directional sln AncSR2:")
+xmonte(obs = dirsln_sr2_df$obs_complexes, expr = dirsln_sr2_df$exp_prot)
+
+```
+
+These results show that while the variational PDFVs are exactly the same between the protein and protein-DNA GP maps, the stationary distributions under drift and directional selection are significantly different. This suggests that protein-DNA co-evolution results in different equilibrium dynamics for the mutation-selection process, and affects the relative accessibility of new DNA binding phenotypes.
+
+### Discrete Markov chains
+
+### Local neighborhoods in protein-DNA genotype-phenotype maps
+
+Let's now ask what is the effect of co-evolution for the structure of the local neighborhood around the ancestral genotype (EGKA). To visualize the effects, let's focus on AncSR1:EGKA. We know that the historical trajectory began with the complex EGKA/GT (ERE) and evolved to GSKV/AA (SRE1). This trajectory required 3 mutations on the protein side and 2 mutations on the DNA side (for a total of 5 mutations). 
+
+We will plot the 3-mutational neighborhood around EGKA on the protein and protein-DNA networks, and also the 5-mutational neighborhood on the protein-DNA network to account for the changes in the complex as a whole.
+
+```{r local_neighborhood_complex,fig.width=5.5,fig.height=5}
+# Protein GP map
+subntwrk_sr1 <- make_ego_graph(net_sr1,order=PATH_LENGTH,nodes = "EGKA")[[1]]
+#phenotypes_tbl_prot %>% filter(AA_var %in% names(V(subntwrk_sr1)) & bg == "AncSR1") # identify phenotypes of the genotypes
+
+# assign vertex attributes: DNA binding phenotypes
+subntwrk_sr1 <- set.vertex.attribute(subntwrk_sr1, 'phenotype', V(subntwrk_sr1)[-4], 'ERE')
+subntwrk_sr1 <- set.vertex.attribute(subntwrk_sr1, 'phenotype', V(subntwrk_sr1)[4], 'Promiscuous')
+
+plot(subntwrk_sr1,layout=layout_with_fr,edge.curved=.1,vertex.color = c(rep(hex_RE_colors[3],3),"white",rep(hex_RE_colors[3],7)),
+     vertex.label.color="black", vertex.label.dist=2,main="local neighborhood EGKA: 3 mutations")
+legend(x=-1.5, y=0, c("ERE","ERE/GG"), pch=21, pt.bg=c(hex_RE_colors[3],"white"), pt.cex=2, cex=.8, bty="n", ncol=1)
+
+##########
+
+# Protein-DNA GP map: 3 steps
+subntwrk_sr1_complex <- make_ego_graph(as.undirected(net_sr1_complex),order=PATH_LENGTH,nodes = "EGKAGT")[[1]]
+#phenotypes_tbl_complex %>% filter(complex %in% names(V(subntwrk_sr1_complex)) & bg == "AncSR1")
+
+# assign vertex attributes: DNA binding phenotypes
+subntwrk_sr1_complex <- set.vertex.attribute(subntwrk_sr1_complex, 'phenotype', V(subntwrk_sr1_complex), 'ERE')
+
+plot(subntwrk_sr1_complex,layout=layout_with_fr,edge.curved=.1,vertex.color = c(rep(hex_RE_colors[3],11)),
+     vertex.label.color="black", vertex.label.dist=2,main="local neighborhood EGKA: 3 mutations (complex)")
+legend(x=-1.5, y=0, c("ERE"), pch=21, pt.bg=c(hex_RE_colors[3]), pt.cex=2, cex=.8, bty="n", ncol=1)
+
+
+##########
+
+# Protein-DNA GP map: 5 steps
+subntwrk_sr1_complex2 <- make_ego_graph(as.undirected(net_sr1_complex),order=5,nodes = "EGKAGT")[[1]]
+#phenotypes_tbl_complex %>% filter(complex %in% names(V(subntwrk_sr1_complex2)) & bg == "AncSR1")
+
+# assign vertex attributes: DNA binding phenotypes
+subntwrk_sr1_complex2 <- set.vertex.attribute(subntwrk_sr1_complex2, 'phenotype', V(subntwrk_sr1_complex2)[-c(7,10)], 'ERE')
+subntwrk_sr1_complex2 <- set.vertex.attribute(subntwrk_sr1_complex2, 'phenotype', V(subntwrk_sr1_complex2)[c(7,10)], 'GG')
+
+plot(subntwrk_sr1_complex2,layout=layout_with_fr,edge.curved=.1,
+     vertex.color = c(rep(hex_RE_colors[3],6),hex_RE_colors[12],rep(hex_RE_colors[3],2),hex_RE_colors[12],rep(hex_RE_colors[3],11)),
+     vertex.label.color="black", vertex.label.dist=2,vertex.label.cex=.7,main="local neighborhood EGKA: 5 mutations (complex)")
+legend(x=-1.5, y=0, c("ERE","GG"), pch=21, pt.bg=c(hex_RE_colors[3],hex_RE_colors[12]), pt.cex=2, cex=.8, bty="n", ncol=1)
+
+
+```
+
+These plots show some interesting consequences of introducing protein-DNA co-evolution to the GP map. We saw before that co-evolution changes the probabilities of evolving each phenotype at equilibrium, but we can also zoom-in to inspect what is happenning around a focal genotype. We can observe three things:
+1. The 3-mutational neighborhood on the protein network contains a promiscuous genotype (EARS) that can bind to ERE and GGRE. However, the 3-mutational neighborhood on the protein-DNA network only contains ERE-specific genotypes.
+2. EARS/GG is two mutations away from EGKA/GT, one in the protein and one in the DNA, and this makes it innaccesible within 3 mutations in the protein-DNA network. EARS/GG becomes accessible in the 5-mutational neighborhood.
+3. The 3-mutational neighborhood on the protein network and the 5-mutational neighborhood on the protein-DNA network contain the same phenotypes (ERE and GG), but this suggests that co-evolution increases the length of mutational trajectories to reach new phenotypes.
+
+### Evolution around EGKA on AncSR1 and AncSR2 protein-DNA networks
+
+We saw one specific example of the effects of introducing co-evolution to the genotype network. However, we want to ask more systematically what are the effects of co-evolution. Here we will compute the PDFV accesible to the ancestral complex. For now, we will focus for now on the `P` matrix from the Drift scenario.
+
+```{r mc_chain_ref_genotype_complex, fig.height=4,fig.width=9}
+# run a discrete Markov chain from 'REF_GENOTYPE' of length 'PATH_LENGTH' for different population genetic scenarios
+mc_Drift_ref_geno_3m_sr1_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr1_ntwrk_complex,n_steps = PATH_LENGTH) # 3-mutational neighborhood
+mc_Drift_ref_geno_5m_sr1_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr1_ntwrk_complex,n_steps = 5) # 5-mutational neighborhood
+
+mc_Drift_ref_geno_3m_sr2_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr2_ntwrk_complex,n_steps = PATH_LENGTH) 
+mc_Drift_ref_geno_5m_sr2_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr2_ntwrk_complex,n_steps = 5) 
+
+# Compute the PDFV from the Markov chains
+pdfv_Drift_ref_geno_3m_sr1_complex <- get_PDFV_v2(mc_Drift_ref_geno_3m_sr1_complex,Bg = "AncSR1",
+                                           model = "Random walk (3m, complex)",specific = F,type="simulated mc",complex = T)
+
+pdfv_Drift_ref_geno_5m_sr1_complex <- get_PDFV_v2(mc_Drift_ref_geno_5m_sr1_complex,Bg = "AncSR1",
+                                           model = "Random walk (5m, complex)",specific = F,type="simulated mc",complex = T)
+
+pdfv_Drift_ref_geno_3m_sr2_complex <- get_PDFV_v2(mc_Drift_ref_geno_3m_sr2_complex,Bg = "AncSR2",
+                                           model = "Random walk (3m, complex)",specific = F,type="simulated mc",complex = T)
+
+pdfv_Drift_ref_geno_5m_sr2_complex <- get_PDFV_v2(mc_Drift_ref_geno_5m_sr2_complex,Bg = "AncSR2",
+                                           model = "Random walk (5m, complex)",specific = F,type="simulated mc",complex = T)
+
+
+# plots
+p1 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1_b,pdfv_Drift_ref_geno_3m_sr1_complex,pdfv_Drift_ref_geno_5m_sr1_complex),
+                       cols = cols[2:4],title = "AncSR1:EGKA",fill = F)
+p2 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2_b,pdfv_Drift_ref_geno_3m_sr2_complex,pdfv_Drift_ref_geno_5m_sr2_complex),
+                       cols = cols[2:4],title = "AncSR2:EGKA",legend = F,fill = F)
+p1 + p2
+
+```
+
+We see that the PDFVs around the local neighborhood of the EGKA/GT complex have important differences with that of the protein network. The most obvious ones, are the general decrease in accessibility for almost all alternative phenotypes (other than ERE). Importantly, the historical derived phenotype (SRE1) is barely accessible within 3 or 5 mutation steps when we incorporate co-evolution. 
+
+---
+
+Let's now explore the temporal dynamics of pehenotypic variation: how the probability of each DNA binding phenotype changes at each step along the Markov chain. We're particularly interested in tracking the change in probability of the derived historical function SRE1 on both DBD backgrounds. 
+
+```{r mc_chain_ref_genotype_complex_b, fig.width=11,fig.height=5}
+# Number of iterations to run the Markov chain
+mc_iter <- 20
+SPECIFICITY=FALSE
+
+# Simulations under random walk, directional selection, and stabilizing selection
+pdfv_mc_multistep_sr1_complex <- simulate_markov_chain_multistep(REF_GENOTYPE_COMPLEX,P_drift_sr1_ntwrk_complex,mc_iter,
+                                                                 "AncSR1",specific = SPECIFICITY,complex = TRUE)
+pdfv_mc_multistep_sr2_complex <- simulate_markov_chain_multistep(REF_GENOTYPE_COMPLEX,P_drift_sr2_ntwrk_complex,mc_iter,
+                                                                 "AncSR2",specific = SPECIFICITY,complex = TRUE)
+
+# Plot the trajectory: Include stationary distributoins as "extra mutation steps"
+stationary_PDFV_sr1_complex <- get_PDFV_v2(P_drift_sr1_ntwrk_statdist_complex,Bg = "AncSR1",
+                                           model = mc_iter+1,specific = T,type="simulated mc",complex = TRUE)
+stationary_PDFV_sr2_complex <- get_PDFV_v2(P_drift_sr2_ntwrk_statdist_complex,Bg = "AncSR2",
+                                   model = mc_iter+1,specific = T,type="simulated mc",complex = TRUE)
+
+s0 <- data.frame(RE=REs[[2]],Norm_F_prob=c(rep(0,2),1,rep(0,14)),model=0)
+RE_COLS <- hex_RE_colors
+
+col_df <- do.call(rbind,pdfv_mc_multistep_sr1_complex) %>% rbind(.,s0,stationary_PDFV_sr1_complex) %>% 
+ filter(RE=="SRE1 (AA)")
+p1 <- do.call(rbind,pdfv_mc_multistep_sr1_complex) %>% rbind(.,s0,stationary_PDFV_sr1_complex) %>%
+  ggplot(aes(x=model,y=Norm_F_prob,color=RE)) +
+  geom_line(data=col_df,aes(x=model,y=Norm_F_prob),col="black",linewidth=3) + 
+  geom_point() + geom_line() + scale_color_manual(values = RE_COLS) + 
+  theme_classic() +
+  labs(x="Mutation step",y="Probability",title = paste("AncSR1:",REF_GENOTYPE)) +
+  scale_x_continuous(breaks=seq(0,mc_iter+1,1),labels=c(seq(0,mc_iter,1),Inf)) +
+  theme(axis.text.x = element_text(size=10,angle = 45),
+        axis.text.y = element_text(size=15),
+        legend.position = "none")
+
+col_df <- do.call(rbind,pdfv_mc_multistep_sr2_complex) %>% rbind(.,s0,stationary_PDFV_sr2_complex) %>% 
+  filter(RE=="SRE1 (AA)")
+p2 <- do.call(rbind,pdfv_mc_multistep_sr2_complex) %>% rbind(.,s0,stationary_PDFV_sr2_complex) %>%
+  ggplot(aes(x=model,y=Norm_F_prob,color=RE)) +
+  geom_line(data=col_df,aes(x=model,y=Norm_F_prob),col="black",linewidth=3) + 
+  geom_point() + geom_line() + scale_color_manual(values = RE_COLS) + 
+  theme_classic() +
+  labs(x="Mutation step",y="Probability",title = paste("AncSR2:",REF_GENOTYPE)) +
+  scale_x_continuous(breaks=seq(0,mc_iter+1,1),labels=c(seq(0,mc_iter,1),Inf)) +
+  theme(axis.text.x = element_text(size=10,angle = 45),
+        axis.text.y = element_text(size=15))
+
+p1 + p2
+```
+
+The figure shows the change in the probability of evolving each phenotype over time when evolution begins from the ancestral EKGA/GT complex genotype. We see that SRE1 (green+black background) is inaccesible during the first 20 mutation steps on the AncSR1 background. On the AncSR2 background, SRE1 becomes more likely over time, but it takes 16 mutations to be as likely as ERE (as opposed to 3 mutations in the protein network). In contrast, ATRE becomes accessible within fewer mutations, and becomes the most likely outcome after 13 mutations. 
+
+By the 5th mutation step, accounting for the changes that must have occurred in the complex to swith from the ancestral to the derived protein-DNA genotype, we see that SRE1's probability was very low on both backgrounds, implying again that, under the historical conditions, the evolution of SRE1 involved a substantial role for chance.
+
+Another important difference regarding the dynamics of the evolutionary process between the protein and protein-DNA networks, is the persistence of the ancestral phenotype (ERE) as the most likely outcome. We can quantify this by the number of mutations it takes for the ancestral phenotype to reduce it's probabiltity by 50% (i.e., $L_{50}$). On the AncSR1 background, the $L_{50} \approx 9$ mutations on the protein network, whereas for the complex network the $L_{50} \approx \infty$ (the probability of ERE at equilibrium is 0.48). On the AncSR2 background, the $L_{50} \approx 1$ mutation on the protein network, whereas for the complex network the $L_{50} \approx 6$ mutations. These results imply that the protein-DNA network is more robust than the protein network, and co-evolution can substantially delay the evolution of novel phentoypes.
+
+---
+
+Lastly, let's consider how protein-DNA co-evolution affects the mutational trajectory between the two historical complexes: EGKA/GT and GSKV/AA. We know that the derived genotype was not accessible on the AncSR1 background, so we will only consider the mutational trajectories on the AncSR2 background. 
+
+```{r mut_trajectory_complex}
+# Mutational trajectory on the protein genotype network
+print("Mutational trajectories on the protein genotype network:")
+all_shortest_paths(net_sr2,from = which(names(V(net_sr2))=="EGKA"),
+                               to = which(names(V(net_sr2))=="GSKV"))$res
+
+# Mutational trajectory on the protein-DNA genotype network
+print("Mutational trajectories on the protein-DNA genotype network:")
+all_shortest_paths(as.undirected(net_sr2_complex),
+                                       from = which(names(V(net_sr2_complex))=="EGKAGT"),
+                                       to = which(names(V(net_sr2_complex))=="GSKVAA"))$res
+```
+
+We see four important things:
+1. There is only one mutational trajectory on the protein network vs two possible trajectories on the complex network.
+2. The length of the mutational trajectories under co-evolution is longer. It requires 8 or 9 mutation steps to reach the derived complex, vs. 3 mutation steps on the protein network.
+3. The identity of the intermediate protein genotypes is different. On the protein network, the trajectory involves only intermediate genotypes with the ancestral and derived states (i.e., GGKA and GGKV); on the complex network, it involves protein genotypes with alternative (non-historical) amino acid states states, i.e., A at the 2nd position and M at the 4th positiion.
+4. The evolution of the derived specificity can be achieved within 1 mutation step on the protein network (GGKV is SRE1-specific), whereas in both trajectories of the complex network, the evolutionof the derived specificity requires passing through intermediate GARE-binding genotypes.
+
 
 ### References
 

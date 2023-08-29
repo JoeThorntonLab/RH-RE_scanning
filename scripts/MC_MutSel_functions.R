@@ -165,17 +165,19 @@ connect_complex <- function(var1,var2){
   var2_dna <- unlist(strsplit(var2,''))[5:6]
   
   link <- 0
-  # compute links for each side of the complex
-  link_prot <- connect_aa_variants(var1_prot,var2_prot)
-  link_dna <- hamming_d(var1_dna,var2_dna)
+  # Compute hamming distance for the complex
+  hd_prot <- hamming_d(var1_prot,var2_prot)
+  hd_dna <- hamming_d(var1_dna,var2_dna)
   
-  # Check that complexes are *one* change appart, either in DNA or protein
-  if(link_prot+link_dna == 1){
-    if(link_prot == 1) link <- connect_aa_variants_count(var1_prot,var2_prot)
-    else if(link_dna == 1){
-      # find all the protein backgrounds in which mutation at the DNA can occur
+  # Compute mutation links only if complexes are *one* change appart, either in DNA or protein
+  if(hd_dna + hd_prot == 1){
+    if(hd_prot == 1){ # if change happened in protein, check whether variants can be mutated
+      link <- connect_aa_variants_count(var1_prot,var2_prot)
+    }
+    else if(hd_dna == 1){
+      # If change happended in DNA, find all the protein backgrounds in which mutation at the DNA can occur
       bgs <- map(var1_prot, function(x) names(GENETIC_CODE)[GENETIC_CODE == x])
-      link <- do.call(prod, map(bgs, length)) * link_dna
+      link <- do.call(prod, map(bgs, length)) * hd_dna
     }
   }
   return(link)
@@ -234,7 +236,7 @@ build_mutation_matrix <- function(nodes,type=1,cores=1){
                         mapply(connect_aa_variants_fraction,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
   }
   else if(type == 3){
-    # number of mutational paths from i to j
+    # number of mutational paths from i to j (codon bias)
     adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
                         mapply(connect_aa_variants_count,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
   }
@@ -293,29 +295,44 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,type=1,no
       edges <- get.edgelist(links) # generate edgelist from matrix
       net <- graph_from_data_frame(d=edges, vertices=nodes, directed=F) # network with annotations per node
     }
-    
-    # Build adjacency matrix and network
-    adj_mat <- build_mutation_matrix(nodes,type=type,cores=cores)
-    if(type == 1) net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
-    else if(type != 1) net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
+    else{      
+      # Build adjacency matrix and network
+      adj_mat <- build_mutation_matrix(nodes,type=type,cores=cores)
+      if(type == 1) net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
+      else if(type != 1) net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
+    }
   }  
   return(net)
 }    
 
 # Extract a variant's phenotypic value
-get_phenotype <- function(aa_var,Bg,pheno_table,phenotype="mean"){
+get_phenotype <- function(aa_var,Bg,pheno_table,phenotype="mean",complex=FALSE){
   # aa_var = variant or variants (can be a single string or a string vector)
+    # Either a protein variant or a prot-DNA complex variant
   # Bg = string specifying the DBD background (= 'AncSR1' or 'AncSR2')
   # pheno_table = a data frame with phenotypic values (meanF)
   # phenotype = a string specifying which 'phenotype' to extract: 
-  # 'mean' = avg meanF across bound DNA elements (default)
-  # 'min' = min meanF across bound DNA elements
-  # 'max' = max meanF across bound DNA elements
+    # 'mean' = avg meanF across bound DNA elements (default)
+    # 'min' = min meanF across bound DNA elements
+    # 'max' = max meanF across bound DNA elements
+  # complex = whether to extract phenotypes of prot-DNA complexes (default: FALSE)
+  
+  # check inconsistent parameters
+  if(complex & !("complex" %in% colnames(pheno_table))){
+    stop("The phenotypic table provided does not include prot-DNA complexes")
+  }
+
   p <- NA
-  n <-  pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(AA_var)
-  if(phenotype == "mean"){ p <- pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(meanF_bREs)}
-  if(phenotype == "min"){ p <- pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(min_meanF_bREs)}
-  if(phenotype == "max"){ p <- pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(max_meanF_bREs)}
+  if(complex){
+    n <- pheno_table %>% filter(complex %in% aa_var & bg == Bg) %>% pull(complex)
+    p <- pheno_table %>% filter(complex %in% aa_var & bg == Bg) %>% pull(meanF_bREs)
+  }
+  else {
+    n <-  pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(AA_var)
+    if(phenotype == "mean"){ p <- pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(meanF_bREs)}
+    if(phenotype == "min"){ p <- pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(min_meanF_bREs)}
+    if(phenotype == "max"){ p <- pheno_table %>% filter(AA_var %in% aa_var & bg == Bg) %>% pull(max_meanF_bREs)}
+  }
   names(p) <- n
   return(p)
 }
@@ -439,9 +456,20 @@ rate_mutational_step <- function(from_i,to_j,adj_matrix,pheno_table,scenario,Ne,
   }
 
   r_ij <- 0 # initialize rate r_ij
+  neighbors <- FALSE
+
+  # Determine whether the genotype variants are single-mutation neighbors
+  if(length(unlist(strsplit(from_i,''))) == 6){ # => protein-DNA complex
+    l <- connect_complex(from_i,to_j)
+    if(l > 0) neighbors <- TRUE
+  }
+  else{ # => protein genotype
+    l <- connect_aa_variants(from_i,to_j)
+    if(l == 1) neighbors <- TRUE
+  }
   
   # If variants i and j are one-mutant neighbors, proceed to compute P(i,j)
-  if(connect_aa_variants(from_i,to_j) == 1){
+  if(neighbors){
     # Extract phenotypes of focal variants
     mF_i = get_phenotype(from_i,Bg,pheno_table,...)
     mF_j = get_phenotype(to_j,Bg,pheno_table,...)
@@ -526,7 +554,7 @@ prob_mutational_step <- function(from_i,to_j,graph,pheno_table,scenario,Ne,fit.f
 }
 
 # Build transition probability matrix (P(i,j)'s) for a DBD background and a specific selection scenario
-build_transition_matrix <- function(nodes,graph,pheno_tbl,param,cores=1){
+build_transition_matrix <- function(nodes,graph,pheno_tbl,param,complex=FALSE,cores=1){
   # nodes = a vector with vertex character names
   # graph: A genotype network (igraph object)
   # pheno_tbl: a data frame containing the phenotypic information for each RH variant
@@ -536,7 +564,8 @@ build_transition_matrix <- function(nodes,graph,pheno_tbl,param,cores=1){
     # Ne: Effective population size
     # fit.fn.param: Parameters of the fitness function
     # mutation: a logical value to indicate whether to include mutational propensities in the computation of P(i,j)
-  # phenotype: phenotypic value to use from RH variants
+    # phenotype: phenotypic value to use from RH variants
+  # complex: a logical value to indicate whether to extract prot-DNA complex phenotypes (default: FALSE)
   # cores: specify the number of cores to use in to use for parallel computing (default: 1)
   
   # Transition matrices are substatially sparse because they only store P(i,j) values amongst one-mutant neighbors, with the rest of cells
@@ -566,7 +595,7 @@ build_transition_matrix <- function(nodes,graph,pheno_tbl,param,cores=1){
                              graph=graph,pheno_table=pheno_tbl,
                              scenario=scenario,Ne=Ne,
                              fit.fn.param=fit.fn.param,Bg=Bg,
-                             mutation=mutation,phenotype=pheno) %>% 
+                             mutation=mutation,phenotype=pheno,complex=complex) %>% 
                      `colnames<-`(nodes) %>% `rownames<-`(nodes))
   stopCluster(cl)
   
@@ -576,7 +605,7 @@ build_transition_matrix <- function(nodes,graph,pheno_tbl,param,cores=1){
 
 # Build transition probability matrix (P(i,j)'s) for a DBD background and a specific selection scenario
 # (uses the function 'rate_mutational_step', instead of 'prob_mutational_step')
-build_transition_matrix_v2 <- function(nodes,adj_matrix,pheno_tbl,param,cores=1){
+build_transition_matrix_v2 <- function(nodes,adj_matrix,pheno_tbl,param,complex=FALSE,cores=1){
   # nodes = a vector with vertex character names
   # adj_matrix = an adjacency matrix
   # pheno_tbl: a data frame containing the phenotypic information for each RH variant
@@ -586,7 +615,8 @@ build_transition_matrix_v2 <- function(nodes,adj_matrix,pheno_tbl,param,cores=1)
     # Ne: Effective population size
     # fit.fn.param: Parameters of the fitness function
     # mutation: a logical value to indicate whether to include mutational propensities in the computation of P(i,j)
-  # phenotype: phenotypic value to use from RH variants
+    # phenotype: phenotypic value to use from RH variants
+  # complex: a logical value to indicate whether to extract prot-DNA complex phenotypes (default: FALSE)
   # cores: specify the number of cores to use in to use for parallel computing (default: 1)
   
   # Transition matrices are substatially sparse because they only store P(i,j) values amongst one-mutant neighbors, with the rest of cells
@@ -616,7 +646,7 @@ build_transition_matrix_v2 <- function(nodes,adj_matrix,pheno_tbl,param,cores=1)
                              adj_matrix=adj_matrix,pheno_table=pheno_tbl,
                              scenario=scenario,Ne=Ne,
                              fit.fn.param=fit.fn.param,Bg=Bg,
-                             mutation=mutation,phenotype=pheno) %>% 
+                             mutation=mutation,phenotype=pheno,complex=complex) %>% 
                      `colnames<-`(nodes) %>% `rownames<-`(nodes)
   stopCluster(cl)
 
@@ -714,8 +744,8 @@ simulate_markov_chain <- function(states_0,tr_mat,n_steps,freqs_states_0=NULL){
   return(freq_n)
 }
 
-# Compute probability distribution of functional variation (PDFV) accessible to a focal node.
-get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FALSE){
+# Compute probability distribution of functional variation (PDFV) accessible to a focal node(s).
+get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FALSE,complex=FALSE){
   # state_freqs = a vector of state frequencies after N steps of a discrete Markov chain (output of 'simulate_markov_chain' function) (default: NULL)
   # type = a string indicating how the PDFV should be computed:
       # "network" = PDFV is proportional to the number of genotypes in the entire network (default)
@@ -724,7 +754,8 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
   # Bg = a string indicating the DBD background ("AncSR1" or "AncSR2")
   # model = a string indicating the name of model (default: NA)
   # specific = logical argument to indicate whether to compute PDFV using specific genotypes (TRUE) or including promiscuous (FALSE) (default: FALSE).
-  
+  # complex = a logical argument to indicate whether PDFV is to be computed for prot-DNA complexes
+
   # Check for inconsistent parameters
   if(!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg)){
     stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
@@ -737,6 +768,9 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
   }
   if(type=="network" && !is.null(state_freqs)){
     message("Ignoring vector of frequencies...")
+  }
+  if(complex & !("complex" %in% colnames(phenotypes_tbl))){
+    stop("The phenotypic table does not contain prot-DNA complexes")
   }
   
   if(type=="network"){
@@ -764,22 +798,44 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
     # Accessible RH states after N steps of a markov chain
     acc_states <- state_freqs[state_freqs>0]
     
-    if(specific){
+    if(complex){
+    # Compute PDFV from prot-DNA complexes
+      if(specific){
       # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
-      data.frame(AA_var=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
-        reframe(RE =  REs[[2]],
-                count = table(factor(specificity,levels=REs[[2]])),
-                Norm_F_prob = count/sum(count),
-                model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+        data.frame(complex=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
+          reframe(RE =  REs[[2]],
+                  count = table(factor(specificity,levels=REs[[2]])),
+                  Norm_F_prob = count/sum(count),
+                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+      }
+      else{
+      # Combine specific and promiscuous genotypes 
+        data.frame(complex=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
+          unnest(cols = c(bound_REs)) %>% 
+          reframe(RE =  REs[[1]],
+                  count = table(factor(bound_REs,levels=REs[[1]])),
+                  Norm_F_prob = count/sum(count),
+                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+      }
     }
     else{
+      if(specific){
+      # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
+        data.frame(AA_var=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
+          reframe(RE =  REs[[2]],
+                  count = table(factor(specificity,levels=REs[[2]])),
+                  Norm_F_prob = count/sum(count),
+                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+      }
+      else{
       # Combine specific and promiscuous genotypes 
-      data.frame(AA_var=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
-        unnest(cols = c(bound_REs)) %>% 
-        reframe(RE =  REs[[1]],
-                count = table(factor(bound_REs,levels=REs[[1]])),
-                Norm_F_prob = count/sum(count),
-                model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+        data.frame(AA_var=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
+          unnest(cols = c(bound_REs)) %>% 
+          reframe(RE =  REs[[1]],
+                  count = table(factor(bound_REs,levels=REs[[1]])),
+                  Norm_F_prob = count/sum(count),
+                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+      }
     }
   }
   else if(type=="simulated mc"){
@@ -788,39 +844,66 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
     # Accessible RH states after N steps of a markov chain
     acc_states <- state_freqs[state_freqs>0]
     
-    if(specific){
+    if(complex){
+    # Compute PDFV from prot-DNA complexes
+      if(specific){
       # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
-      data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
-        # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
-        # Report final normalized probability for all 16 phenotypes.
-        group_by(specificity) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
-        add_row(specificity=REs[[2]],Norm_F_prob=0) %>% distinct(specificity, .keep_all = TRUE) %>% 
-        mutate(model = model, specificity = factor(specificity,levels(REs[[2]]))) %>% dplyr::rename(RE = specificity) %>%
-        select(RE,Norm_F_prob,model)
+        data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
+          # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
+          # Report final normalized probability for all 16 phenotypes.
+          group_by(specificity) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
+          add_row(specificity=REs[[2]],Norm_F_prob=0) %>% distinct(specificity, .keep_all = TRUE) %>% 
+          mutate(model = model, specificity = factor(specificity,levels(REs[[2]]))) %>% dplyr::rename(RE = specificity) %>%
+          select(RE,Norm_F_prob,model)
+      }
+      else{
+      # Combine specific and promiscuous genotypes 
+        data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
+          unnest(cols = c(bound_REs)) %>% 
+          # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
+          # Report final normalized probability for all 16 phenotypes.
+          group_by(bound_REs) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
+          add_row(bound_REs=REs[[1]],Norm_F_prob=0) %>% distinct(bound_REs, .keep_all = TRUE) %>% 
+          mutate(model = model, bound_REs = factor(bound_REs,levels(REs[[1]]))) %>% dplyr::rename(RE = bound_REs) %>%
+          select(RE,Norm_F_prob,model)
+      }
     }
     else{
+      if(specific){
+      # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
+        data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
+          # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
+          # Report final normalized probability for all 16 phenotypes.
+          group_by(specificity) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
+          add_row(specificity=REs[[2]],Norm_F_prob=0) %>% distinct(specificity, .keep_all = TRUE) %>% 
+          mutate(model = model, specificity = factor(specificity,levels(REs[[2]]))) %>% dplyr::rename(RE = specificity) %>%
+          select(RE,Norm_F_prob,model)
+      }
+      else{
       # Combine specific and promiscuous genotypes 
-      data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
-        unnest(cols = c(bound_REs)) %>% 
-        # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
-        # Report final normalized probability for all 16 phenotypes.
-        group_by(bound_REs) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
-        add_row(bound_REs=REs[[1]],Norm_F_prob=0) %>% distinct(bound_REs, .keep_all = TRUE) %>% 
-        mutate(model = model, bound_REs = factor(bound_REs,levels(REs[[1]]))) %>% dplyr::rename(RE = bound_REs) %>%
-        select(RE,Norm_F_prob,model)
+        data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
+          unnest(cols = c(bound_REs)) %>% 
+          # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
+          # Report final normalized probability for all 16 phenotypes.
+          group_by(bound_REs) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
+          add_row(bound_REs=REs[[1]],Norm_F_prob=0) %>% distinct(bound_REs, .keep_all = TRUE) %>% 
+          mutate(model = model, bound_REs = factor(bound_REs,levels(REs[[1]]))) %>% dplyr::rename(RE = bound_REs) %>%
+          select(RE,Norm_F_prob,model)
+      }
     }
   }
 }
 
 # Simulate a multi-step markov chain: Returns a list of data frames with the prob. distribution of functions at each time step
-simulate_markov_chain_multistep <- function(states_0,tr_mat,n_iter,Bg=NULL,freqs_states_0=NULL,specific=FALSE){
+simulate_markov_chain_multistep <- function(states_0,tr_mat,n_iter,Bg=NULL,freqs_states_0=NULL,specific=FALSE,complex=FALSE){
   # states_0 = vector containing the states from which markov chain starts
   # tr_mat = a probability transition matrix
   # n_iter = number of (mutational) steps to run the Markov chain
   # Bg = a string indicating the DBD background ("AncSR1" or "AncSR2")
   # freq_0 = optional argument to indicate the vector of initial frequencies of states_0 at n_steps=0 (default: NULL)
   # specific = logical argument to indicate whether to compute PDFV using specific genotypes (TRUE) or including promiscuous (FALSE) (default: FALSE).
-  
+  # complex = whether to compute PDFV for protein-DNA complexes (default: FALSE)
+
   # Check for valid paramenters
   if(!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg)){
     stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
@@ -833,7 +916,7 @@ simulate_markov_chain_multistep <- function(states_0,tr_mat,n_iter,Bg=NULL,freqs
   for(i in 1:n_iter){
     # simulate Markov chain for each GP map 
     mc_tmp <- simulate_markov_chain(states_0,tr_mat,n_steps = i)
-    pdfv_tmp <- get_PDFV_v2(mc_tmp,Bg = Bg,model = i,specific = specific,type="simulated mc")
+    pdfv_tmp <- get_PDFV_v2(mc_tmp,Bg = Bg,model = i,specific = specific,type="simulated mc",complex=complex)
     df[[i]] <- pdfv_tmp
   }
   return(df)
