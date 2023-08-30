@@ -67,7 +67,7 @@ if(!file.exists(file.path(".", "MutSel_matrices_complete_data.RData"))) {
               specificity = ifelse(n_bound_REs == 1, RE, "Promiscuous"), # Determine the type of specificity
               bound_REs = list(RE)) # assign DNA elements bound
   
-  phenotypes_tbl_prot <- phenotypes_tbl # save it for later
+  #phenotypes_tbl_prot <- phenotypes_tbl # save it for later
 
 } else {
   # load matrices if already created
@@ -281,7 +281,8 @@ For $k$ different DNA binding phenotypes, we obtain a probability distribution o
 
 ```{r globalparameters}
 ## GLOBAL PARAMETERS FOR MARKOV CHAINS ##
-PATH_LENGTH = 3 # path length (neighborhood size) to find mutational trajectoties
+PATH_LENGTH = 3 # path length (neighborhood size) to find mutational trajectoties in the protein network
+PATH_LENGTH_COMPLEX = 5 # path length (neighborhood size) to find mutational trajectoties in the prot-DNA network
 REF_GENOTYPE = "EGKA" # EGKA (historical genotype) 
 REF_GENOTYPE_COMPLEX = "EGKAGT" #EGKA/GT (historical protein-DNA complex)
 N_CORES=detectCores()-1 # number of cores for parallel processing
@@ -812,7 +813,7 @@ Besides asking what phenotypic variation was accessible to the ancestral genotyp
 
 To answer these questions, we can specify Markov chains to simulate evolution on each ancestral genotype network. The initial states for each chain will be the genotypes that bind *specifically* to each DNA element **and** are part of the main network. This specification allows us to estimate the probability of each phenotypic transition averaged over all possible initial states.
 
-```{r pheno_transitions, fig.width=6,fig.height=6}
+```{r pheno_transitions, fig.width=6,fig.height=4}
 # Phenotypic transitions only between specific genotypes --> change in specificity
 pheno_transition_sr1_spec <- phenotypic_transitions(from=REs[[1]],to=REs[[1]],tr_mat=P_drift_sr1_ntwrk,bg = "AncSR1",n_steps = PATH_LENGTH,specific = T)
 pheno_transition_sr2_spec <- phenotypic_transitions(from=REs[[1]],to=REs[[1]],tr_mat=P_drift_sr2_ntwrk,bg = "AncSR2",n_steps = PATH_LENGTH,specific = T)
@@ -914,7 +915,7 @@ if(!file.exists(file.path(".", "MutSel_matrices_complete_data_complexes.RData"))
               specificity = ifelse(n_bound_REs == 1, RE, "Promiscuous"), # Determine the type of specificity
               bound_REs = list(RE)) # assign DNA elements bound
   
-  phenotypes_tbl_complex <- phenotypes_tbl # save it for later
+  #phenotypes_tbl_complex <- phenotypes_tbl # save it for later
 
 } else {
   # load matrices if already created
@@ -924,6 +925,61 @@ if(!file.exists(file.path(".", "MutSel_matrices_complete_data_complexes.RData"))
 
 # load functions
 source("../../scripts/MC_MutSel_functions.R")
+```
+
+### Building protein-DNA genotype networks and probability transition matrices
+
+For every evolutionary scenario, we will create a `P` matrix for each background, using the meanF for each protein-DNA complex.
+
+```{r transition_mats_complex, eval=FALSE}
+# Check whether the matrices have been loaded already (above), if not proceed to build the networks and matrices
+if(!file.exists(file.path(".", "MutSel_matrices_complete_data.RData"))) {
+  
+  # BUILD GENOTYPE NETWORKS #
+  sr1_complexes <- phenotypes_tbl %>% filter(bg == "AncSR1") %>% pull(complex)
+  sr2_complexes <- phenotypes_tbl %>% filter(bg == "AncSR2") %>% pull(complex)
+  
+  # Regular networks
+  net_sr1_complex <- build_genotype_network(nodes=sr1_complexes, type=4, cores=N_CORES)
+  net_sr2_complex <- build_genotype_network(nodes=sr2_complexes, type=4, cores=N_CORES)
+  
+  #####
+  
+  # BUILD TRANSITION PROBABILITY MATRICES #
+  
+  # Generate transition probability matrix under three evolutionary scenarios for AncSR1 and AncSR2 backgrounds (From =   rows, to = cols)
+  
+  # Build model scenarios for each DBD background:
+  # AncSR1
+  MODEL.PARAM_SR1_drift <- list("AncSR1","drift",Ne,STEP.PARAM,TRUE,"mean")
+  MODEL.PARAM_SR1_directional <- list("AncSR1","directional",Ne,LOG.PARAM,TRUE,"mean")
+  #MODEL.PARAM_SR1_stabilizing <- list("AncSR1","stabilizing",Ne,NORM.PARAM,TRUE,"max")
+  
+  # AncSR2
+  MODEL.PARAM_SR2_drift <- list("AncSR2","drift",Ne,STEP.PARAM,TRUE,"mean")
+  MODEL.PARAM_SR2_directional <- list("AncSR2","directional",Ne,LOG.PARAM,TRUE,"mean")
+  #MODEL.PARAM_SR2_stabilizing <- list("AncSR2","stabilizing",Ne,NORM.PARAM,TRUE,"max")
+  
+  # Build matrices
+  # AncSR1
+  adj_mat_complex_sr1 <- build_mutation_matrix(sr1_complexes,type=4,N_CORES)
+  M_drift_sr1 <- build_transition_matrix_v2(sr1_complexes,adj_mat_complex_sr1,phenotypes_tbl,MODEL.PARAM_SR1_drift,N_CORES, complex=TRUE)
+  M_dir_sr1 <- build_transition_matrix_v2(sr1_complexes,adj_mat_complex_sr1,phenotypes_tbl,MODEL.PARAM_SR1_directional,N_CORES,complex=TRUE)
+  
+  # AncSR2
+  adj_mat_complex_sr2 <- build_mutation_matrix(sr2_complexes,type=4,N_CORES)
+  M_drift_sr2 <- build_transition_matrix_v2(sr2_complexes,adj_mat_complex_sr2,phenotypes_tbl,MODEL.PARAM_SR2_drift,N_CORES,complex=TRUE)
+  M_dir_sr2 <- build_transition_matrix_v2(sr2_complexes,adj_mat_complex_sr2,phenotypes_tbl,MODEL.PARAM_SR2_directional,N_CORES,complex=TRUE)
+  
+  # convert adjacency matrices of mutation rates to transition probability matrices
+  adj_mat_complex_sr1 <- t(apply(adj_mat_complex_sr1, 1, function(x) x / sum(x)))
+  adj_mat_complex_sr1 <- replace(adj_mat_complex_sr1,is.nan(adj_mat_complex_sr1),0)
+  adj_mat_complex_sr1 <- as(adj_mat_complex_sr1, "sparseMatrix")
+  
+  adj_mat_complex_sr2 <- t(apply(adj_mat_complex_sr2, 1, function(x) x / sum(x)))
+  adj_mat_complex_sr2 <- replace(adj_mat_complex_sr2,is.nan(adj_mat_complex_sr2),0)
+  adj_mat_complex_sr2 <- as(adj_mat_complex_sr2, "sparseMatrix")
+}
 ```
 
 
@@ -1124,10 +1180,10 @@ We saw one specific example of the effects of introducing co-evolution to the ge
 ```{r mc_chain_ref_genotype_complex, fig.height=4,fig.width=9}
 # run a discrete Markov chain from 'REF_GENOTYPE' of length 'PATH_LENGTH' for different population genetic scenarios
 mc_Drift_ref_geno_3m_sr1_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr1_ntwrk_complex,n_steps = PATH_LENGTH) # 3-mutational neighborhood
-mc_Drift_ref_geno_5m_sr1_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr1_ntwrk_complex,n_steps = 5) # 5-mutational neighborhood
+mc_Drift_ref_geno_5m_sr1_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr1_ntwrk_complex,n_steps = PATH_LENGTH_COMPLEX) # 5-mutational neighborhood
 
 mc_Drift_ref_geno_3m_sr2_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr2_ntwrk_complex,n_steps = PATH_LENGTH) 
-mc_Drift_ref_geno_5m_sr2_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr2_ntwrk_complex,n_steps = 5) 
+mc_Drift_ref_geno_5m_sr2_complex <- simulate_markov_chain(REF_GENOTYPE_COMPLEX,P_drift_sr2_ntwrk_complex,n_steps = PATH_LENGTH_COMPLEX) 
 
 # Compute the PDFV from the Markov chains
 pdfv_Drift_ref_geno_3m_sr1_complex <- get_PDFV_v2(mc_Drift_ref_geno_3m_sr1_complex,Bg = "AncSR1",
@@ -1236,6 +1292,113 @@ We see four important things:
 3. The identity of the intermediate protein genotypes is different. On the protein network, the trajectory involves only intermediate genotypes with the ancestral and derived states (i.e., GGKA and GGKV); on the complex network, it involves protein genotypes with alternative (non-historical) amino acid states states, i.e., A at the 2nd position and M at the 4th positiion.
 4. The evolution of the derived specificity can be achieved within 1 mutation step on the protein network (GGKA is SRE1-specific), whereas in both trajectories of the complex network, the evolutionof the derived specificity requires passing through intermediate GARE-binding genotypes.
 
+### Phenotypic transitions
+
+Finally, let's explore the effects of co-evolution for the transitions between phenotypes. Since we're considering the evolution of the SR complex, we will determine the probability of each phenotypic transition after 5 mutation steps. 
+
+```{r pheno_transitions_complex, fig.width=6,fig.height=4}
+# Phenotypic transitions only between specific genotypes --> change in specificity
+pheno_transition_sr1_complex <- phenotypic_transitions(from=REs[[1]],to=REs[[1]],tr_mat=P_drift_sr1_ntwrk_complex,
+                                                    bg = "AncSR1",n_steps = PATH_LENGTH_COMPLEX,specific = T,complex = T)
+pheno_transition_sr2_complex <- phenotypic_transitions(from=REs[[1]],to=REs[[1]],tr_mat=P_drift_sr2_ntwrk_complex,
+                                                    bg = "AncSR2",n_steps = PATH_LENGTH_COMPLEX,specific = T,complex = T)
+
+# optional: compute global transition probs --> from all specific genotype in main network to every specific genotype
+# AncSR1 network
+spec_nodes_sr1 <- phenotypes_tbl %>% filter(specific=="YES" & bg=="AncSR1") %>% pull(complex)
+ntwrk_transition_sr1 <- phenotypic_transitions(from=NULL,from_nodes = spec_nodes_sr1,tr_mat=P_drift_sr1_ntwrk_complex,
+                                               bg = "AncSR1",n_steps = PATH_LENGTH_COMPLEX,specific = T,complex=T)
+ntwrk_transition_sr1 <- apply(ntwrk_transition_sr1,2,sum,na.rm=T)
+ntwrk_transition_sr1 <- as.matrix(t(ntwrk_transition_sr1/sum(ntwrk_transition_sr1))); rownames(ntwrk_transition_sr1) <- "Network"
+pheno_transition_sr1_complex <- rbind(ntwrk_transition_sr1,pheno_transition_sr1_complex)
+
+# AncSR2 network
+spec_nodes_sr2 <- phenotypes_tbl %>% filter(specific=="YES" & bg=="AncSR2") %>% pull(complex)
+ntwrk_transition_sr2 <- phenotypic_transitions(from=NULL,from_nodes = spec_nodes_sr2,tr_mat=P_drift_sr2_ntwrk_complex,
+                                               bg = "AncSR2",n_steps = PATH_LENGTH_COMPLEX,specific = T,complex=T)
+ntwrk_transition_sr2 <- apply(ntwrk_transition_sr2,2,sum,na.rm=T)
+ntwrk_transition_sr2 <- as.matrix(t(ntwrk_transition_sr2/sum(ntwrk_transition_sr2))); rownames(ntwrk_transition_sr2) <- "Network"
+pheno_transition_sr2_complex <- rbind(ntwrk_transition_sr2,pheno_transition_sr2_complex)
+
+# plot
+#breaksList <- seq(0,1,0.1)
+#pheatmap(pheno_transition_sr1_spec,cluster_rows = F,cluster_cols = F,na_col = "black",
+#         border_color = "black",
+#         color = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 11, name = "RdYlBu")))(length(breaksList)), 
+#         breaks = breaksList, legend_labels = seq(0,1,0.2))
+#
+#pheatmap(pheno_transition_sr2_spec,cluster_rows = F,cluster_cols = F,na_col = "black",
+#         border_color = "black",
+#         color = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 11, name = "RdYlBu")))(length(breaksList)), 
+#         breaks = breaksList, legend_labels = seq(0,1,0.2))
+
+# scaled probabilities
+pheno_transition_sr1_complex_scaled <- t(apply(pheno_transition_sr1_complex,1,scale)); colnames(pheno_transition_sr1_complex_scaled) <- REs[[1]]
+pheno_transition_sr2_complex_scaled <- t(apply(pheno_transition_sr2_complex,1,scale)); colnames(pheno_transition_sr2_complex_scaled) <- REs[[1]]
+
+breaksList <- seq(-1,4,0.1)
+pheatmap(pheno_transition_sr1_complex_scaled,cluster_rows = F,cluster_cols = F,na_col = "black",
+         border_color = "black",
+         color = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 11, name = "RdYlBu")))(length(breaksList)), 
+         breaks = breaksList, legend_labels = seq(-1,4,0.2))
+
+pheatmap(pheno_transition_sr2_complex_scaled,cluster_rows = F,cluster_cols = F,na_col = "black",
+         border_color = "black",
+         color = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 11, name = "RdYlBu")))(length(breaksList)), 
+         breaks = breaksList, legend_labels = seq(-1,4,0.2))
+
+```
+
+These figures show contrasting results with the phenotypic transitions computed from the protein network. Specifically, we see that on AncSR1, SRE1 is the most likely outcome from CARE-binding genotypes, instead of GARE-binding phenotypes, which are not even part of the main complex network. The phenotypic transition bias towards SRE1 on AncSR2 that we observed before is now less clear, and in fact, SRE1 and ATRE have similar probabilities. As for the historical transition, ERE --> SRE1, we see that it is highly unlikely in both backgrounds. In fact, on AncSR1, ERE is unlikely to change to other phenotypes, and, remarkably, on AncSR2, ERE is more likely to transition to ATRE. 
+
+This new pattern arises because ATRE is mutationally closer to ERE (GT) than SRE1 (AA): the former requires only one mutation on the DNA, whereas the latter requires two. Thus, introducing protein-DNA co-evolution can substatially change the landscape of phenotypic transitions. 
+
+When considering the entire networks, we see that SRE1, ERE and ATRE are the most likely outcomes. ATRE-binding is the second most common phenotype on AncSR1 and the third most common phenotype produced by mutation on AncSR2 (see the variational PDFVs). Thus, we now see a new pattern phenotypic transition bias when accounting for co-evolution.
+
+---
+
+We can compare directly the relative total probabilities of evolving each phenotype under the different genotype networks. 
+
+```{r comparison_pheno_tr, fig.width=7,fig.height=5}
+total_prob_phenotype_sr1 <- apply(abs(pheno_transition_sr1_spec_scaled[-1,]),2,sum,na.rm=T) # remove whole network prob.
+total_prob_phenotype_sr1_complex <- apply(abs(pheno_transition_sr1_complex_scaled[-1,]),2,sum,na.rm=T)
+
+df_total_pheno_prob_sr1 <- rbind(data.frame(RE=names(total_prob_phenotype_sr1),prob=total_prob_phenotype_sr1,type="protein"),
+                                      data.frame(RE=names(total_prob_phenotype_sr1_complex),prob=total_prob_phenotype_sr1_complex,type="protein-DNA"))
+
+total_prob_phenotype_sr2 <- apply(abs(pheno_transition_sr2_spec_scaled[-1,]),2,sum,na.rm=T)
+total_prob_phenotype_sr2_complex <- apply(abs(pheno_transition_sr2_complex_scaled[-1,]),2,sum,na.rm=T)
+
+df_total_pheno_prob_sr2 <- rbind(data.frame(RE=names(total_prob_phenotype_sr2),prob=total_prob_phenotype_sr2,type="protein"),
+                                      data.frame(RE=names(total_prob_phenotype_sr2_complex),prob=total_prob_phenotype_sr2_complex,type="protein-DNA"))
+
+# plot
+p1 <- df_total_pheno_prob_sr1 %>% mutate(RE = factor(RE,levels =REs[[1]])) %>%
+  ggplot(aes(x=RE,y=prob,fill=type)) + 
+  geom_bar(stat="identity",color="black",position = "dodge") + 
+  scale_fill_manual(values = c("gray60","black")) +
+  theme_classic() +
+  labs(x="DNA element",y="Relative total transition probability") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1,size = 10),
+        axis.text.y = element_text(size = 13),
+        axis.title=element_text(size=13,face="bold"),
+        legend.position = "none")
+
+p2 <- df_total_pheno_prob_sr2 %>% mutate(RE = factor(RE,levels =REs[[1]])) %>%
+  ggplot(aes(x=RE,y=prob,fill=type)) + 
+  geom_bar(stat="identity",color="black",position = "dodge") + 
+  scale_fill_manual(values = c("gray60","black")) +
+  theme_classic() +
+  labs(x="DNA element",y="Relative total transition probability") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1,size = 10),
+        axis.text.y = element_text(size = 13),
+        axis.title=element_text(size=13,face="bold"))
+
+p1 + p2
+
+```
+
+Including co-evolution drastically changes the transition probabilities.
 
 ### References
 

@@ -1060,7 +1060,7 @@ circular_PDFV_v2 <- function(data,cols = "#00AFBB",title = NULL,legend=T,fill=T,
 }
 
 # Compute the probability of all pairwise phenotypic transitions given a number of mutation steps.
-phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_mat,bg,n_steps,specific=F,normalize=T){
+phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_mat,bg,n_steps,specific=F,normalize=T,complex=FALSE){
   # from, to = vectors containing the names of the DNA phenotypes to compute the trajectory (default: all REs)
   # from_nodes = alternative vector to 'from' which, instead of DNA phenotypes, includes the vector of starting genotypes.
   # tr_mat = a probability transition matrix
@@ -1068,6 +1068,7 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
   # n_steps = number of (mutational) steps to run the Markov chain
   # specific = logical argument to indicate whether to compute PDFV using specific genotypes (TRUE) or including promiscuous (FALSE) (default: FALSE).
   # normalize = logical arg. to specify whether to re-normalize the probabilities (default: TRUE)
+  # complex = whether to use protein-DNA genotypes to compute transitions
   
   # check inconsistent/valid arguments
   if(!(bg %in% c("AncSR1","AncSR2")) || is.null(bg)){
@@ -1086,7 +1087,7 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
     stop("Provide a correct number of steps to run the markov chain (n_steps > 0)")
   }
   
-  if(!is.null(from_nodes)){
+  if(!is.null(from_nodes) & complex==FALSE){
     # dimensions of matrix and names of columns/rows
     # extract starting phenotypes from starting nodes
     RE_from <- unique(phenotypes_tbl %>% filter(specific == "YES" & bg == bg) %>%
@@ -1095,6 +1096,16 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
     
     n_cols <- length(to)
     RE_to <- REs[[1]][REs[[1]] %in% to]
+  }
+  else if(!is.null(from_nodes) & complex==TRUE){
+    # dimensions of matrix and names of columns/rows
+    # extract starting phenotypes from starting nodes
+    RE_from <- unique(phenotypes_tbl %>% filter(bg == bg) %>%
+                    filter(complex %in% from_nodes) %>% pull(specificity))
+    n_rows <- length(RE_from)
+    n_cols <- length(to)
+    RE_to <- REs[[1]][REs[[1]] %in% to]
+
   }
   else{
     # dimensions of matrix and names of columns/rows
@@ -1116,16 +1127,23 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
   states <- rownames(tr_mat) # states in the transition matrix
   
   for(i in RE_from){
-    # extract amino acid variants from the ith neutral network 
-    phenotype_vars <- phenotypes_tbl %>% filter(AA_var %in% states) %>%
-      filter(bg == bg & specificity == i) %>% pull(AA_var)
+    if(complex){
+      # extract amino acid variants from the ith neutral network 
+      phenotype_vars <- phenotypes_tbl %>% filter(complex %in% states) %>%
+          filter(bg == bg & specificity == i) %>% pull(complex)
+    }
+    else{
+      # extract amino acid variants from the ith neutral network 
+      phenotype_vars <- phenotypes_tbl %>% filter(AA_var %in% states) %>%
+          filter(bg == bg & specificity == i) %>% pull(AA_var)
+    }
     
     # if specific genotypes are not part of the main network, or no specific genotypes, continue:
     if(identical(phenotype_vars, character(0))) next
     
     # run markov chain
     mc_tmp <- simulate_markov_chain(phenotype_vars,tr_mat,n_steps = n_steps)
-    pdfv_tmp <- get_PDFV_v2(mc_tmp,Bg = bg ,specific = specific,type="simulated mc") %>% filter(RE %in% RE_to)
+    pdfv_tmp <- get_PDFV_v2(mc_tmp,Bg = bg ,specific = specific,type="simulated mc",complex=complex) %>% filter(RE %in% RE_to)
     
     # re-normalize probabilities?
     if(normalize){
@@ -1143,4 +1161,3 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
   }
   return(pheno_transition_mat)
 }
-
