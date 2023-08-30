@@ -799,11 +799,12 @@ p1 + p2
 ```
 
 These results show three interesting things:
+
 - GSKV was not accessible from EGKA on the AncSR1 background, under the historical conditions.
 - GSKV becomes accessible from EGKA on the AncSR2 background, and the single trajectory recapitulates that of Anderson, McKeown & Thornton (2015).
 - While GSKV was accessible on AncSR2, it was not amongst the most likely genotypes to evolve. Under random walk, DGKA an ATRE-specific binder was the most likely to evolve; under directional selection, was EGRA, a promiscuous genotype that binds ERE, GGRE and TTRE.
 
-Thus, the evolution of GSKV ws highly contingent on change events.
+Thus, the evolution of GSKV was highly contingent on change events.
 
 ### Phenotypic transitions
 
@@ -1111,6 +1112,7 @@ legend(x=-1.5, y=0, c("ERE","GG"), pch=21, pt.bg=c(hex_RE_colors[3],hex_RE_color
 ```
 
 These plots show some interesting consequences of introducing protein-DNA co-evolution to the GP map. We saw before that co-evolution changes the probabilities of evolving each phenotype at equilibrium, but we can also zoom-in to inspect what is happenning around a focal genotype. We can observe three things:
+
 1. The 3-mutational neighborhood on the protein network contains a promiscuous genotype (EARS) that can bind to ERE and GGRE. However, the 3-mutational neighborhood on the protein-DNA network only contains ERE-specific genotypes.
 2. EARS/GG is two mutations away from EGKA/GT, one in the protein and one in the DNA, and this makes it innaccesible within 3 mutations in the protein-DNA network. EARS/GG becomes accessible in the 5-mutational neighborhood.
 3. The 3-mutational neighborhood on the protein network and the 5-mutational neighborhood on the protein-DNA network contain the same phenotypes (ERE and GG), but this suggests that co-evolution increases the length of mutational trajectories to reach new phenotypes.
@@ -1208,7 +1210,7 @@ The figure shows the change in the probability of evolving each phenotype over t
 
 By the 5th mutation step, accounting for the changes that must have occurred in the complex to swith from the ancestral to the derived protein-DNA genotype, we see that SRE1's probability was very low on both backgrounds, implying again that, under the historical conditions, the evolution of SRE1 involved a substantial role for chance.
 
-Another important difference regarding the dynamics of the evolutionary process between the protein and protein-DNA networks, is the persistence of the ancestral phenotype (ERE) as the most likely outcome. We can quantify this by the number of mutations it takes for the ancestral phenotype to reduce it's probabiltity by 50% (i.e., $L_{50}$). On the AncSR1 background, the $L_{50} \approx 9$ mutations on the protein network, whereas for the complex network the $L_{50} \approx \infty$ (the probability of ERE at equilibrium is 0.48). On the AncSR2 background, the $L_{50} \approx 1$ mutation on the protein network, whereas for the complex network the $L_{50} \approx 6$ mutations. These results imply that the protein-DNA network is more robust than the protein network, and co-evolution can substantially delay the evolution of novel phentoypes.
+Another important difference regarding the dynamics of the evolutionary process between the protein and protein-DNA networks, is the persistence of the ancestral phenotype (ERE) as the most likely outcome. We can quantify this by the number of mutations it takes for the ancestral phenotype to reduce it's probabiltity by 50% (i.e., $L_{50}$). On the AncSR1 background, the $L_{50} \approx 9$ on the protein network, whereas for the complex network the $L_{50} \approx \infty$ (the probability of ERE at equilibrium is 0.48). On the AncSR2 background, the $L_{50} \approx 1$ on the protein network, whereas for the complex network the $L_{50} \approx 6$. These results imply that the protein-DNA network is more robust than the protein network, and co-evolution can substantially delay the evolution of novel phentoypes.
 
 ---
 
@@ -1228,10 +1230,11 @@ all_shortest_paths(as.undirected(net_sr2_complex),
 ```
 
 We see four important things:
+
 1. There is only one mutational trajectory on the protein network vs two possible trajectories on the complex network.
 2. The length of the mutational trajectories under co-evolution is longer. It requires 8 or 9 mutation steps to reach the derived complex, vs. 3 mutation steps on the protein network.
 3. The identity of the intermediate protein genotypes is different. On the protein network, the trajectory involves only intermediate genotypes with the ancestral and derived states (i.e., GGKA and GGKV); on the complex network, it involves protein genotypes with alternative (non-historical) amino acid states states, i.e., A at the 2nd position and M at the 4th positiion.
-4. The evolution of the derived specificity can be achieved within 1 mutation step on the protein network (GGKV is SRE1-specific), whereas in both trajectories of the complex network, the evolutionof the derived specificity requires passing through intermediate GARE-binding genotypes.
+4. The evolution of the derived specificity can be achieved within 1 mutation step on the protein network (GGKA is SRE1-specific), whereas in both trajectories of the complex network, the evolutionof the derived specificity requires passing through intermediate GARE-binding genotypes.
 
 
 ### References
