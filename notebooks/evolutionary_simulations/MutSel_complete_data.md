@@ -7,7 +7,7 @@ This notebook contains the analysis for simulating evolutionary trajectories on 
 
 <details>
 
-<summary>Reading in data&lt;&gt;
+<summary>Reading in data</summary>
 
 *Note:* The transition matrices and genotype networks contained in the `MutSel_matrices_complete_data.RData` file were generated in the Midway3 cluster using the R script `MutSel_matrices_complete_data.R`.
 
@@ -50,11 +50,11 @@ if(!file.exists(file.path(".", "MutSel_matrices_complete_data.RData"))) {
 source("../../scripts/MC_MutSel_functions.R")
 ```
 
-&lt;&gt;
+</details>
 
 <details>
 
-<summary>Modeling walks on an empirical GP map&lt;&gt;
+<summary>Modeling walks on an empirical GP map</summary>
 
 ### Strong Selection-Weak Mutation (SSWM) regime
 
@@ -245,11 +245,11 @@ where the numerator is the sum of the probailities of all the genotypes encoding
 
 For *k* different DNA binding phenotypes, we obtain a probability distribution of functional variation (PDFV), a multinomial probability distribution, around any set of starting genotypes {*G*<sub>0</sub>} that quantifies the likelihood that evolution will produce a particular phenotypic outcome given a set of conditions.
 
-&lt;&gt;
+</details>
 
 <details>
 
-<summary>Simulations on protein genotype networks&lt;&gt;
+<summary>Simulations on protein genotype networks</summary>
 
 ## Evolutionary simulations using discrete markov chains
 
@@ -593,6 +593,8 @@ chisq.test(x=d$Hamming,p=d$Norm_F_prob)
     ## X-squared = 12.881, df = 15, p-value = 0.6115
 
 ``` r
+###################
+
 # AncSR2
 # full graph
 adj_mat_fullgraph_sr2 <- simulate_GPmap(net_sr2,type=3,which="mat")
@@ -662,6 +664,8 @@ chisq.test(x=d2$Hamming,p=d2$Norm_F_prob)
     ## X-squared = 20.759, df = 15, p-value = 0.1447
 
 ``` r
+################
+
 # plots
 p1 <- circular_PDFV_v2(list(var.prop_AncSR1_df,genetic_code_pdfv_sr1,hamming_stat_pdfv_sr1),cols = cols[4:6],title = "AncSR1: Stationary PDFVs",fill = F)
 
@@ -946,12 +950,10 @@ p1 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr1,pdfv_DirSln_ref_genotype
                        cols = cols[2:3],title = "AncSR1:EGKA",fill = F)
 p2 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2,pdfv_DirSln_ref_genotype_sr2),
                        cols = cols[2:3],title = "AncSR2:EGKA",legend = F,fill = F)
-p1 + p2
-```
+#p1 + p2
 
-![](MutSel_complete_data_files/figure-markdown_github/mc_chains_ref_genotype_a-1.png)
+###################
 
-``` r
 # plot without promiscuous (including all binders)
 pdfv_Drift_ref_genotype_sr1_b <- get_PDFV_v2(mc_Drift_ref_genotype_sr1,Bg = "AncSR1",
                                            model = "Random walk",specific = F,type="simulated mc")
@@ -970,7 +972,7 @@ p4 <- circular_PDFV_v2(list(pdfv_Drift_ref_genotype_sr2_b,pdfv_DirSln_ref_genoty
 p3 + p4
 ```
 
-![](MutSel_complete_data_files/figure-markdown_github/mc_chains_ref_genotype_a-2.png)
+![](MutSel_complete_data_files/figure-markdown_github/mc_chains_ref_genotype_a-1.png)
 
 The figures above showed that after 3 mutation steps, the ancestral RH genotype, EGKA, had very different PDFVs on each GP map. From AncSR1 to AncSR2 the probability of retaining the ancestral function decreased, and the probability of evolving SRE1 binding increased. Interestingly, the probability of evolving ATRE binding, a non-historical phenotype, was higher than that of SRE1 on the AncSR2 background.
 
@@ -1168,18 +1170,6 @@ ntwrk_transition_sr2 <- apply(ntwrk_transition_sr2,2,sum,na.rm=T)
 ntwrk_transition_sr2 <- as.matrix(t(ntwrk_transition_sr2/sum(ntwrk_transition_sr2))); rownames(ntwrk_transition_sr2) <- "Network"
 pheno_transition_sr2_spec <- rbind(ntwrk_transition_sr2,pheno_transition_sr2_spec)
 
-# plot
-#breaksList <- seq(0,1,0.1)
-#pheatmap(pheno_transition_sr1_spec,cluster_rows = F,cluster_cols = F,na_col = "black",
-#         border_color = "black",
-#         color = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 11, name = "RdYlBu")))(length(breaksList)), 
-#         breaks = breaksList, legend_labels = seq(0,1,0.2))
-#
-#pheatmap(pheno_transition_sr2_spec,cluster_rows = F,cluster_cols = F,na_col = "black",
-#         border_color = "black",
-#         color = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 11, name = "RdYlBu")))(length(breaksList)), 
-#         breaks = breaksList, legend_labels = seq(0,1,0.2))
-
 # scaled probabilities
 pheno_transition_sr1_spec_scaled <- t(apply(pheno_transition_sr1_spec,1,scale)); colnames(pheno_transition_sr1_spec_scaled) <- REs[[1]]
 pheno_transition_sr2_spec_scaled <- t(apply(pheno_transition_sr2_spec,1,scale)); colnames(pheno_transition_sr2_spec_scaled) <- REs[[1]]
@@ -1208,11 +1198,11 @@ We can also see that in almost every case (on both backgrounds), the most likely
 
 Overall, the AncSR2 genetic background has two interesting patterns: First, we observed before pattern of *phenotype bias* where SRE1 is the most likely phenotype to arise by random mutation; second, we can now observe a pattern of *phenotypic transition bias* where the evolutionary transition X --&gt; SRE1 is the most likely to occur. This highlights the importance of the structure of the GP map on phenotypic evolution (\* all the results are robust if we use the directional sln. `P` matrix).
 
-&lt;&gt;
+</details>
 
 <details>
 
-<summary>Simulations on protein-DNA complex genotype networks&lt;&gt;
+<summary>Simulations on protein-DNA complex genotype networks</summary>
 
 ## Evolution of protein-DNA complexes
 
@@ -1572,11 +1562,11 @@ all_shortest_paths(as.undirected(net_sr2_complex),
 ```
 
     ## [[1]]
-    ## + 9/3983 vertices, named, from f282ab8:
+    ## + 9/3983 vertices, named, from 197ab82:
     ## [1] EGKAGT EAKAGT EAKAGA EAKVGA EAKVAA EAKMAA GAKMAA GSKMAA GSKVAA
     ## 
     ## [[2]]
-    ## + 10/3983 vertices, named, from f282ab8:
+    ## + 10/3983 vertices, named, from 197ab82:
     ##  [1] EGKAGT EAKAGT EAKAGA EAKVGA EAKVAA EAKMAA EGKMAA GGKMAA GSKMAA GSKVAA
 
 We see four important things:
@@ -1753,7 +1743,7 @@ p1 <- do.call(rbind,pdfv_mc_multistep_sr1_complex) %>% rbind(.,s0,stationary_PDF
   geom_line(data=col_df,aes(x=model,y=Norm_F_prob),col="black",linewidth=3) + 
   geom_point() + geom_line() + scale_color_manual(values = RE_COLS) + 
   theme_classic() +
-  labs(x="Mutation step",y="Probability",title = paste("AncSR1:",REF_GENOTYPE)) +
+  labs(x="Mutation step",y="Probability",title = paste("AncSR1:",REF_GENOTYPE_COMPLEX)) +
   scale_x_continuous(breaks=seq(0,mc_iter+1,1),labels=c(seq(0,mc_iter,1),Inf)) +
   theme(axis.text.x = element_text(size=10,angle = 45),
         axis.text.y = element_text(size=15),
@@ -1766,7 +1756,7 @@ p2 <- do.call(rbind,pdfv_mc_multistep_sr2_complex) %>% rbind(.,s0,stationary_PDF
   geom_line(data=col_df,aes(x=model,y=Norm_F_prob),col="black",linewidth=3) + 
   geom_point() + geom_line() + scale_color_manual(values = RE_COLS) + 
   theme_classic() +
-  labs(x="Mutation step",y="Probability",title = paste("AncSR2:",REF_GENOTYPE)) +
+  labs(x="Mutation step",y="Probability",title = paste("AncSR2:",REF_GENOTYPE_COMPLEX)) +
   scale_x_continuous(breaks=seq(0,mc_iter+1,1),labels=c(seq(0,mc_iter,1),Inf)) +
   theme(axis.text.x = element_text(size=10,angle = 45),
         axis.text.y = element_text(size=15))
@@ -1960,7 +1950,7 @@ p1 <- df_total_pheno_prob_sr1 %>% mutate(RE = factor(RE,levels =REs[[1]])) %>%
   ggplot(aes(x=RE,y=prob,fill=type)) + 
   geom_bar(stat="identity",color="black",position = "dodge") + 
   scale_fill_manual(values = c("gray60","black")) +
-  theme_classic() +
+  theme_classic() + ggtitle("AncSR1") +
   labs(x="DNA element",y="Relative total transition probability") +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1,size = 10),
         axis.text.y = element_text(size = 13),
@@ -1971,7 +1961,7 @@ p2 <- df_total_pheno_prob_sr2 %>% mutate(RE = factor(RE,levels =REs[[1]])) %>%
   ggplot(aes(x=RE,y=prob,fill=type)) + 
   geom_bar(stat="identity",color="black",position = "dodge") + 
   scale_fill_manual(values = c("gray60","black")) +
-  theme_classic() +
+  theme_classic() + ggtitle("AncSR2") +
   labs(x="DNA element",y="Relative total transition probability") +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1,size = 10),
         axis.text.y = element_text(size = 13),
@@ -1989,7 +1979,7 @@ The inclusion of co-evolution drastically changes the landscape of phenotypic tr
 <!-- We saw that co-evolution leads to a different pattern of phenotypic transition bias, where ATRE binding is now amongst the most likely phenotypes to evolve. This new pattern can arise because ATRE is mutationally closer to ERE (GT) than SRE1 (AA): access to ATRE requires only one mutation on the DNA, whereas access to SRE1 (AA) requires two. Thus, introducing protein-DNA co-evolution can substatially change the landscape of phenotypic transitions.
 
 We can make sense of these patterns by exploring the proximity between neutral networks, that is, how close in sequence space are the phenotypes. For this, we can compute the number of direct links between genotypes in each neutral network; this represents the the number of direct mutational paths that exist between phenotypes, and can provide an approximation of how easy it is for evolution to access new phenotypes. -->
-&lt;&gt;
+</details>
 
 ### References
 
