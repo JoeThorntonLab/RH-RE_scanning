@@ -36,11 +36,15 @@ invisible(lapply(packages, library, character.only=TRUE))
 
 ```
 
-This notebook contains the analysis for simulating evolutionary trajectories on empirical GP maps using markov chains.
+This notebook contains the analysis for simulating evolutionary trajectories on empirical GP maps using markov chains. It has three mains sections:
 
-<details>
+- A theoretical explanation for modeling evolution on empirical GP maps [here](#strong-selection-weak-mutation-regime)
+- The simulations on the protein genotype networks [here](#evolutionary-simulations-using-discrete-markov-chains)
+- The simulations on the protein-DNA complex genotype networks [here](#evolution-of-protein-dna-complexes)
 
-<summary>Reading in data</summary>
+---
+
+### Reading in the data
 
 *Note:* The transition matrices and genotype networks contained in the `MutSel_matrices_complete_data.RData` file were generated in the Midway3 cluster using the R script `MutSel_matrices_complete_data.R`.
 
@@ -83,13 +87,8 @@ if(!file.exists(file.path(".", "MutSel_matrices_complete_data.RData"))) {
 source("../../scripts/MC_MutSel_functions.R")
 ```
 
-</details>
 
-<details>
-
-<summary>Modeling walks on an empirical GP map</summary>
-
-### Strong Selection-Weak Mutation (SSWM) regime
+## Strong Selection-Weak Mutation regime
 
 Under the SSWM regime, the mutation rate is low enough such that the time to fixation of a mutation is much lower than the time between subsequent mutations (Gillespie, 1984). Thus, trajectories on a genotype landscape can be modeled as an stepwise, origin-fixation process. Specifically, the rate of fixation from allele $i$ to $j$ is a product of the rate of introduction of allele $j$ in the population and the probability that it goes to fixation, like so 
 
@@ -282,11 +281,6 @@ where the numerator is the sum of the probailities of all the genotypes encoding
 
 For $k$ different DNA binding phenotypes, we obtain a probability distribution of functional variation (PDFV), a multinomial probability distribution, around any set of starting genotypes $\{G_0\}$ that quantifies the likelihood that evolution will produce a particular phenotypic outcome given a set of conditions.  
 
-</details>
-
-<details>
-
-<summary>Simulations on protein genotype networks</summary>
 
 ## Evolutionary simulations using discrete markov chains
 
@@ -1058,11 +1052,6 @@ We can also see that in almost every case (on both backgrounds), the most likely
 
 Overall, the AncSR2 genetic background has two interesting patterns: First, we observed before pattern of *phenotype bias* where SRE1 is the most likely phenotype to arise by random mutation; second, we can now observe a pattern of *phenotypic transition bias* where the evolutionary transition X --> SRE1 is the most likely to occur. This highlights the importance of the structure of the GP map on phenotypic evolution (* all the results are robust if we use the directional sln. `P` matrix).
 
-</details>
-
-<details>
-
-<summary>Simulations on protein-DNA complex genotype networks</summary>
 
 ## Evolution of protein-DNA complexes
 
@@ -1738,7 +1727,6 @@ pheatmap(dir_links_sr1,cluster_rows=F, cluster_cols=F, na_col = "#3e3e40",
          legend = TRUE,main="Mutational proximity: AncSR1")
 ```
 
-</details>
 
 ### References
 

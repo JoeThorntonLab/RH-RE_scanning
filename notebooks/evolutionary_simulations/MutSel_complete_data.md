@@ -3,11 +3,15 @@ Evolutionary simulations on empirical GP maps
 Santiago Herrera
 2023-08-23
 
-This notebook contains the analysis for simulating evolutionary trajectories on empirical GP maps using markov chains.
+This notebook contains the analysis for simulating evolutionary trajectories on empirical GP maps using markov chains. It has three mains sections:
 
-<details>
+-   A theoretical explanation for modeling evolution on empirical GP maps [here](#strong-selection-weak-mutation-regime)
+-   The simulations on the protein genotype networks [here](#evolutionary-simulations-using-discrete-markov-chains)
+-   The simulations on the protein-DNA complex genotype networks [here](#evolution-of-protein-dna-complexes)
 
-<summary>Reading in data</summary>
+------------------------------------------------------------------------
+
+### Reading in the data
 
 *Note:* The transition matrices and genotype networks contained in the `MutSel_matrices_complete_data.RData` file were generated in the Midway3 cluster using the R script `MutSel_matrices_complete_data.R`.
 
@@ -50,13 +54,7 @@ if(!file.exists(file.path(".", "MutSel_matrices_complete_data.RData"))) {
 source("../../scripts/MC_MutSel_functions.R")
 ```
 
-</details>
-
-<details>
-
-<summary>Modeling walks on an empirical GP map</summary>
-
-### Strong Selection-Weak Mutation (SSWM) regime
+## Strong Selection-Weak Mutation regime
 
 Under the SSWM regime, the mutation rate is low enough such that the time to fixation of a mutation is much lower than the time between subsequent mutations (Gillespie, 1984). Thus, trajectories on a genotype landscape can be modeled as an stepwise, origin-fixation process. Specifically, the rate of fixation from allele *i* to *j* is a product of the rate of introduction of allele *j* in the population and the probability that it goes to fixation, like so
 
@@ -244,12 +242,6 @@ $$
 where the numerator is the sum of the probailities of all the genotypes encoding the DNA binding function *R**E*<sub>*i*</sub> after *S* substitutions, and the denominator is a normalization constant with *k* = 16 such that ∑<sub>*i*</sub>*P*(*R**E*<sub>*i*</sub>|*π*<sub>(0)</sub>, *S*, *P*)=1.
 
 For *k* different DNA binding phenotypes, we obtain a probability distribution of functional variation (PDFV), a multinomial probability distribution, around any set of starting genotypes {*G*<sub>0</sub>} that quantifies the likelihood that evolution will produce a particular phenotypic outcome given a set of conditions.
-
-</details>
-
-<details>
-
-<summary>Simulations on protein genotype networks</summary>
 
 ## Evolutionary simulations using discrete markov chains
 
@@ -1198,12 +1190,6 @@ We can also see that in almost every case (on both backgrounds), the most likely
 
 Overall, the AncSR2 genetic background has two interesting patterns: First, we observed before pattern of *phenotype bias* where SRE1 is the most likely phenotype to arise by random mutation; second, we can now observe a pattern of *phenotypic transition bias* where the evolutionary transition X --&gt; SRE1 is the most likely to occur. This highlights the importance of the structure of the GP map on phenotypic evolution (\* all the results are robust if we use the directional sln. `P` matrix).
 
-</details>
-
-<details>
-
-<summary>Simulations on protein-DNA complex genotype networks</summary>
-
 ## Evolution of protein-DNA complexes
 
 Thus far we have only considered the GP map from the perspective of the protein. However, in reality, the SR regulatory module evolves as a protein-DNA complex, where both interacting partners can mutate. In this scenario, each node of the GP map coresponds to a protein-DNA complex genotype (instead of a protein genotype), and two complexes are neighbors if they are one mutation appart at the protein OR DNA side (note that there are no "promiscuous" genotypes anymore, because each complex is a unique genotype).
@@ -1562,11 +1548,11 @@ all_shortest_paths(as.undirected(net_sr2_complex),
 ```
 
     ## [[1]]
-    ## + 9/3983 vertices, named, from 197ab82:
+    ## + 9/3983 vertices, named, from df01ffe:
     ## [1] EGKAGT EAKAGT EAKAGA EAKVGA EAKVAA EAKMAA GAKMAA GSKMAA GSKVAA
     ## 
     ## [[2]]
-    ## + 10/3983 vertices, named, from 197ab82:
+    ## + 10/3983 vertices, named, from df01ffe:
     ##  [1] EGKAGT EAKAGT EAKAGA EAKVGA EAKVAA EAKMAA EGKMAA GGKMAA GSKMAA GSKVAA
 
 We see four important things:
@@ -1979,8 +1965,6 @@ The inclusion of co-evolution drastically changes the landscape of phenotypic tr
 <!-- We saw that co-evolution leads to a different pattern of phenotypic transition bias, where ATRE binding is now amongst the most likely phenotypes to evolve. This new pattern can arise because ATRE is mutationally closer to ERE (GT) than SRE1 (AA): access to ATRE requires only one mutation on the DNA, whereas access to SRE1 (AA) requires two. Thus, introducing protein-DNA co-evolution can substatially change the landscape of phenotypic transitions.
 
 We can make sense of these patterns by exploring the proximity between neutral networks, that is, how close in sequence space are the phenotypes. For this, we can compute the number of direct links between genotypes in each neutral network; this represents the the number of direct mutational paths that exist between phenotypes, and can provide an approximation of how easy it is for evolution to access new phenotypes. -->
-</details>
-
 ### References
 
 1.  Gillespie J. Molecular Evolution Over the Mutational Landscape. Evolution (N Y). 1984;38: 1116–1129.
