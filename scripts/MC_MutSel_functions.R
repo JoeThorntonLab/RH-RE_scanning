@@ -1,5 +1,11 @@
-
+#===============================================
+# Evolutionary simulations on empirical GP maps
+#===============================================
+# Last modified: Sept 03, 2023
+#
 # Functions to build, simulate and work with discrete Markov processes on RH-RE DMS data
+
+
 
 # make factors with different levels for ordering of REs in plotting
 REs <- list()
@@ -154,6 +160,14 @@ hamming_d <- function(var1,var2){
   return(d)
 }
 
+# Connect genotypes based on their hamming distance (link exists only if hamming distance = 1)
+connect_hamming <- function(var1, var2){
+  hd <- hamming_d(var1,var2)
+  if(hd != 1) link = 0
+  else link = hd
+  return(link)
+}
+
 # Function to connect protein-DNA complex variants. A link exists whether protein genotypes can be be connected by a single 
 # nucleotide change given the genetic code, OR DNA variants differ by a hamming distance of one. Variants are given as 
 # prot+DNA genotypes (e.g., EGKAGT)
@@ -206,15 +220,16 @@ pi_codon_to_aa <- function(pi_codon){
 build_mutation_matrix <- function(nodes,type=1,cores=1){
   # nodes: a vector with vertex character names or data.frame (see argument 'node_attributes')
   # type: specify how to build the adjacency matrix. 1 - simple link through genetic code; 2 - fraction
-    # of codons; 3 - mutational paths; 4 - mutational paths between prot-DNA complexes (default: 1)
+    # of codons; 3 - mutational paths; 4 - mutational paths between prot-DNA complexes;
+    # 5 - hamming distance (default: 1)
   # cores: specify the number of cores to use in to use for parallel computing (default: 1)
   
   # Check for inconistent arguments
   if(is.null(nodes)){
     stop("Provide a vector of nodes to build the matrix")
   }
-  if(!(type %in% seq(1,4,1))){
-    stop("Invalid matrix type. Valid matrix options: 1, 2, 3, or 4")
+  if(!(type %in% seq(1,5,1))){
+    stop("Invalid matrix type. Valid matrix options: 1, 2, 3, 4 or 5")
   }
   
   # Create adjacency matrix
@@ -245,6 +260,11 @@ build_mutation_matrix <- function(nodes,type=1,cores=1){
     adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
                         mapply(connect_complex,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
   }
+  else if(type == 5){
+    # hamming distance between genotypes
+    adj_mat <- Matrix(foreach(i = 1:length(nodes), .combine = 'cbind') %dopar%
+                        mapply(connect_hamming,nodes,nodes[i]) %>% `colnames<-`(nodes), sparse = T)
+  }
   stopCluster(cl)
   
   return(adj_mat)
@@ -269,16 +289,16 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,type=1,no
   if(node_attributes && is.null(dim(nodes))){
     stop("Nodes have no attributes. Provide a data frame with annotations per node.")
   }
-  if(!(type %in% seq(1,4,1))){
-    stop("Invalid matrix type. Valid matrix options: 1, 2, 3, or 4")
+  if(!(type %in% seq(1,5,1))){
+    stop("Invalid matrix type. Valid matrix options: 1, 2, 3, 4 or 5")
   }
   
   if(build_mat==FALSE){
     # Build networks using supplied adjacency matrix
-    if(type != 1){
+    if(type != 1 && type != 5){
       net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
     }
-    else if(type == 1){
+    else if(type == 1 || type == 5){
       if(node_attributes){
         links <- graph.adjacency(adj_mat,mode = "undirected")
         edges <- get.edgelist(links) # generate edgelist from matrix
@@ -298,8 +318,8 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,type=1,no
     else{      
       # Build adjacency matrix and network
       adj_mat <- build_mutation_matrix(nodes,type=type,cores=cores)
-      if(type == 1) net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
-      else if(type != 1) net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
+      if(type == 1 || type == 5) net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
+      else if(type != 1 && type != 5) net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
     }
   }  
   return(net)
@@ -684,8 +704,9 @@ stationary_dist <- function(tr_mat){
   # tr_mat: A transition probability matrix
   
   # Check whether 'tr_mat' is an ergodic transition probability matrix
-  if(!((is.matrix(tr_mat) || inherits(tr_mat,"dgCMatrix")) && nrow(tr_mat)==ncol(tr_mat) && 
-       all(tr_mat>=0 & tr_mat<=1) && sum(apply(tr_mat,1,sum))==ncol(tr_mat))){
+  if(!((is.matrix(tr_mat) || inherits(tr_mat,"dgCMatrix") || inherits(tr_mat,"dsCMatrix")) && 
+    nrow(tr_mat)==ncol(tr_mat) && 
+    all(tr_mat>=0 & tr_mat<=1) && sum(apply(tr_mat,1,sum))==ncol(tr_mat))){
     stop("Provide a square probability transition matrix")
   }
   
@@ -1160,4 +1181,151 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
     pheno_transition_mat[which(rownames(pheno_transition_mat)== i),] <- x
   }
   return(pheno_transition_mat)
+}
+
+# Compute the proximity between two neutral networks
+pairwise_neutral_network_proximity <- function(n_ntwrk1,n_ntwrk2,Bg,graph,type=1,pheno_df=phenotypes_tbl,complex=FALSE){
+  # n_ntwrk1,n_ntwrk2 = strings specifying the names of RE functions
+  # Bg = string specifying the DBD background (= 'AncSR1' or 'AncSR2')
+  # a genotype network (igraph object)
+  # type = proximity calculation:
+    # 1 - fraction overlap due to promiscuous genotypes; 2 - number of direct links betwen neutral networks
+  # pheno_df = df with phenotypic annotations per genotype
+  # complex = whether to use protein-DNA complex genoytpes (default: FALSE)
+  
+  # Check inconsistent parameters
+  if(!(type %in% c(1,2))){
+    stop("Provide a valid value for type: 1 or 2")
+  }
+  if(!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg)){
+    stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
+  }
+  if(complex && type == 1){
+    stop("protein-DNA complex networks don't have promiscuous genotypes")
+  }
+
+  prox <- NA
+
+  if(type == 1){
+    # Compute fraction overlap due to promiscuous genotypes: AnB/AuB
+
+    # Extract genotypes from each neutral network: all binders
+    all_vars_ntwrk1 <- unique(pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk1) %>% pull(AA_var))
+    all_vars_ntwrk2 <- unique(pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk2) %>% pull(AA_var))
+
+    # Filter variants to retain those present in main component genotype network
+    net_vars <- extract_main_ntwrk(graph=graph,tr_mat=NULL,nodes=TRUE)
+    all_vars_ntwrk1 <- all_vars_ntwrk1[all_vars_ntwrk1 %in% net_vars]
+    all_vars_ntwrk2 <- all_vars_ntwrk2[all_vars_ntwrk2 %in% net_vars]
+
+    # Check that neutral networks are encoded by at least one genotype 
+    if(!identical(all_vars_ntwrk1, character(0)) && !identical(all_vars_ntwrk2, character(0))){
+      # Compute fraction overlap due to promiscuous genotypes: AnB/AuB
+      U <- union(all_vars_ntwrk1,all_vars_ntwrk2)
+      I <- intersect(all_vars_ntwrk1,all_vars_ntwrk2)
+      prox <- length(I) / length(U)
+    }
+  }
+  else if(type == 2){
+    # Compute number of direct links between specific genotypes
+
+    # Extract genotypes from each neutral network: specific binders
+    if(complex){
+      vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(complex)
+      vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(complex)
+    }
+    else{
+      vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(AA_var)
+      vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(AA_var)
+    }
+
+    # Filter variants to retain those present in main component genotype network
+    net_vars <- extract_main_ntwrk(graph=graph,tr_mat=NULL,nodes=TRUE)
+    vars_ntwrk1 <- vars_ntwrk1[vars_ntwrk1 %in% net_vars]
+    vars_ntwrk2 <- vars_ntwrk2[vars_ntwrk2 %in% net_vars]
+
+    # Check that neutral networks are encoded by at least one genotype 
+    if(!identical(vars_ntwrk1, character(0)) && !identical(vars_ntwrk2, character(0))){
+      # Compute all direct links
+      # Create all variant combinations, but only keep unique comparisons: (r+n-1)!/(r!*(n-1)!)        
+      if(complex){
+        tmp <- unique(t(apply(expand.grid(vars_ntwrk1,vars_ntwrk2), 1, sort))) %>% as.data.frame(.) %>%
+          mutate(link = map2_int(as.character(.[,1]),as.character(.[,2]),connect_complex),
+                 link = ifelse(link > 0,1,0))
+      }
+      else{
+        tmp <- unique(t(apply(expand.grid(vars_ntwrk1,vars_ntwrk2), 1, sort))) %>% as.data.frame(.) %>%
+          mutate(link = map2_int(as.character(.[,1]),as.character(.[,2]),connect_aa_variants))
+      }
+      prox <- sum(tmp$link)
+    }
+  }
+  return(prox) 
+}
+
+# Simulate genotype networks
+simulate_GPmap <- function(graph,type=1,which="net",cores=1,seed = NULL,n_sample = NULL){
+  # graph: reference genotype network (igraph object) - for 'type' options 1,2 and 3
+  # type: an integer indicating the type of simulation to produce
+    # 1 - network built from hamming distance (not accounting for genetic code)
+    # 2 - same number of nodes and edges but randomized connections between nodes
+    # 3 - maximally connected network (same number of nodes)
+    # 4 - network from random sample of genotypes 
+  # which: specify whether to return the genotype network ("net"), the adjacency matrix ("mat") or both ("both").(default: "net")
+  # cores: specify the number of cores to use in to use for parallel computing (default: 1)
+  # seed: integer (seed) to make random networks reproducible (default: NULL)
+  # n_sample: Number of genotypes to randomly sample
+  
+  # check inconsistent parameters
+  if(!(which %in% c("net","mat","both"))){
+    stop("Provide a valid output ('which') paramter: 'net','mat' or 'both'")
+  }
+  if(type %in% c(1,2,3) && is.null(graph)){
+    stop("Must provide a reference genotype network to do the simulation")
+  }
+  if(type == 4 && is.null(n_sample)){
+    stop("Must provide a value > 0 for 'n_sample' argument")
+  }
+  if(type == 4 && !is.null(graph)){
+    message("Ignoring genotype network...")
+  }
+
+  # keep the number of nodes and edges
+  n_nodes <- length(V(graph))
+  n_edges <- length(E(graph))
+  res <- NULL
+  
+  # simulate genotype network maintaining node identity from original network
+  if(type == 1){
+    # network built from hamming distance (not accounting for genetic code)
+    adj_mat <- build_mutation_matrix(nodes = names(V(graph)),type = 5,cores = cores)
+    tmp_net <- build_genotype_network(nodes = names(V(graph)),build_mat = FALSE,adj_mat = adj_mat,type = 5,cores = cores)
+  }
+  if(type == 2){
+    # same number of edges but randomized connections between nodes
+    if(!is.null(seed)){
+      set.seed(seed)
+    }
+    tmp_net <- sample_gnm(n=n_nodes, m=n_edges)
+    tmp_net <- set.vertex.attribute(tmp_net, "name", value=names(V(graph))) # rename vertices
+    adj_mat <- as_adjacency_matrix(tmp_net,type = "both") # adjacency matrix
+  }
+  else if(type == 3){
+    # maximally connected network
+    tmp_net <- make_full_graph(n_nodes,loops = FALSE)
+    tmp_net <- set.vertex.attribute(tmp_net, "name", value=names(V(graph))) # rename vertices
+    adj_mat <- as_adjacency_matrix(tmp_net,type = "both") # adjacency matrix
+  }
+  else if(type == 4){
+    # make network from random sample of genotypes
+    possible_AAvar <- do.call(paste,expand.grid(AA_STANDARD,AA_STANDARD,AA_STANDARD,AA_STANDARD)) %>% gsub(" ","",.)
+    g <- sample(possible_AAvar,n_sample,replace=FALSE)
+    adj_mat <- build_mutation_matrix(nodes = g,type = 3,cores = cores)
+    tmp_net <- build_genotype_network(nodes = g,build_mat = FALSE,adj_mat = adj_mat,type = 3,cores = cores)
+  }
+  
+  if(which == "net") res <- tmp_net
+  else if(which == "mat") res <- adj_mat
+  else if(which == "both") res <- list(tmp_net,adj_mat)
+  return(res)
 }
