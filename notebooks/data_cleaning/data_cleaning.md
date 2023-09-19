@@ -7,14 +7,14 @@ Jaeda Patton and Santiago Herrera
 
 ``` r
 # load general functions
-source(file.path("..", "scripts", "general_functions.R"))
+source(file.path(basedir, "scripts", "general_functions.R"))
 
 # read in data from binned sort and debulk sort experiments
-if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
+if(!file.exists(file.path(basedir, "data", "meanF", "meanF_data.rda"))) {
   #### TODO: update file paths once we find a permanent place to store the data
-  untar(file.path("..", "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), 
-        exdir = file.path("..", "data", "meanF"))
-  datafiles <- untar(file.path("..", "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), list = TRUE)
+  untar(file.path(basedir, "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), 
+        exdir = file.path(basedir, "data", "meanF"))
+  datafiles <- untar(file.path(basedir, "data", "meanF", "NovaSeq_DMS_datasets.tar.gz"), list = TRUE)
   meanF_data <- list()
   
   for(i in 1:length(datafiles)) {
@@ -37,7 +37,7 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
     
     # read in data from debulk sort experiment
     else if(grepl("Debulk", datafiles[i])) {
-      debulk_data <- read.csv(file.path("..", "data", "meanF", datafiles[i]), 
+      debulk_data <- read.csv(file.path(basedir, "data", "meanF", datafiles[i]), 
                               stringsAsFactors = TRUE)
     }
   }
@@ -58,12 +58,12 @@ if(!file.exists(file.path("..", "data", "meanF", "meanF_data.rda"))) {
             type = ifelse(grepl(paste(c("minilib","SRE","ERE"),collapse = "|"),REBC), "control","exp")) # mark rows as "controls" or "experiments"
     
   # save data files for faster loading
-  save(meanF_data, file = file.path("..", "data", "meanF", "meanF_data.rda"))
-  save(debulk_data, file = file.path("..", "data", "meanF", "debulk_data.rda"))
+  save(meanF_data, file = file.path(basedir, "data", "meanF", "meanF_data.rda"))
+  save(debulk_data, file = file.path(basedir, "data", "meanF", "debulk_data.rda"))
 } else {
   # load R data frames if already created
-  load(file.path("..", "data", "meanF", "meanF_data.rda"))
-  load(file.path("..", "data", "meanF", "debulk_data.rda"))
+  load(file.path(basedir, "data", "meanF", "meanF_data.rda"))
+  load(file.path(basedir, "data", "meanF", "debulk_data.rda"))
 }
 ```
 
@@ -198,15 +198,15 @@ choose_read_count <- function(r) {
 
 # parallel processing:
 cores <- 4
-if(!file.exists(file.path("..", "results", "cleaned_data", "outliers.rda"))) {
-  cl <- parallel::makeCluster(cores,"FORK",outfile="")
+if(!file.exists(file.path(results_dir, "outliers.rda"))) {
+  cl <- parallel::makeCluster(cores, "FORK", outfile = "")
   doParallel::registerDoParallel(cl)
   outliers <- foreach(i = seq(1,100,1), .combine = 'rbind') %dopar% choose_read_count(i)
   stopCluster(cl)
-  save(outliers, file = file.path("..", "results", "cleaned_data", "outliers.rda"))
+  save(outliers, file = file.path(results_dir, "outliers.rda"))
 } else {
   # the above takes a long time to run, so load the saved file if already created
-  load(file.path("..", "results", "cleaned_data", "outliers.rda"))
+  load(file.path(results_dir, "outliers.rda"))
 }
 
 
@@ -736,7 +736,7 @@ c1 <- rbind(ctl_rep1,ctl_rep2,ctl_rep3,ctl_rep4) %>% mutate(type = "spike-in") %
   ylab("Fluorescence") + xlab("Control")
 
 # Check correlations in meanF between measured isogenics and DMS spiked-in isogenics
-iso_file = file.path("..", "data", "meanF", "rep4_isogenic_controls_FlowJo_bin.csv")
+iso_file = file.path(basedir, "data", "meanF", "rep4_isogenic_controls_FlowJo_bin.csv")
 isogenics <- read.csv(iso_file,header=T) %>% rowwise() %>%
   mutate(meanF_iso = sum(c(fbin1*cell_countb1,fbin2*cell_countb2,fbin3*cell_countb3,fbin4*cell_countb4))/sum(c(cell_countb1,cell_countb2,cell_countb3,cell_countb4)))
   
@@ -802,7 +802,7 @@ greater than that of the test variant. Also compute an FDR-corrected
 p-value.
 
 ``` r
-if(!file.exists(file.path("..", "results", "cleaned_data", "meanF_p.rda"))) {
+if(!file.exists(file.path(results_dir, "meanF_p.rda"))) {
   # split data by background and mean read count bin
   meanF_p <- meanF_data_corrected %>%
     select(AA_var:type, avg_meanF, avg_Count_total, stop, rcbin)
@@ -853,9 +853,9 @@ if(!file.exists(file.path("..", "results", "cleaned_data", "meanF_p.rda"))) {
               by = c("AA_var", "REBC", "bg", "RE", "type"))
   
   # save data for faster loading later
-  save(meanF_p, file = file.path("..", "results", "cleaned_data", "meanF_p.rda"))
+  save(meanF_p, file = file.path(results_dir, "meanF_p.rda"))
 } else {
-  load(file.path("..", "results", "cleaned_data", "meanF_p.rda"))
+  load(file.path(results_dir, "meanF_p.rda"))
 }
 
 
@@ -908,8 +908,8 @@ meanF_data_corrected <- meanF_data_corrected %>%
   left_join(meanF_p %>% select(AA_var:type, p:sig), 
             by = c("AA_var", "REBC", "bg", "RE", "type"))
 write.csv(meanF_data_corrected,
-          file=gzfile(file.path("..", "results", "cleaned_data", 
-                                "meanF_data_corrected_NovaSeq.csv.gz"))) 
+          file = gzfile(file.path(results_dir, 
+                                  "meanF_data_corrected_NovaSeq.csv.gz"))) 
 ```
 
 ## Correlation between replicates for corrected data
@@ -1119,13 +1119,13 @@ if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPpos.rda"))) {
                                  estGFPposcells = mean(estGFPposcells)) %>%
                        mutate(BinBC = "GFPneg"))
   
-  save(estGFPpos, file = file.path("..", "results", "cleaned_data", "estGFPpos.rda"))
-} else load(file.path("..", "results", "cleaned_data", "estGFPpos.rda"))
+  save(estGFPpos, file = file.path(results_dir, "estGFPpos.rda"))
+} else load(file.path(results_dir, "estGFPpos.rda"))
 
 
 # now for libraries that underwent two different debulk sorts, average GFP+ cell count
 # estimates across the two debulk sorts
-if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPposave.rda"))) {
+if(!file.exists(file.path(results_dir, "estGFPposave.rda"))) {
   estGFPposave <- estGFPpos %>%
     group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
     summarize(estGFPposcells = mean(estGFPposcells))
@@ -1139,8 +1139,8 @@ if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPposave.rda")))
              factor(levels = c("<100", "100-500", "500-1000", ">=1000"))) %>%
     left_join(meanF_cutoffs, by = c("bg", "rcbin"))
   
-  save(estGFPposave, file = file.path("..", "results", "cleaned_data", "estGFPposave.rda"))
-} else load(file.path("..", "results", "cleaned_data", "estGFPposave.rda"))
+  save(estGFPposave, file = file.path(results_dir, "estGFPposave.rda"))
+} else load(file.path(results_dir, "estGFPposave.rda"))
 
 estGFPposave <- estGFPpos %>%
   group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
@@ -1442,5 +1442,5 @@ debulk_data_filter %>%
 ``` r
 # export filtered data
 write.csv(debulk_data_filter,
-          file = gzfile(file.path("..", "results", "cleaned_data", "debulk_data_filtered.csv.gz")))
+          file = gzfile(file.path(results_dir, "debulk_data_filtered.csv.gz")))
 ```

@@ -73,20 +73,20 @@ with the option `purl = FALSE` were run locally.
 
 ``` r
 # load general functions
-source(file.path("..", "scripts", "general_functions.R"))
+source(file.path(basedir, "scripts", "general_functions.R"))
 # load model fitting functins
-source(file.path("..", "scripts", "mut_effects_model_fitting_functions.R"))
+source(file.path(basedir, "scripts", "mut_effects_model_fitting_functions.R"))
 
 # reading in cleaned data from binned sort and debulk sort experiments
 if(!file.exists(file.path(results_dir, "meanF_data.rda"))) {
-  meanF_data <- read.csv(file.path("..", "results", "cleaned_data", 
+  meanF_data <- read.csv(file.path(basedir, "results", "cleaned_data", 
                                  "meanF_data_corrected_NovaSeq.csv.gz"),
                        row.names = 1, stringsAsFactors = TRUE)
   save(meanF_data, file = file.path(results_dir, "meanF_data.rda"))
 } else load(file.path(results_dir, "meanF_data.rda"))
 
 if(!file.exists(file.path(results_dir, "debulk_data.rda"))) {
-  debulk_data <- read.csv(file.path("..", "results", "cleaned_data", 
+  debulk_data <- read.csv(file.path(basedir, "results", "cleaned_data", 
                                  "debulk_data_filtered.csv.gz"),
                        row.names = 1, stringsAsFactors = TRUE)
   debulk_data <- debulk_data %>% 
@@ -136,6 +136,9 @@ AncSR2_model_data <- meanF_data %>%
               mutate(avg_meanF = AncSR2_nullF, type = "debulk")) %>%
   distinct(AA_var, RE, .keep_all = TRUE) %>%  # remove debulk sort variants if they are in the binned sort dataset
   arrange(AA_var, RE)
+
+save(AncSR1_model_data, file = file.path(results_dir, "AncSR1_model_data.rda"))
+save(AncSR2_model_data, file = file.path(results_dir, "AncSR2_model_data.rda"))
 
 rm(debulk_data)  # clearing space
 ```
@@ -509,9 +512,11 @@ nfolds <- 10
 AncSR1_foldid <- rep_len(1:nfolds, nrow(AncSR1_full_mat))
 set.seed(230703)
 AncSR1_foldid <- sample(AncSR1_foldid, nrow(AncSR1_full_mat))
+save(AncSR1_foldid, file = file.path(results_dir, "AncSR1_foldid.rda"))
 AncSR2_foldid <- rep_len(1:nfolds, nrow(AncSR2_full_mat))
 set.seed(230703)
 AncSR2_foldid <- sample(AncSR2_foldid, nrow(AncSR2_full_mat))
+save(AncSR2_foldid, file = file.path(results_dir, "AncSR2_foldid.rda"))
 
 # regularization paths
 AncSR1_path <- full.fit.AncSR1$lambda
@@ -1154,57 +1159,54 @@ fine-grained cross validation models.
 
 ``` r
 AncSR1.cv.fits.fine <- list()
-AncSR1.cv.gs.fine <- list()
-AncSR1.cv.pred.fine <- list()
 AncSR2.cv.fits.fine <- list()
-AncSR2.cv.gs.fine <- list()
-AncSR2.cv.pred.fine <- list()
 for(i in 1:10) {
-  # load and store AncSR1 glmnet object and get predictions for test set
-  print(paste("AncSR1 fold", i))
+  # load AncSR1 glmnet object
   load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR1.rda")))
-  which <- AncSR1_foldid == i
-  gs <- predict(fold_fit, AncSR1_full_mat[which,])
-  pred <- apply(gs, 2, logistic, L = AncSR1.L, U = AncSR1.U)
   AncSR1.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
-  AncSR1.cv.gs.fine[[paste0("fold", i)]] <- gs
-  AncSR1.cv.pred.fine[[paste0("fold", i)]] <- pred
-  
-  # load and store AncSR2 glmnet object and get predictions for test set
-  print(paste("AncSR2 fold", i))
+  # load AncSR2 glmnet object
   load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR2.rda")))
-  which <- AncSR2_foldid == i
-  gs <- predict(fold_fit, AncSR2_full_mat[which,])
-  pred <- apply(gs, 2, logistic, L = AncSR2.L, U = AncSR2.U)
   AncSR2.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
-  AncSR2.cv.gs.fine[[paste0("fold", i)]] <- gs
-  AncSR2.cv.pred.fine[[paste0("fold", i)]] <- pred
 }
-```
+rm(fold_fit)
 
-    ## [1] "AncSR1 fold 1"
-    ## [1] "AncSR2 fold 1"
-    ## [1] "AncSR1 fold 2"
-    ## [1] "AncSR2 fold 2"
-    ## [1] "AncSR1 fold 3"
-    ## [1] "AncSR2 fold 3"
-    ## [1] "AncSR1 fold 4"
-    ## [1] "AncSR2 fold 4"
-    ## [1] "AncSR1 fold 5"
-    ## [1] "AncSR2 fold 5"
-    ## [1] "AncSR1 fold 6"
-    ## [1] "AncSR2 fold 6"
-    ## [1] "AncSR1 fold 7"
-    ## [1] "AncSR2 fold 7"
-    ## [1] "AncSR1 fold 8"
-    ## [1] "AncSR2 fold 8"
-    ## [1] "AncSR1 fold 9"
-    ## [1] "AncSR2 fold 9"
-    ## [1] "AncSR1 fold 10"
-    ## [1] "AncSR2 fold 10"
-
-``` r
-rm(fold_fit, gs, pred)
+if(!file.exists(file.path(results_dir, "AncSR1.cv.gs.fine.rda"))) {
+  AncSR1.cv.gs.fine <- list()
+  AncSR1.cv.pred.fine <- list()
+  AncSR2.cv.gs.fine <- list()
+  AncSR2.cv.pred.fine <- list()
+  for(i in 1:10) {
+    # get predictions for AncSR1 test sets
+    which <- AncSR1_foldid == i
+    gs <- predict(AncSR1.cv.fits.fine[[paste0("fold", i)]], 
+                  AncSR1_full_mat[which,])
+    pred <- apply(gs, 2, logistic, L = AncSR1.L, U = AncSR1.U)
+    AncSR1.cv.gs.fine[[paste0("fold", i)]] <- gs
+    AncSR1.cv.pred.fine[[paste0("fold", i)]] <- pred
+    
+    # get predictions for AncSR2 test sets
+    which <- AncSR2_foldid == i
+    gs <- predict(AncSR2.cv.fits.fine[[paste0("fold", i)]], 
+                  AncSR2_full_mat[which,])
+    pred <- apply(gs, 2, logistic, L = AncSR2.L, U = AncSR2.U)
+    AncSR2.cv.gs.fine[[paste0("fold", i)]] <- gs
+    AncSR2.cv.pred.fine[[paste0("fold", i)]] <- pred
+  }
+  rm(gs, pred)
+  save(AncSR1.cv.gs.fine, 
+       file = file.path(results_dir, "AncSR1.cv.gs.fine.rda"))
+  save(AncSR1.cv.pred.fine, 
+       file = file.path(results_dir, "AncSR1.cv.pred.fine.rda"))
+  save(AncSR2.cv.gs.fine, 
+       file = file.path(results_dir, "AncSR2.cv.gs.fine.rda"))
+  save(AncSR2.cv.pred.fine, 
+       file = file.path(results_dir, "AncSR2.cv.pred.fine.rda"))
+} else {
+  load(file.path(results_dir, "AncSR1.cv.gs.fine.rda"))
+  load(file.path(results_dir, "AncSR1.cv.pred.fine.rda"))
+  load(file.path(results_dir, "AncSR2.cv.gs.fine.rda"))
+  load(file.path(results_dir, "AncSR2.cv.pred.fine.rda"))
+}
 ```
 
 Analyze out-of-sample prediction error across 10 fine-grained

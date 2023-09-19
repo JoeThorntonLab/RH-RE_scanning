@@ -12,6 +12,7 @@ require("knitr")
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(fig.width=6, fig.height=5, warning = FALSE, 
                       message = FALSE, purl = FALSE)
+basedir <- file.path("..", "..")
 
 # check for packages and install any that are missing
 packages <- c("rstudioapi", "tidyr", "MASS", "ggplot2", "Matrix", "stringr",
@@ -23,11 +24,11 @@ installed_packages <- packages %in% rownames(installed.packages())
 installed_bioc_packages <- bioconductor_packages %in% rownames(installed.packages())
 
 # install correct version of glmnet; requires version 4.1.6
-if(!dir.exists(file.path("..", "R_packages", "glmnet_4.1-6"))) {
-  dir.create(file.path("..", "R_packages", "glmnet_4.1-6"))
-  install.packages(file.path("..", "R_packages", "glmnet_4.1-6.tar.gz"),
-                   lib=file.path("..", "R_packages", "glmnet_4.1-6"), 
-                   repos=NULL, type="source")
+if(!dir.exists(file.path(basedir, "R_packages", "glmnet_4.1-6"))) {
+  dir.create(file.path(basedir, "R_packages", "glmnet_4.1-6"))
+  install.packages(file.path(basedir, "R_packages", "glmnet_4.1-6.tar.gz"),
+                   lib=file.path(basedir, "R_packages", "glmnet_4.1-6"), 
+                   repos = NULL, type = "source")
 }
 
 if(any(installed_packages == F)) {
@@ -42,14 +43,11 @@ if(any(installed_bioc_packages == F)) {
 # load packages
 invisible(lapply(c(bioconductor_packages, packages[packages != "glmnet"]), 
                  library, character.only=TRUE))
-library(glmnet, lib.loc = file.path("..", "R_packages", "glmnet_4.1-6"))
+library(glmnet, lib.loc = file.path(basedir, "R_packages", "glmnet_4.1-6"))
 
 # make output directories
-if(!dir.exists(file.path("..", "results", "mutation_effects_model"))) {
-  dir.create(file.path("..", "results", "mutation_effects_model"))
-}
-
-results_dir <- file.path("..", "results", "mutation_effects_model")
+results_dir <- file.path(basedir, "results", "mutation_effects_model")
+if(!dir.exists(results_dir)) dir.create(results_dir)
 ```
 
 
@@ -77,20 +75,20 @@ In this notebook, code chunks with option `purl = TRUE` were run on the Universi
 
 ```{r load, purl = TRUE}
 # load general functions
-source(file.path("..", "scripts", "general_functions.R"))
+source(file.path(basedir, "scripts", "general_functions.R"))
 # load model fitting functins
-source(file.path("..", "scripts", "mut_effects_model_fitting_functions.R"))
+source(file.path(basedir, "scripts", "mut_effects_model_fitting_functions.R"))
 
 # reading in cleaned data from binned sort and debulk sort experiments
 if(!file.exists(file.path(results_dir, "meanF_data.rda"))) {
-  meanF_data <- read.csv(file.path("..", "results", "cleaned_data", 
+  meanF_data <- read.csv(file.path(basedir, "results", "cleaned_data", 
                                  "meanF_data_corrected_NovaSeq.csv.gz"),
                        row.names = 1, stringsAsFactors = TRUE)
   save(meanF_data, file = file.path(results_dir, "meanF_data.rda"))
 } else load(file.path(results_dir, "meanF_data.rda"))
 
 if(!file.exists(file.path(results_dir, "debulk_data.rda"))) {
-  debulk_data <- read.csv(file.path("..", "results", "cleaned_data", 
+  debulk_data <- read.csv(file.path(basedir, "results", "cleaned_data", 
                                  "debulk_data_filtered.csv.gz"),
                        row.names = 1, stringsAsFactors = TRUE)
   debulk_data <- debulk_data %>% 
@@ -1028,35 +1026,41 @@ if(!file.exists(file.path(results_dir, "cv.fold10.fine.fit.AncSR2.rda"))) {
 Get out-of-sample predicted genetic scores and fluorescence for all fine-grained cross validation models.
 
 ```{r cvfinepreds, purl = TRUE}
+AncSR1.cv.fits.fine <- list()
+AncSR2.cv.fits.fine <- list()
+for(i in 1:10) {
+  # load AncSR1 glmnet object
+  load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR1.rda")))
+  AncSR1.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
+  # load AncSR2 glmnet object
+  load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR2.rda")))
+  AncSR2.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
+}
+rm(fold_fit)
+
 if(!file.exists(file.path(results_dir, "AncSR1.cv.gs.fine.rda"))) {
-  AncSR1.cv.fits.fine <- list()
   AncSR1.cv.gs.fine <- list()
   AncSR1.cv.pred.fine <- list()
-  AncSR2.cv.fits.fine <- list()
   AncSR2.cv.gs.fine <- list()
   AncSR2.cv.pred.fine <- list()
   for(i in 1:10) {
-    # load and store AncSR1 glmnet object and get predictions for test set
-    print(paste("AncSR1 fold", i))
-    load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR1.rda")))
+    # get predictions for AncSR1 test sets
     which <- AncSR1_foldid == i
-    gs <- predict(fold_fit, AncSR1_full_mat[which,])
+    gs <- predict(AncSR1.cv.fits.fine[[paste0("fold", i)]], 
+                  AncSR1_full_mat[which,])
     pred <- apply(gs, 2, logistic, L = AncSR1.L, U = AncSR1.U)
-    AncSR1.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
     AncSR1.cv.gs.fine[[paste0("fold", i)]] <- gs
     AncSR1.cv.pred.fine[[paste0("fold", i)]] <- pred
     
-    # load and store AncSR2 glmnet object and get predictions for test set
-    print(paste("AncSR2 fold", i))
-    load(file.path(results_dir, paste0("cv.fold", i, ".fine.fit.AncSR2.rda")))
+    # get predictions for AncSR2 test sets
     which <- AncSR2_foldid == i
-    gs <- predict(fold_fit, AncSR2_full_mat[which,])
+    gs <- predict(AncSR2.cv.fits.fine[[paste0("fold", i)]], 
+                  AncSR2_full_mat[which,])
     pred <- apply(gs, 2, logistic, L = AncSR2.L, U = AncSR2.U)
-    AncSR2.cv.fits.fine[[paste0("fold", i)]] <- fold_fit
     AncSR2.cv.gs.fine[[paste0("fold", i)]] <- gs
     AncSR2.cv.pred.fine[[paste0("fold", i)]] <- pred
   }
-  rm(fold_fit, gs, pred)
+  rm(gs, pred)
   save(AncSR1.cv.gs.fine, 
        file = file.path(results_dir, "AncSR1.cv.gs.fine.rda"))
   save(AncSR1.cv.pred.fine, 
