@@ -11,13 +11,14 @@ editor_options:
 require("knitr")
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(fig.width=5, fig.height=5, warning = FALSE, 
-                      message = FALSE, purl = TRUE)
+                      message = FALSE, purl = FALSE)
+basedir <- file.path("..", "..")
 
 # check for packages and install any that are missing
-packages <- c("tidyr", "ggplot2", "Matrix", "stringr", "tibble", 
+packages <- c("tidyr", "ggplot2", "Matrix", "stringr", "tibble", "purrr",
               "MASS", "patchwork", "viridis", "lemon", "ggsignif", "dunn.test", 
               "doParallel", "ggpattern", "ggseqlogo", "ggalluvial", "ggrepel",
-              "Biostrings", "igraph", "forcats", "dplyr")
+              "gplots", "Biostrings", "igraph", "forcats", "dplyr", "magrittr")
 bioconductor_packages <- c()
 installed_packages <- packages %in% rownames(installed.packages())
 installed_bioc_packages <- bioconductor_packages %in% 
@@ -44,13 +45,10 @@ invisible(lapply(c(bioconductor_packages[installed_bioc_packages],
 
 
 # make output directories
-if(!dir.exists(file.path("..", "results", "genotype_phenotype_distributions"))) {
-  dir.create(file.path("..", "results", "genotype_phenotype_distributions"))
-}
+results_dir <- file.path(basedir, "results", "genotype_phenotype_distributions")
+if(!dir.exists(results_dir)) dir.create(results_dir)
 
-basedir <- file.path("..", "..")
-results_dir <- file.path(basedir, "results", 
-                         "genotype_phenotype_distributions")
+# plot fontsize
 fontsize <- 16
 ```
 
@@ -343,7 +341,7 @@ meanF_data <- rbind(meanF_data %>%
   arrange(bg, AA_var, RE)
 
 # export data
-write.csv(meanF_data %>% select(bg:RE, functional), 
+write.csv(meanF_data %>% filter(functional) %>% select(bg:meanF_REP4), 
           file = gzfile(file.path(results_dir, "meanF_data_fxnal.csv.gz"), 
                         compression = 9),
           row.names = FALSE)
@@ -380,9 +378,17 @@ fxnalproteinREbgplot <- meanF_data %>%
   filter(functional) %>%
   ggplot(aes(x = bg, fill = bg)) +
   geom_bar() +
+  geom_text(stat = "count", 
+            aes(label = paste0(..count.., " (", 
+                               signif(..count.. / 2560000 * 100, 2), "%)")), 
+            vjust = -1, size = 4) +
+  # geom_text(stat = "count", 
+  #           aes(label = paste0(signif(..count.. / 2560000 * 100, 2), "%")), 
+  #           vjust = -1, size = 4) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1))) +
   scale_fill_manual(values = bg_color(), drop = FALSE) +
   xlab("Ancestral background") +
-  ylab("Number of protein:RE variants") +
+  ylab("Number of functional protein:RE variants") +
   theme_classic() +
   theme(text = element_text(size = fontsize),
         legend.text = element_text(size = fontsize),
@@ -407,9 +413,17 @@ fxnalproteinbgplot <- meanF_data %>%
   filter(functional) %>%
   ggplot(aes(x = bg, fill = bg)) +
   geom_bar() +
+  geom_text(stat = "count", 
+            aes(label = paste0(..count.., " (", 
+                               signif(..count.. / 160000 * 100, 2), "%)")), 
+            vjust = -1, size = 4) +
+  # geom_text(stat = "count", 
+  #           aes(label = paste0(signif(..count.. / 160000 * 100, 2), "%")), 
+  #           vjust = -1, size = 4) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1))) +
   scale_fill_manual(values = bg_color(), drop = FALSE) +
   xlab("Ancestral background") +
-  ylab("Number of protein variants") +
+  ylab("Number of functional protein variants") +
   theme_classic() +
   theme(text = element_text(size = fontsize),
         legend.text = element_text(size = fontsize),
@@ -524,9 +538,15 @@ bgfluorscatterplot <- meanF_data_fxnal %>%
   mutate(padj = padjhigherAncSR2) %>%
   ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
   geom_point(alpha = 0.5) +
+  scale_color_discrete(labels = c(paste0("Not significant (", 
+                                         signif((1 - sum(padjhigherAncSR2 < 0.05) / 
+                                                   nrow(meanF_data_fxnal)) * 100, 2), "%)"),
+                                  paste0("Significant (", 
+                                         signif(sum(padjhigherAncSR2 < 0.05) / 
+                                                  nrow(meanF_data_fxnal) * 100, 2), "%)")),
+                       name = "Higher fluorescence in\nAncSR2 background") +
   labs(x = "Fluorescence in AncSR1 background",
-       y = "Fluorescence in AncSR2 background",
-       color = "FDR < 0.05") +
+       y = "Fluorescence in AncSR2 background") +
   geom_abline(slope = 1, intercept = 0, color = "red") +
   theme_classic()
 bgfluorscatterplot
@@ -595,10 +615,14 @@ print(sum(padjhigherAncSR2RE < 0.05))
 Let's now count the number of functional protein variants that bind to each RE variant.
 
 ```{r countfxnalRE, purl = FALSE}
-meanF_data %>%
+nboundRE <- meanF_data %>%
   group_by(bg, RE) %>%
-  summarize(count = sum(functional)) %>%
-  pivot_wider(names_from = bg, values_from = count) %>%
+  summarize(n = sum(functional)) %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(n = 0))
+
+nboundRE %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
   mutate(nincreaseAncSR2 = AncSR2 - AncSR1,
          foldincreaseAncSR2 = round(AncSR2 / AncSR1, 1)) %>%
   knitr::kable(caption = "Number of functional protein variants per RE")
@@ -607,11 +631,10 @@ meanF_data %>%
 Plot number of functional variants per RE.
 
 ```{r plotfxnalRE, purl = FALSE, fig.height = 6, fig.width = 7}
-# bar plot
-fxnalREbarplot <- meanF_data %>%
-  filter(functional) %>%
-  ggplot(aes(x = RE, fill = bg)) +
-  geom_bar() +
+# bar plot (AncSR1 on top, AncSR2 on bottom)
+fxnalREbarplotfacet <- nboundRE %>%
+  ggplot(aes(x = RE, y = n, fill = bg)) +
+  geom_col() +
   facet_grid(rows = vars(bg), scales = "free") +
   scale_x_discrete(drop = FALSE) +
   scale_fill_manual(values = bg_color(), drop = FALSE, 
@@ -625,13 +648,27 @@ fxnalREbarplot <- meanF_data %>%
         legend.position = c(0.9, 0.9)) +
   guides(x = guide_axis(angle = 45))
 
-fxnalREbarplot
+fxnalREbarplotfacet
+
+# bar plot (AncSR1/AncSR2 bars dodged)
+fxnalREbarplotdodge <- nboundRE %>%
+  ggplot(aes(x = RE, y = n, fill = bg)) +
+  geom_col(position = "dodge") +
+  scale_x_discrete(drop = FALSE) +
+  scale_fill_manual(values = bg_color(), drop = FALSE, 
+                    name = "Ancestral\nbackground") +
+  ylab("Number of protein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        legend.position = c(0.9, 0.9)) +
+  guides(x = guide_axis(angle = 45))
+
+fxnalREbarplotdodge
 
 # scatter plot
-fxnalREscatterplot <- meanF_data %>%
-  group_by(bg, RE) %>%
-  summarize(count = sum(functional)) %>%
-  pivot_wider(names_from = bg, values_from = count) %>%
+fxnalREscatterplot <- nboundRE %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
   ggplot(aes(x = AncSR1, y = AncSR2)) +
   geom_smooth(method = "lm", color = "red") +
   geom_point() +
@@ -642,18 +679,14 @@ fxnalREscatterplot <- meanF_data %>%
   theme_classic()
 fxnalREscatterplot
 
-nfxnalbglm <- meanF_data %>%
-  group_by(bg, RE) %>%
-  summarize(count = sum(functional)) %>%
-  pivot_wider(names_from = bg, values_from = count) %>%
+nfxnalbglm <- nboundRE %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
   lm(formula = AncSR2 ~ AncSR1, data = .)
 summary(nfxnalbglm)
 
-nfxnalbgnoERESRE1lm <- meanF_data %>%
-  group_by(bg, RE) %>%
-  summarize(count = sum(functional)) %>%
+nfxnalbgnoERESRE1lm <- nboundRE %>%
   filter(!RE %in% c("ERE (GT)", "SRE1 (AA)")) %>%
-  pivot_wider(names_from = bg, values_from = count) %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
   lm(formula = AncSR2 ~ AncSR1, data = .)
 summary(nfxnalbgnoERESRE1lm)
 
@@ -896,156 +929,915 @@ summary(nfxnalbgnoERESRE1lm)
 
 ## How many protein variants bind promiscuously?
 
-Let's now determine which protein variants bind promiscuously, *i.e.* are functional on multiple REs. Simply counting the number of REs on which each protein variant is classified as functional will overestimate the number of promiscuous variants due to multiple testing (each protein variant has been tested on 16 REs). To correct for this, for each possible set of $k$ REs where $k \in [1:16]$, we will compute a p-value for each protein variant as the probability that it is at least as fluorescent as the reference variant on all $k$ REs in the set. This is simply the product across all $k$ REs of the p-values computed for each RE:protein variant individually. We will again use an FDR threshold of 0.1 to classify variants as functional vs. nonfunctional on each set of REs.
+<!-- Let's now determine which protein variants bind promiscuously, *i.e.* are functional on multiple REs. Simply counting the number of REs on which each protein variant is classified as functional will overestimate the number of promiscuous variants due to multiple testing (each protein variant has been tested on 16 REs). To correct for this, for each possible set of $k$ REs where $k \in [1:16]$, we will compute a p-value for each protein variant as the probability that it is at least as fluorescent as the reference variant on all $k$ REs in the set. This is simply the product across all $k$ REs of the p-values computed for each RE:protein variant individually. We will again use an FDR threshold of 0.1 to classify variants as functional vs. nonfunctional on each set of REs. -->
 
 ```{r ppromiscuous, purl = TRUE, eval = FALSE}
-# Compute p-values for binding to multiple REs
-if(!file.exists(file.path(results_dir, "ppromiscuous.rda"))) {
-  # Create list to store p-values for the null hypothesis that a variant is at
-  # least as fluorescent as the reference variant on n RE variants, where 
-  # k in [1:16]. Each element is a dataframe listing the p-values for binding to
-  # k REs; each row is a protein:RE set combination, and there are k columns
-  # listing the REs in the set
-  ppromiscuous <- list()
-  
-  # The dataframe for k=1 simply lists the p-values for individual REs computed
-  # above, including only variant combinations with p>0 for computational 
-  # efficiency.
-  ppromiscuous[[1]] <- meanF_data %>% filter(p > 0) %>% select(bg:RE, p)
-  
-  # number of REs per protein variant with p > 0
-  npg0 <- ppromiscuous[[1]] %>% group_by(bg, AA_var) %>% count(name = "nRE")
-  
-  # Compute p-values for each k > 1
-  for(k in 2:16) {
-    print(paste("k =", k))
-    
-    # subset of data for which p > 0 for at least n REs per protein variant
-    datak <- ppromiscuous[[1]] %>% semi_join(filter(npg0, nRE >= k))
-    
-    # subset data by protein background (parallel)
-    cl <- makeCluster(2, "FORK", outfile = "")
-    registerDoParallel(cl)
-    
-    ppromiscuous[[k]] <- foreach(background = unique(as.character(datak$bg)), 
-                                 .combine = "rbind") %dopar% {
-      print(background)
-      databg <- filter(datak, bg == background)
-      out <- data.frame(matrix(nrow = 0, ncol = 0))
-      aas <- unique(as.character(databg$AA_var))
-      
-      # subset data by amino acid variant
-      for(aa in aas) {
-        print(aa)
-        dataaa <- filter(databg, AA_var == aa)
-        
-        # get all possible combinations of k REs
-        REcombos <- data.frame(t(combn(as.character(dataaa$RE), k)))
-        colnames(REcombos) <- sapply(1:k, function(x) paste0("RE", x))
-        
-        # compute p-val for each combination of REs
-        p <- apply(REcombos, 1, function(x)
-          dataaa %>% filter(RE %in% x) %>% pull(p) %>% prod())
-        
-        out <- rbind(out, data.frame(bg = background, AA_var = aa, REcombos, p))
-      }
-    }
-    stopCluster(cl)
-  }
-  
-  save(ppromiscuous, file = file.path(results_dir, "ppromiscuous.rda"))
-} else load(file.path(results_dir, "ppromiscuous.rda"))
+# # Compute p-values for binding to multiple REs
+# if(!file.exists(file.path(results_dir, "ppromiscuous.rda"))) {
+#   # Create list to store p-values for the null hypothesis that a variant is at
+#   # least as fluorescent as the reference variant on n RE variants, where 
+#   # k in [1:16]. Each element is a dataframe listing the p-values for binding to
+#   # k REs; each row is a protein:RE set combination, and there are k columns
+#   # listing the REs in the set
+#   ppromiscuous <- list()
+#   
+#   # The dataframe for k=1 simply lists the p-values for individual REs computed
+#   # above, including only variant combinations with p>0 for computational 
+#   # efficiency.
+#   ppromiscuous[[1]] <- meanF_data %>% filter(p > 0) %>% select(bg:RE, p)
+#   
+#   # number of REs per protein variant with p > 0
+#   npg0 <- ppromiscuous[[1]] %>% group_by(bg, AA_var) %>% count(name = "nRE")
+#   
+#   # Compute p-values for each k > 1
+#   for(k in 2:16) {
+#     print(paste("k =", k))
+#     
+#     # subset of data for which p > 0 for at least n REs per protein variant
+#     datak <- ppromiscuous[[1]] %>% semi_join(filter(npg0, nRE >= k))
+#     
+#     # subset data by protein background (parallel)
+#     cl <- makeCluster(2, "FORK", outfile = "")
+#     registerDoParallel(cl)
+#     
+#     ppromiscuous[[k]] <- foreach(background = unique(as.character(datak$bg)), 
+#                                  .combine = "rbind") %dopar% {
+#       print(background)
+#       databg <- filter(datak, bg == background)
+#       out <- data.frame(matrix(nrow = 0, ncol = 0))
+#       aas <- unique(as.character(databg$AA_var))
+#       
+#       # subset data by amino acid variant
+#       for(aa in aas) {
+#         print(aa)
+#         dataaa <- filter(databg, AA_var == aa)
+#         
+#         # get all possible combinations of k REs
+#         REcombos <- data.frame(t(combn(as.character(dataaa$RE), k)))
+#         colnames(REcombos) <- sapply(1:k, function(x) paste0("RE", x))
+#         
+#         # compute p-val for each combination of REs
+#         p <- apply(REcombos, 1, function(x)
+#           dataaa %>% filter(RE %in% x) %>% pull(p) %>% prod())
+#         
+#         out <- rbind(out, data.frame(bg = background, AA_var = aa, REcombos, p))
+#       }
+#     }
+#     stopCluster(cl)
+#   }
+#   
+#   save(ppromiscuous, file = file.path(results_dir, "ppromiscuous.rda"))
+# } else load(file.path(results_dir, "ppromiscuous.rda"))
 ```
 
 ```{r, purl = FALSE, eval = FALSE}
-if(!file.exists(file.path(results_dir, "multiple_REs_bound_data.rda"))) {
-  multiple_REs_bound_data <- list(AncSR1 = list(), AncSR2 = list())
-  multiple_REs_bound_data[["AncSR1"]][[1]] <- meanF_data_functional %>% 
-    filter(bg == "AncSR1") %>% 
-    mutate(p = pfunctional, padj = padjfunctional, RE1 = RE) %>%
-    select(AA_var, RE1, p, padj)
-  multiple_REs_bound_data[["AncSR2"]][[1]] <- meanF_data_functional %>% 
-    filter(bg == "AncSR2") %>% 
-    mutate(p = pfunctional, padj = padjfunctional, RE1 = RE) %>%
-    select(AA_var, RE1, p, padj)
-  
-  # initialize data frames
-  for(background in c("AncSR1", "AncSR2")) {
-    for(i in 2:16) {
-      df <- data.frame(AA_var = NA)
-      df[sapply(1:i, function(x) paste0("RE", x))] <- NA
-      df$p <- NA
-      multiple_REs_bound_data[[background]][[i]] <- df
+# if(!file.exists(file.path(results_dir, "multiple_REs_bound_data.rda"))) {
+#   multiple_REs_bound_data <- list(AncSR1 = list(), AncSR2 = list())
+#   multiple_REs_bound_data[["AncSR1"]][[1]] <- meanF_data_functional %>% 
+#     filter(bg == "AncSR1") %>% 
+#     mutate(p = pfunctional, padj = padjfunctional, RE1 = RE) %>%
+#     select(AA_var, RE1, p, padj)
+#   multiple_REs_bound_data[["AncSR2"]][[1]] <- meanF_data_functional %>% 
+#     filter(bg == "AncSR2") %>% 
+#     mutate(p = pfunctional, padj = padjfunctional, RE1 = RE) %>%
+#     select(AA_var, RE1, p, padj)
+#   
+#   # initialize data frames
+#   for(background in c("AncSR1", "AncSR2")) {
+#     for(i in 2:16) {
+#       df <- data.frame(AA_var = NA)
+#       df[sapply(1:i, function(x) paste0("RE", x))] <- NA
+#       df$p <- NA
+#       multiple_REs_bound_data[[background]][[i]] <- df
+#     }
+#   }
+#   
+#   for(background in c("AncSR1", "AncSR2")) {
+#     AA_vars <- meanF_data_active %>%
+#         filter(bg == background) %>% pull("AA_var") %>% 
+#         unique() %>% as.character() %>% sort()
+#     
+#     for(aa in AA_vars) {
+#       print(aa)
+#       aa_df <- meanF_data_active %>% 
+#           filter(AA_var == aa, bg == background) %>%
+#           select(RE, meanF_REP1:meanF_REP4, pfunctional)
+#       i <- 2
+#       while(i <= nrow(aa_df)) {
+#         # compute all possible sets of i REs for variant aa
+#         RE_combs <- combn(as.character(aa_df$RE), i)
+#         
+#         # compute p-value of aa being worse than AncSR2-WT:SRE1 on any of the
+#         # set of REs
+#         p <- apply(RE_combs, 2, function(x) {
+#           df2 <- aa_df %>% filter(RE %in% x)
+#           prod(df2$pfunctional)
+#         })
+#         
+#         new_df <- data.frame(AA_var = rep(aa, ncol(RE_combs)))
+#         new_df[sapply(1:i, function(x) paste0("RE", x))] <- t(RE_combs)
+#         new_df$p <- p
+#         multiple_REs_bound_data[[background]][[i]] <- 
+#           multiple_REs_bound_data[[background]][[i]] %>%
+#           rbind(new_df)
+#         
+#         i <- i + 1
+#       }
+#     }
+#   }
+#   
+#   # merge data for AncSR1 & AncSR2
+#   multiple_REs_bound_data <- lapply(1:16, function(x) 
+#     rbind(multiple_REs_bound_data[[1]][[x]] %>% 
+#             slice(-1) %>% mutate(bg = "AncSR1"), 
+#           multiple_REs_bound_data[[2]][[x]] %>% 
+#             slice(-1) %>% mutate(bg = "AncSR2")))
+#   
+#   # compute adjusted p-values
+#   multiple_REs_bound_data <- lapply(multiple_REs_bound_data, function(x)
+#     mutate(x, padj = p.adjust(p, "fdr")))
+#   
+#   save(multiple_REs_bound_data, 
+#        file = file.path(results_dir, "multiple_REs_bound_data.rda"))
+# } else load(file = file.path(results_dir, "multiple_REs_bound_data.rda"))
+# 
+# # TODO: check what's up with AncSR1 AAKM
+```
+
+
+## Specificity vs. Promiscuity
+
+Let's now identify how many protein variants bind specifically vs. promiscuously. Protein variants are defined as "specific" if they are functional on only one RE variant, and "promiscuous" if they bind to multiple RE variants.
+
+```{r nspecific, purl = TRUE, fig.height = 5, fig.width = 6}
+# Count the number of REs on which each protein variant is functional.
+meanF_data_specificity <- meanF_data %>%
+  pivot_wider(id_cols = bg:AA_var, names_from = RE, 
+              values_from = c(avg_meanF, functional), 
+              names_sep = "_") %>%
+  mutate(nfxnal = rowSums(select(., 19:34)))
+
+# Print the number of REs bound vs. number of protein variants
+meanF_data_specificity %>%
+  filter(nfxnal > 0) %>%
+  mutate(nfxnal = factor(nfxnal, levels = 1:16)) %>%
+  group_by(bg, nfxnal) %>%
+  rename(nREs = nfxnal) %>%
+  count(name = "nproteinvars", .drop = FALSE) %>%
+  group_by(bg) %>%
+  mutate(fracfxnal = round(nproteinvars / sum(nproteinvars), 3)) %>%
+  pivot_wider(names_from = bg, values_from = nproteinvars:fracfxnal, 
+              values_fill = 0) %>%
+  knitr::kable(caption = "Number of protein variants bound to n REs")
+
+# Plot the number of REs on which each protein variant is functional
+nREbarplot <- meanF_data_specificity %>%
+  filter(nfxnal > 0) %>%
+  ggplot(aes(x = nfxnal, fill = bg)) +
+  geom_bar() +
+  facet_wrap(vars(bg), nrow = 2, scales = "free_y") +
+  scale_x_continuous(breaks = 1:16) +
+  scale_fill_manual(values = bg_color(), drop = FALSE, 
+                    name = "Ancestral\nbackground") +
+  xlab("Number of REs bound") +
+  ylab("Number of protein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = c(0.9, 0.9))
+nREbarplot
+```
+
+
+How many protein variants bind specifically to each RE?
+
+```{r nREsbound, purl = FALSE}
+# count the number of protein that bind specifically to each RE in each 
+# background
+nspecificRE <- meanF_data_specificity %>%
+  filter(nfxnal == 1) %>%
+  select(-c(3:18, nfxnal)) %>%
+  pivot_longer(3:18, names_to = "RE", values_to = "fxnal", 
+               names_prefix = "functional_") %>%
+  mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
+  filter(fxnal) %>%
+  group_by(bg, RE) %>%
+  count(name = "nproteinvars") %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(nproteinvars = 0))
+
+kable(nspecificRE %>% 
+        group_by(bg) %>%
+        mutate(fracproteinvars = round(nproteinvars / sum(nproteinvars), 3)) %>%
+        pivot_wider(names_from = bg, 
+                    values_from = nproteinvars:fracproteinvars),
+      caption = "Number of protein variants bound specifically per RE")
+```
+
+Create barplot.
+
+```{r nspecificRE, purl = FALSE, fig.height = 6, fig.width = 7}
+# plot number of protein variants bound specifically on each RE/background as a
+# bar plot
+nspecificbarplot <- nspecificRE %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(nproteinvars = 0)) %>%
+  ggplot(aes(x = RE, y = nproteinvars, fill = bg)) +
+  geom_col() +
+  facet_wrap(vars(bg), nrow = 2, scales = "free_y") +
+  scale_fill_manual(values = bg_color(), drop = FALSE, 
+                    name = "Ancestral\nbackground") +
+  ylab("Number of protein variants bound specifically") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = c(0.9, 0.9)) +
+  guides(x = guide_axis(angle = 45))
+nspecificbarplot
+```
+
+Does the number of protein variants bound specifically per RE correlate with the total number of protein variants bound per RE?
+
+```{r ntotalspecificREcor, purl = FALSE, fig.height = 5.5, fig.width = 8}
+# plot number of protein variants bound specifically vs. number bound total per
+# RE/bg
+nboundspecificvtotalplot <- nspecificRE %>%
+  rename(nspecific = nproteinvars) %>%
+  full_join(nboundRE) %>%
+  rename(ntotal = n) %>%
+  ggplot(aes(x = ntotal, y = nspecific)) +
+  geom_smooth(method = "lm", color = "black") +
+  geom_point(aes(color = bg)) +
+  geom_text_repel(aes(label = RE), box.padding = 0.15) +
+  facet_wrap(vars(bg), ncol = 2, scales = "free") +
+  scale_color_manual(values = bg_color(), name = "Ancestral\nbackground") +
+  ylim(0, NA) +
+  labs(x = "Number of protein variants bound total",
+       y = "Number of protein variants bound specifically") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = "right")
+nboundspecificvtotalplot
+
+# print Pearson's r^2 between total and specific variants bound per RE in each
+# background
+nspecificRE %>%
+  rename(nspecific = nproteinvars) %>%
+  full_join(nboundRE) %>%
+  rename(ntotal = n) %>%
+  group_by(bg) %>%
+  summarize("r2" = round(cor(nspecific, ntotal)^2, 2)) %>%
+  kable(caption = "r^2 n total vs. specific protein variants bound per RE")
+
+# plot number protein variants bound and bound specifically per RE
+nboundspecifictotalbarplot <- nspecificRE %>%
+  rename(nspecific = nproteinvars) %>%
+  full_join(meanF_data %>%
+              filter(functional) %>%
+              group_by(bg, RE) %>%
+              summarize(ntotal = n())) %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(nspecific = 0, ntotal = 0)) %>%
+  mutate(npromiscuous = ntotal - nspecific) %>%
+  pivot_longer(c(nspecific, npromiscuous), names_to = "specific", 
+               names_prefix = "n", values_to = "n") %>%
+  ggplot(aes(x = RE, y = n, fill = bg, alpha = specific)) +
+  geom_col(position = "fill") +
+  facet_wrap(vars(bg), nrow = 2, scales = "free_y") +
+  scale_fill_manual(values = bg_color(), drop = FALSE, 
+                    name = "Ancestral\nbackground") +
+  scale_alpha_manual(values = c("specific" = 1, "promiscuous" = 0.5)) +
+  ylab("Number of protein variants bound") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.text = element_text(size = fontsize),
+        strip.background = element_blank(),
+        strip.text = element_blank(),
+        legend.position = "right") +
+  guides(x = guide_axis(angle = 45))
+nboundspecifictotalbarplot
+```
+
+For those protein variants that bind to multiple REs (promiscuous), which RE combinations do they bind to? Plot a heatmap of the number of protein variants that bind to each pair of REs. 
+
+```{r promiscuousheatmaps, purl = FALSE, fig.height = 6, fig.width = 8}
+npromiscuousREpairs <- map_dfr(combn(colnames(meanF_data_specificity)[19:34], 2,
+                                     simplify = FALSE),
+                               ~ meanF_data_specificity %>%
+                                 filter(nfxnal >= 2) %>%
+                                 select(c(bg, all_of(.x))) %>%
+                                 mutate(n = rowSums(select(., -bg))) %>%
+                                 group_by(bg) %>%
+                                 summarize(pairs = paste(sub("functional_", "", .x), 
+                                                         collapse = "_"),
+                                           n = sum(n == 2))) %>%
+  separate(pairs, c("RE1", "RE2"), sep = "_") %>%
+  mutate(RE1 = factor(RE1, levels = levels(REs[[1]])),
+         RE2 = factor(RE2, levels = levels(REs[[1]])))
+
+promiscuousheatmapAncSR1 <- npromiscuousREpairs %>%
+  filter(bg == "AncSR1") %>%
+  ggplot(aes(x = RE1, y = RE2, fill = n)) +
+  geom_tile() +
+  scale_fill_viridis() +
+  labs(x = "", y = "", title = "AncSR1", fill = "Number of\nprotein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize - 2),
+        legend.position = "bottom") +
+  guides(x = guide_axis(angle = 45),
+         fill = guide_colorbar(title.position = "top",
+                               title.theme = element_text(size = fontsize - 2),
+                               label.theme = element_text(angle = 45),
+                               label.hjust = 1))
+
+# promiscuousheatmapAncSR1 <- npromiscuousREpairs %>%
+#   filter(bg == "AncSR1") %>%
+#   select(-bg) %>%
+#   pivot_wider(names_from = "RE2", values_from = "n") %>%
+#   column_to_rownames("RE1") %>%
+#   apply(1:2, function(x) x / (meanF_data_specificity %>% 
+#                                 filter(nfxnal >= 2, bg == "AncSR1") %>%
+#                                 nrow())) %>%
+#   heatmaply(dendrogram = "none")
+
+promiscuousheatmapAncSR2 <- npromiscuousREpairs %>%
+  filter(bg == "AncSR2") %>%
+  ggplot(aes(x = RE1, y = RE2, fill = n)) +
+  geom_tile() +
+  scale_fill_viridis() +
+  labs(x = "", y = "", title = "AncSR2", fill = "Number of\nprotein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize - 2),
+        legend.position = "bottom") +
+  guides(x = guide_axis(angle = 45),
+         fill = guide_colorbar(title.position = "top",
+                               title.theme = element_text(size = fontsize - 2),
+                               label.theme = element_text(angle = 45),
+                               label.hjust = 1))
+
+promiscuousheatmapAncSR1 + promiscuousheatmapAncSR2
+```
+
+Heatmaps v2
+
+```{r promiscuousheatmaps2, purl = FALSE, fig.height = 5, fig.width = 7}
+# fill scale: fraction of promiscuous variants
+promiscuousheatmapbothbg <- npromiscuousREpairs %>%
+  mutate(frac = ifelse(bg == "AncSR1", 
+                       n / (meanF_data_specificity %>% 
+                              filter(nfxnal >= 2, bg == "AncSR1") %>%
+                              nrow()),
+                       n / (meanF_data_specificity %>% 
+                              filter(nfxnal >= 2, bg == "AncSR2") %>%
+                              nrow()))) %>%
+  ggplot(aes(fill = frac)) +
+  geom_tile(data = . %>% filter(bg == "AncSR1"), aes(x = RE1, y = RE2)) +
+  geom_tile(data = . %>% filter(bg == "AncSR2"), aes(x = RE2, y = RE1)) +
+  scale_x_discrete(limits = levels(REs[[1]])) +
+  scale_y_discrete(limits = levels(REs[[1]])) +
+  scale_fill_viridis(limits = c(0, 0.48)) +
+  labs(x = "", y = "", fill = "Fraction of\nprotein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize - 2),
+        legend.position = "bottom") +
+  guides(x = guide_axis(angle = 45))
+
+# fill scale: fraction of specific variants
+specificheatmapAncSR1 <- nspecificRE %>%
+  ungroup() %>%
+  filter(bg == "AncSR1") %>%
+  select(-bg) %>%
+  complete(RE, fill = list(nproteinvars = 0)) %>%
+  mutate(frac = nproteinvars / (meanF_data_specificity %>%
+                                  filter(nfxnal == 1, bg == "AncSR1") %>%
+                                  nrow())) %>%
+  ggplot(aes(x = RE, y = "Specific", fill = frac)) +
+  geom_tile() +
+  scale_x_discrete(limits = levels(REs[[1]]), position = "top") +
+  scale_fill_viridis(limits = c(0, 0.48)) +
+  labs(x = "AncSR1 background", y = "", fill = "Fraction of\nprotein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        axis.title.x.top = element_text(size = fontsize),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.line.x = element_blank())
+
+specificheatmapAncSR2 <- nspecificRE %>%
+  ungroup() %>%
+  filter(bg == "AncSR2") %>%
+  select(-bg) %>%
+  complete(RE, fill = list(nproteinvars = 0)) %>%
+  mutate(frac = nproteinvars / (meanF_data_specificity %>%
+                                  filter(nfxnal == 1, bg == "AncSR2") %>%
+                                  nrow())) %>%
+  ggplot(aes(x = "Specific", y = RE, fill = frac)) +
+  geom_tile() +
+  scale_y_discrete(limits = levels(REs[[1]]), position = "right") +
+  scale_fill_viridis(limits = c(0, 0.48)) +
+  labs(x = "", y = "AncSR2 background", fill = "Fraction of\nprotein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        axis.title.y.right = element_text(size = fontsize),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank()) +
+  guides(x = guide_axis(angle = 45))
+
+(specificheatmapAncSR1 + theme(legend.position = "none")) +
+  plot_spacer() +
+  (promiscuousheatmapbothbg + theme(legend.position = "none")) +
+  (specificheatmapAncSR2 + theme(legend.position = "right")) +
+  plot_layout(ncol = 2, byrow = TRUE, widths = c(16, 1), heights = c(1, 16))
+```
+
+Heatmaps v3
+
+```{r promiscuousheatmaps3, purl = FALSE, fig.height = 6, fig.width = 8}
+promiscuousspecificheatmapAncSR1 <- nspecificRE %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(nproteinvars = 0)) %>%
+  rename(RE1 = RE, n = nproteinvars) %>%
+  mutate(RE2 = RE1) %>%
+  rbind(npromiscuousREpairs) %>%
+  filter(bg == "AncSR1") %>%
+  ggplot(aes(fill = n)) +
+  geom_tile(aes(x = RE1, y = RE2)) +
+  geom_tile(aes(x = RE2, y = RE1)) +
+  scale_x_discrete(limits = levels(REs[[1]])) +
+  scale_y_discrete(limits = levels(REs[[1]])) +
+  scale_fill_viridis() +
+  labs(x = "", y = "", title = "AncSR1", fill = "Number of\nprotein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize - 2),
+        legend.position = "bottom") +
+  guides(x = guide_axis(angle = 45),
+         fill = guide_colorbar(title.position = "top",
+                               title.theme = element_text(size = fontsize - 2),
+                               label.theme = element_text(angle = 45),
+                               label.hjust = 1))
+
+promiscuousspecificheatmapAncSR2 <- nspecificRE %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(nproteinvars = 0)) %>%
+  rename(RE1 = RE, n = nproteinvars) %>%
+  mutate(RE2 = RE1) %>%
+  rbind(npromiscuousREpairs) %>%
+  filter(bg == "AncSR2") %>%
+  ggplot(aes(fill = n)) +
+  geom_tile(aes(x = RE1, y = RE2)) +
+  geom_tile(aes(x = RE2, y = RE1)) +
+  scale_x_discrete(limits = levels(REs[[1]])) +
+  scale_y_discrete(limits = levels(REs[[1]])) +
+  scale_fill_viridis() +
+  labs(x = "", y = "", title = "AncSR2", fill = "Number of\nprotein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize - 2),
+        legend.position = "bottom") +
+  guides(x = guide_axis(angle = 45),
+         fill = guide_colorbar(title.position = "top",
+                               title.theme = element_text(size = fontsize - 2),
+                               label.theme = element_text(angle = 45),
+                               label.hjust = 1))
+
+promiscuousspecificheatmapAncSR1 + promiscuousspecificheatmapAncSR2
+```
+
+Clustered heatmaps
+
+```{r clusteredheatmap, purl = FALSE}
+# AncSR1 (removed RE variants with nothing bound)
+nspecificRE %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(nproteinvars = 0)) %>%
+  rename(RE1 = RE, n = nproteinvars) %>%
+  mutate(RE2 = RE1) %>%
+  rbind(npromiscuousREpairs) %>%
+  filter(bg == "AncSR1") %>%
+  rbind(rename(., RE1 = RE2, RE2 = RE1) %>% filter(RE1 != RE2)) %>%
+  filter(!RE1 %in% filter(nboundRE, bg == "AncSR1", n == 0)$RE,
+         !RE2 %in% filter(nboundRE, bg == "AncSR1", n == 0)$RE) %>%
+  pivot_wider(names_from = RE2, values_from = n) %>%
+  column_to_rownames("RE1") %>%
+  select(-bg) %>%
+  as.matrix() %>%
+  heatmap.2(col = viridis, trace = "none", dendrogram = "none", 
+            breaks = 0:max(.))
+
+# AncSR2 (removed RE variants with nothing bound)
+nspecificRE %>%
+  ungroup() %>%
+  complete(bg, RE, fill = list(nproteinvars = 0)) %>%
+  rename(RE1 = RE, n = nproteinvars) %>%
+  mutate(RE2 = RE1) %>%
+  rbind(npromiscuousREpairs) %>%
+  filter(bg == "AncSR2") %>%
+  rbind(rename(., RE1 = RE2, RE2 = RE1) %>% filter(RE1 != RE2)) %>%
+  filter(!RE1 %in% filter(nboundRE, bg == "AncSR2", n == 0)$RE,
+         !RE2 %in% filter(nboundRE, bg == "AncSR2", n == 0)$RE) %>%
+  pivot_wider(names_from = RE2, values_from = n) %>%
+  column_to_rownames("RE1") %>%
+  select(-bg) %>%
+  as.matrix() %>%
+  heatmap.2(col = viridis, trace = "none", dendrogram = "none",
+            breaks = 0:max(.))
+```
+
+Are there RE sequence determinants of promiscuity?
+
+```{r promiscuitydeterminantsRE, purl = FALSE, fig.height = 5, fig.width = 7}
+# Can promiscuity be explained by modeling the probability of binding each RE
+# variant as independent? First just look at the pairwise co-binding 
+# probabilities (the probability that two REs are co-bound by the same protein
+# variant)
+REpairs <- as.data.frame(t(combn(levels(REs[[1]]), 2)))
+colnames(REpairs) <- c("RE1", "RE2")
+REpairs <- REpairs %>%
+  left_join(nboundRE, by = c("RE1" = "RE")) %>%
+  left_join(nboundRE, by = c("bg", "RE2" = "RE"), suffix = c("1", "2")) %>%
+  left_join(npromiscuousREpairs) %>%
+  rename(n12 = n) %>%
+  mutate(p1 = n1 / 160000, p2 = n2 / 160000, p12true = n12 / 160000, 
+         p12pred = p1 * p2) %>%
+  filter(!(bg == "AncSR1" & RE1 %in% filter(nboundRE, bg == "AncSR1", n == 0)$RE),
+         !(bg == "AncSR1" & RE2 %in% filter(nboundRE, bg == "AncSR1", n == 0)$RE),
+         !(bg == "AncSR2" & RE1 %in% filter(nboundRE, bg == "AncSR2", n == 0)$RE),
+         !(bg == "AncSR2" & RE2 %in% filter(nboundRE, bg == "AncSR2", n == 0)$RE))
+coboundpairstruevpredplotAncSR1 <- REpairs %>%
+  filter(bg == "AncSR1") %>%
+  unite(RE1, RE2, col = "REs") %>%
+  select(REs, p12true, p12pred) %>%
+  ggplot(aes(x = p12pred, y = p12true)) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_point(color = bg_color()[1]) +
+  labs(y = "true co-binding frequency", 
+       x = "predicted independent co-binding frequency",
+       title = "AncSR1") +
+  theme_classic()
+coboundpairstruevpredplotAncSR2 <- REpairs %>%
+  filter(bg == "AncSR2") %>%
+  unite(RE1, RE2, col = "REs") %>%
+  select(REs, p12true, p12pred) %>%
+  ggplot(aes(x = p12pred, y = p12true)) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_point(color = bg_color()[2]) +
+  labs(y = "true co-binding frequency", 
+       x = "predicted independent co-binding frequency",
+       title = "AncSR2") +
+  theme_classic()
+coboundpairstruevpredplotAncSR1 + coboundpairstruevpredplotAncSR2
+
+# How much more likely is an RE variant to be cobound with another RE variant 
+# that has the same nucleotide at position 1 or 2 compared?
+# Use a likelihood ratio test to test for effects of matching nucleotides at
+# site 1 or 2 in the RE compared to a null model where cobinding frequencies are
+# predicted from the independent binding expectation alone.
+REpairsmatch <- REpairs %>%
+  mutate(RE1 = gsub(".+\\(|\\)", "", RE1), RE2 = gsub(".+\\(|\\)", "", RE2)) %>%
+  separate_wider_position(RE1, widths = c("RE1.1" = 1, "RE1.2" = 1)) %>%
+  separate_wider_position(RE2, widths = c("RE2.1" = 1, "RE2.2" = 1)) %>%
+  mutate(A1 = RE1.1 == "A" & RE2.1 == "A",
+         C1 = RE1.1 == "C" & RE2.1 == "C",
+         G1 = RE1.1 == "G" & RE2.1 == "G",
+         T1 = RE1.1 == "T" & RE2.1 == "T",
+         A2 = RE1.2 == "A" & RE2.2 == "A",
+         C2 = RE1.2 == "C" & RE2.2 == "C",
+         G2 = RE1.2 == "G" & RE2.2 == "G",
+         T2 = RE1.2 == "T" & RE2.2 == "T")
+  # mutate(match = map2_int(RE1, RE2, 
+  #                         ~ str_split_fixed(c(.x, .y), "", 2) %>%
+  #                           apply(2, function(x) x[1] == x[2]) %>%
+  #                           {if(sum(.) == 1) which(.) else 0}))
+
+REsiteeffect <- as.data.frame(matrix(nrow = 0, ncol = 4))
+colnames(REsiteeffect) <- c("bg", "effect", "beta", "p")
+for(b in c("AncSR1", "AncSR2")) {
+  lmH0 <- lm(p12true ~ p12pred, REpairsmatch %>% filter(bg == b))
+  print(b)
+  print(summary(lmH0))
+  for(position in 1:2) {
+    for(nt in c("A", "C", "G", "T")) {
+      datasub <- REpairsmatch %>% filter(bg == b) %>%
+      select(p12true, p12pred, paste0(nt, position)) %>%
+        rename(match = paste0(nt, position))
+      lmH1 <- lm(p12true ~ p12pred + match, datasub)
+      LRS <- -2 * (as.numeric(logLik(lmH0)) - as.numeric(logLik(lmH1)))
+      pval <- pchisq(LRS, df = 1, lower.tail = FALSE)
+      
+      REsiteeffect <- REsiteeffect %>% 
+      rbind(data.frame(bg = b, effect = paste0(nt, position), 
+                       beta = coef(lmH1)[3], p = pval), 
+            make.row.names = FALSE)
     }
   }
-  
-  for(background in c("AncSR1", "AncSR2")) {
-    AA_vars <- meanF_data_active %>%
-        filter(bg == background) %>% pull("AA_var") %>% 
-        unique() %>% as.character() %>% sort()
-    
-    for(aa in AA_vars) {
-      print(aa)
-      aa_df <- meanF_data_active %>% 
-          filter(AA_var == aa, bg == background) %>%
-          select(RE, meanF_REP1:meanF_REP4, pfunctional)
-      i <- 2
-      while(i <= nrow(aa_df)) {
-        # compute all possible sets of i REs for variant aa
-        RE_combs <- combn(as.character(aa_df$RE), i)
-        
-        # compute p-value of aa being worse than AncSR2-WT:SRE1 on any of the
-        # set of REs
-        p <- apply(RE_combs, 2, function(x) {
-          df2 <- aa_df %>% filter(RE %in% x)
-          prod(df2$pfunctional)
-        })
-        
-        new_df <- data.frame(AA_var = rep(aa, ncol(RE_combs)))
-        new_df[sapply(1:i, function(x) paste0("RE", x))] <- t(RE_combs)
-        new_df$p <- p
-        multiple_REs_bound_data[[background]][[i]] <- 
-          multiple_REs_bound_data[[background]][[i]] %>%
-          rbind(new_df)
-        
-        i <- i + 1
-      }
-    }
-  }
-  
-  # merge data for AncSR1 & AncSR2
-  multiple_REs_bound_data <- lapply(1:16, function(x) 
-    rbind(multiple_REs_bound_data[[1]][[x]] %>% 
-            slice(-1) %>% mutate(bg = "AncSR1"), 
-          multiple_REs_bound_data[[2]][[x]] %>% 
-            slice(-1) %>% mutate(bg = "AncSR2")))
-  
-  # compute adjusted p-values
-  multiple_REs_bound_data <- lapply(multiple_REs_bound_data, function(x)
-    mutate(x, padj = p.adjust(p, "fdr")))
-  
-  save(multiple_REs_bound_data, 
-       file = file.path(results_dir, "multiple_REs_bound_data.rda"))
-} else load(file = file.path(results_dir, "multiple_REs_bound_data.rda"))
-
-# TODO: check what's up with AncSR1 AAKM
-
-
-# identify protein variants that pass the significance threshold for binding to 
-# k or more RE variants
-multiple_REs_variants <- lapply(multiple_REs_bound_data, function(x)
-  x %>% filter(padj > 0.15) %>% distinct(AA_var, bg))
-multiple_REs_variants <- 
-  multiple_REs_variants[sapply(multiple_REs_variants, nrow) > 0]
-for(i in 1:(length(multiple_REs_variants)-1)) {
-  multiple_REs_variants[[i]] <- anti_join(multiple_REs_variants[[i]], multiple_REs_variants[[i+1]])
 }
-# convert to data frame
-multiple_REs_variants <- lapply(1:length(multiple_REs_variants), function(x)
-  mutate(multiple_REs_variants[[x]], nREs = x))
-multiple_REs_variants <- do.call(rbind, multiple_REs_variants)
+print(REsiteeffect)
+
+REeffect <- as.data.frame(matrix(nrow = 0, ncol = 4))
+colnames(REeffect) <- c("bg", "effect", "beta", "p")
+for(b in c("AncSR1", "AncSR2")) {
+  lmH0 <- lm(p12true ~ p12pred, REpairs %>% filter(bg == b))
+  for(RE in levels(REs[[1]])) {
+    datasub <- REpairs %>% filter(bg == b) %>%
+    select(p12true, p12pred, RE1, RE2) %>%
+      mutate(match = RE1 == RE | RE2 == RE)
+    lmH1 <- lm(p12true ~ p12pred + match, datasub)
+    LRS <- -2 * (as.numeric(logLik(lmH0)) - as.numeric(logLik(lmH1)))
+    pval <- pchisq(LRS, df = 1, lower.tail = FALSE)
+    
+    REeffect <- REeffect %>% 
+    rbind(data.frame(bg = b, effect = RE, 
+                     beta = coef(lmH1)[3], p = pval), 
+          make.row.names = FALSE)
+  }
+}
+REeffect <- REeffect %>% drop_na()
+REeffect$padj <- p.adjust(REeffect$p, method = "fdr")
+print(REeffect)
+
+# AncSR1siteeffectH0 <- lm(p12true ~ p12pred, 
+#                          REpairsmatch %>% filter(bg == "AncSR1"))
+# AncSR1siteeffectH1 <- lm(p12true ~ p12pred + match1, 
+#                          REpairsmatch %>% filter(bg == "AncSR1") %>%
+#                            mutate(match1 = match == 1))
+# AncSR1siteeffectH2 <- lm(p12true ~ p12pred + match2, 
+#                          REpairsmatch %>% filter(bg == "AncSR1") %>%
+#                            mutate(match2 = match == 2))
+# LRS1 <- -2 * (as.numeric(logLik(AncSR1siteeffectH0)) - 
+#                 as.numeric(logLik(AncSR1siteeffectH1)))
+# LRS2 <- -2 * (as.numeric(logLik(AncSR1siteeffectH0)) - 
+#                 as.numeric(logLik(AncSR1siteeffectH2)))
+# pval1 <- pchisq(LRS1, df = 1, lower.tail = FALSE)
+# pval2 <- pchisq(LRS2, df = 1, lower.tail = FALSE)
+# print(paste("AncSR1 RE site 1 match effect:", 
+#             signif(coef(AncSR1siteeffectH1)[3], 3), "p =", signif(pval1, 3)))
+# print(paste("AncSR1 RE site 2 match effect:", 
+#             signif(coef(AncSR1siteeffectH2)[3], 3), "p =", signif(pval2, 3)))
+# 
+# AncSR2siteeffectH0 <- lm(p12true ~ p12pred, 
+#                          REpairsmatch %>% filter(bg == "AncSR2"))
+# AncSR2siteeffectH1 <- lm(p12true ~ p12pred + match1, 
+#                          REpairsmatch %>% filter(bg == "AncSR2") %>%
+#                            mutate(match1 = match == 1))
+# AncSR2siteeffectH2 <- lm(p12true ~ p12pred + match2, 
+#                          REpairsmatch %>% filter(bg == "AncSR2") %>%
+#                            mutate(match2 = match == 2))
+# LRS1 <- -2 * (as.numeric(logLik(AncSR2siteeffectH0)) - 
+#                 as.numeric(logLik(AncSR2siteeffectH1)))
+# LRS2 <- -2 * (as.numeric(logLik(AncSR2siteeffectH0)) - 
+#                 as.numeric(logLik(AncSR2siteeffectH2)))
+# pval1 <- pchisq(LRS1, df = 1, lower.tail = FALSE)
+# pval2 <- pchisq(LRS2, df = 1, lower.tail = FALSE)
+# print(paste("AncSR2 RE site 1 match effect:", 
+#             signif(coef(AncSR2siteeffectH1)[3], 3), "p =", signif(pval1, 3)))
+# print(paste("AncSR2 RE site 2 match effect:", 
+#             signif(coef(AncSR2siteeffectH2)[3], 3), "p =", signif(pval2, 3)))
+# 
+# # test separately for each RE
+# REsiteeffect <- as.data.frame(matrix(nrow = 0, ncol = 6))
+# colnames(REsiteeffect) <- c("bg", "RE", "beta1", "p1", "beta2", "p2")
+# for(i in 1:16) {
+#   RE <- levels(REs[[1]])[i]
+#   for(b in c("AncSR1", "AncSR2")) {
+#     subset <- REpairs %>% 
+#       filter(bg == b, RE1 == RE | RE2 == RE) %>%
+#       unite(RE1:RE2, col = "RE2", sep = "") %>%
+#       mutate(RE2 = sub(RE, "", RE2, fixed = TRUE), RE1 = RE) %>%
+#       mutate(RE1 = gsub(".+\\(|\\)", "", RE1), 
+#              RE2 = gsub(".+\\(|\\)", "", RE2)) %>%
+#       separate_wider_position(RE1, widths = c("RE1.1" = 1, "RE1.2" = 1)) %>%
+#       separate_wider_position(RE2, widths = c("RE2.1" = 1, "RE2.2" = 1)) %>%
+#       mutate(match1 = RE1.1 == RE2.1, match2 = RE1.2 == RE2.2)
+#     
+#     subsetlmH0 <- lm(p12true ~ p12pred, subset)
+#     subsetlmH1 <- lm(p12true ~ p12pred + match1, subset)
+#     subsetlmH2 <- lm(p12true ~ p12pred + match2, subset)
+#     subsetlmH12 <- lm(p12true ~ p12pred + match1 + match2, subset)
+#     LRS1 <- -2 * (as.numeric(logLik(subsetlmH0)) - 
+#                     as.numeric(logLik(subsetlmH1)))
+#     LRS2 <- -2 * (as.numeric(logLik(subsetlmH0)) - 
+#                     as.numeric(logLik(subsetlmH2)))
+#     pval1 <- pchisq(LRS1, df = 1, lower.tail = FALSE)
+#     pval2 <- pchisq(LRS2, df = 1, lower.tail = FALSE)
+#     REsiteeffect <- REsiteeffect %>% 
+#       rbind(data.frame(bg = b, RE = RE, beta1 = coef(subsetlmH1)[3], p1 = pval1, 
+#                        beta2 = coef(subsetlmH2)[3], p2 = pval2), 
+#             make.row.names = FALSE)
+#   }
+# }
+```
 
 
+How do protein variants switch between specific and promiscuous categories between the AncSR1 and AncSR2 backgrounds? Do they switch specificity?
+
+```{r bgphenotypeswitch, purl = FALSE, fig.height = 6, fig.width = 8}
+# Of protein variants that are functional in either ancestral background, how do
+# their phenotypes (specific, promiscuous, or nonfunctional) differ between the
+# backgrounds?
+meanF_data_specificity %>%
+  filter(nfxnal > 0) %>%
+  mutate(specific = ifelse(nfxnal == 1, "specific", "promiscuous")) %>%
+  select(bg, AA_var, specific) %>%
+  pivot_wider(names_from = bg, values_from = specific) %>%
+  replace_na(list(AncSR1 = "nonfunctional", AncSR2 = "nonfunctional")) %>%
+  count(AncSR1, AncSR2) %>%
+  ungroup() %>%
+  mutate(frac = n / sum(n)) %>%
+  kable(caption = "Change in specificity/promsicuity phenotype")
+
+specificpromiscuousswitchplot <- meanF_data_specificity %>%
+  filter(nfxnal > 0) %>%
+  mutate(specific = ifelse(nfxnal == 1, "specific", "promiscuous")) %>%
+  select(bg, AA_var, specific) %>%
+  pivot_wider(names_from = bg, values_from = specific) %>%
+  replace_na(list(AncSR1 = "nonfunctional", AncSR2 = "nonfunctional")) %>%
+  count(AncSR1, AncSR2) %>%
+  mutate(change = map2_chr(AncSR1, AncSR2,
+                           ~ {if((.x == "specific" & .y == "promiscuous") |
+                                 .x == "nonfunctional") "gained binding"
+                             else if(.x == .y) "maintained binding"
+                             else "lost binding"})) %>%
+  mutate(AncSR1 = factor(AncSR1, levels = c("specific", "promiscuous", 
+                                            "nonfunctional")),
+         AncSR2 = factor(AncSR2, levels = c("specific", "promiscuous", 
+                                            "nonfunctional")),
+         change = factor(change, levels = c("gained binding",
+                                            "maintained binding",
+                                            "lost binding"))) %>%
+  ggplot(aes(y = n, axis1 = AncSR1, axis2 = AncSR2)) +
+  geom_alluvium(aes(fill = change)) +
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("AncSR1\nbackground", "AncSR2\nbackground"),
+                   expand = c(0.15, 0.05),
+                   position = "top") +
+  labs(y = "Number of protein variants") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        axis.line.x = element_blank(),
+        axis.ticks.x = element_blank())
+specificpromiscuousswitchplot
+
+# Of protein variants that are specific in the AncSR1 background, do they change
+# specificity or maintain the same specificity in the AncSR2 background?
+meanF_data_specificity %>%
+  filter(nfxnal > 0) %>%
+  mutate(specific = ifelse(nfxnal == 1, "specific", "promiscuous")) %>%
+  select(bg, AA_var, specific) %>%
+  pivot_wider(names_from = bg, values_from = specific) %>%
+  replace_na(list(AncSR1 = "nonfunctional", AncSR2 = "nonfunctional")) %>%
+  count(AncSR1, AncSR2) %>%
+  ungroup() %>%
+  filter(AncSR1 == "specific") %>%
+  mutate(frac = n / sum(n)) %>%
+  kable(caption = "Change in phenotype for AncSR1 specific variants")
+
+AncSR1specificswitchplot <- meanF_data_specificity %>%
+  filter(nfxnal > 0) %>%
+  mutate(specificity = apply(select(., `functional_ERE (GT)`:functional_TT), 
+                             1, which)) %>%
+  mutate(specificity = sapply(specificity, function(x) 
+    ifelse(length(x) == 1, levels(REs[[1]])[x], "promiscuous"))) %>%
+  select(bg, AA_var, specificity) %>%
+  pivot_wider(names_from = bg, values_from = specificity) %>%
+  filter(AncSR1 %in% REs[[1]]) %>%
+  replace_na(list(AncSR2 = "nonfunctional")) %>%
+  count(AncSR1, AncSR2) %>%
+  mutate(change = map2_chr(AncSR1, AncSR2,
+                           ~ {if(.x == .y) "maintained specificity"
+                             else if(.y %in% REs[[1]]) "switched specificity"
+                             else if(.y == "promiscuous") "gained promiscuity"
+                             else "lost binding"})) %>%
+  mutate(AncSR1 = factor(AncSR1, levels = levels(REs[[1]])),
+         AncSR2 = factor(AncSR2, levels = c(levels(REs[[1]]), "promiscuous", 
+                                            "nonfunctional")),
+         change = factor(change, levels = c("maintained specificity", 
+                                            "switched specificity",
+                                            "gained promiscuity",
+                                            "lost binding"))) %>%
+  ggplot(aes(y = n, axis1 = AncSR1, axis2 = AncSR2)) +
+  geom_alluvium(aes(fill = change)) +
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("AncSR1\nbackground", "AncSR2\nbackground"),
+                   expand = c(0.15, 0.05),
+                   position = "top") +
+  labs(y = "Number of protein variants") +
+  theme_classic() +
+  # guides(fill = "none") +
+  theme(text = element_text(size = fontsize),
+        axis.line.x = element_blank(),
+        axis.ticks.x = element_blank())
+AncSR1specificswitchplot
+```
+
+
+What are the amino acid sequence determinants of binding, specificity, and promiscuity?
+
+```{r logoplots, purl = FALSE, fig.height = 6, fig.width = 7}
+allbindersbybglogoplot <- list(AncSR1 = meanF_data %>% 
+                             filter(functional, bg == "AncSR1") %>% 
+                             pull(AA_var) %>%
+                             as.character() %>%
+                             unique(),
+                           AncSR2 = meanF_data %>%
+                             filter(functional, bg == "AncSR2") %>%
+                             pull(AA_var) %>%
+                             as.character() %>%
+                             unique()) %>%
+  ggseqlogo(method = "probability") +
+  theme(text = element_text(size = fontsize)) +
+  labs(x = "RH position", title = "All binders")
+allbindersbybglogoplot
+
+allbindersbybgRElogoplot <- list(AncSR1 = meanF_data %>%
+                                   filter(functional, bg == "AncSR1") %>%
+                                   {sapply(levels(REs[[1]]), function(x)
+                                     filter(., RE == x) %>% pull(AA_var) %>%
+                                       as.character(), USE.NAMES = TRUE)},
+                                 AncSR2 = meanF_data %>%
+                                   filter(functional, bg == "AncSR2") %>%
+                                   {sapply(levels(REs[[1]]), function(x)
+                                     filter(., RE == x) %>% pull(AA_var) %>%
+                                       as.character(), USE.NAMES = TRUE)}) %>%
+  list_flatten(name_spec = "{outer} {inner}") %>%
+  discard(~ length(.x) == 0) %>%
+  ggseqlogo(method = "probability", nrow = 4) +
+  theme(text = element_text(size = fontsize - 4)) +
+  labs(x = "RH position", title = "All binders")
+allbindersbybgRElogoplot
+
+specificbinderslogoplot <- list(AncSR1 = meanF_data_specificity %>% 
+                                  filter(nfxnal == 1, bg == "AncSR1") %>% 
+                                  mutate(specificity = 
+                                           apply(select(., `functional_ERE (GT)`:functional_TT), 
+                                                 1, function(x) 
+                                                   as.character(REs[[1]][which(x)]))) %>%
+                                  {sapply(levels(REs[[1]]), function(x)
+                                    filter(., specificity == x) %>% 
+                                      pull(AA_var) %>% as.character(),
+                                    USE.NAMES = TRUE)},
+                                AncSR2 = meanF_data_specificity %>% 
+                                  filter(nfxnal == 1, bg == "AncSR2") %>% 
+                                  mutate(specificity = 
+                                           apply(select(., `functional_ERE (GT)`:functional_TT), 
+                                                 1, function(x) 
+                                                   as.character(REs[[1]][which(x)]))) %>%
+                                  {sapply(levels(REs[[1]]), function(x)
+                                    filter(., specificity == x) %>% 
+                                      pull(AA_var) %>% as.character(),
+                                    USE.NAMES = TRUE)}) %>%
+  list_flatten(name_spec = "{outer} {inner}") %>%
+  discard(~ length(.x) == 0) %>%
+  ggseqlogo(method = "probability", nrow = 4) +
+  theme(text = element_text(size = fontsize - 4)) +
+  labs(x = "RH position", title = "Specific binders")
+specificbinderslogoplot
+
+promiscuousbinderslogoplot <- list(AncSR1 = meanF_data_specificity %>% 
+                                  filter(nfxnal > 1, bg == "AncSR1") %>% 
+                                  pull(AA_var) %>% unique() %>% as.character(),
+                                AncSR2 = meanF_data_specificity %>% 
+                                  filter(nfxnal > 1, bg == "AncSR2") %>% 
+                                  pull(AA_var) %>% unique() %>% as.character()) %>%
+  ggseqlogo(method = "probability") +
+  theme(text = element_text(size = fontsize)) +
+  labs(x = "RH position", title = "Promiscuous binders")
+promiscuousbinderslogoplot
+
+promiscuouspairslogoplot <- list(AncSR1 = map2(c("ERE (GT)", "SRE1 (AA)", "SRE1 (AA)"),
+                                               c("AT", "AT", "CA"),
+                                               ~ meanF_data_specificity %>%
+                                                 filter(bg == "AncSR1",
+                                                        !!sym(paste0("functional_", .x)),
+                                                        !!sym(paste0("functional_", .y))) %>%
+                                                 pull(AA_var) %>% as.character()) %>%
+                                   set_names(c("ERE (GT), AT", "SRE1 (AA), AT", "SRE1 (AA), CA")),
+                                 AncSR2 = map2(c("SRE1 (AA)", "SRE1 (AA)", "SRE1 (AA)", "AT", "CA"),
+                                               c("AT", "CA", "TA", "TT", "TA"),
+                                               ~ meanF_data_specificity %>%
+                                                 filter(bg == "AncSR2",
+                                                        !!sym(paste0("functional_", .x)),
+                                                        !!sym(paste0("functional_", .y))) %>%
+                                                 pull(AA_var) %>% as.character()) %>%
+                                   set_names(c("SRE1 (AA), AT", "SRE1 (AA), CA", "SRE1 (AA), TA", 
+                                               "AT, TT", "CA, TA"))) %>%
+  list_flatten(name_spec = "{outer} {inner}") %>%
+  ggseqlogo(method = "probability") +
+  theme(text = element_text(size = fontsize - 4)) +
+  labs(x = "RH position", title = "Promiscuous binders")
+promiscuouspairslogoplot
+```
+
+
+``` {r, purl = FALSE, eval = FALSE}
 # plot the number of REs each RH variant is active on
 a1 <- multiple_REs_variants %>%
   mutate(specific = factor(ifelse(nREs == 1, "specific", "promiscuous"),
@@ -1596,15 +2388,15 @@ Let's create the genotype networks, where each node is a protein variant and the
 
 ```{r, purl = FALSE, eval = F}
 # create data frame of which protein variants bind to which REs
-REs_bound <- multiple_REs_variants %>%
-  separate_longer_delim(cols = RE, delim = ", ") %>%
-  mutate(present = 1) %>%
-  pivot_wider(names_from = RE, values_from = present)
+# REs_bound <- multiple_REs_variants %>%
+#   separate_longer_delim(cols = RE, delim = ", ") %>%
+#   mutate(present = 1) %>%
+#   pivot_wider(names_from = RE, values_from = present)
   
 
 ## AncSR1
-AncSR1_comb <- combn(REs_bound %>% 
-                       filter(bg == "AncSR1") %>% 
+AncSR1_comb <- combn(meanF_data_specificity %>% 
+                       filter(bg == "AncSR1", nfxnal > 0) %>% 
                        pull(AA_var) %>% 
                        as.character(), 2)
 AncSR1_edges <- t(AncSR1_comb)
@@ -1617,16 +2409,17 @@ AncSR1_connected <- AncSR1_edges[AncSR1_connected,]
 # variables indicating binding to each RE, and one integer variable for number
 # of REs bound
 AncSR1_graph <- graph_from_data_frame(AncSR1_connected, directed=FALSE, 
-                                      vertices = REs_bound %>% 
-                                        filter(bg == "AncSR1") %>% select(-bg) %>%
+                                      vertices = meanF_data_specificity %>% 
+                                        filter(bg == "AncSR1", nfxnal > 0) %>% 
+                                        select(AA_var, `functional_ERE (GT)`:nfxnal) %>%
                                         mutate(AA_var = as.character(AA_var)))
 write_graph(AncSR1_graph, 
             file.path(results_dir, "AncSR1_RH_network.graphml"),
             format="graphml")
 
 ## AncSR2
-AncSR2_comb <- combn(REs_bound %>% 
-                       filter(bg == "AncSR2") %>% 
+AncSR2_comb <- combn(meanF_data_specificity %>% 
+                       filter(bg == "AncSR2", nfxnal > 0) %>% 
                        pull(AA_var) %>% 
                        as.character(), 2)
 AncSR2_edges <- t(AncSR2_comb)
@@ -1639,11 +2432,76 @@ AncSR2_connected <- AncSR2_edges[AncSR2_connected,]
 # variables indicating binding to each RE, and one integer variable for number
 # of REs bound
 AncSR2_graph <- graph_from_data_frame(AncSR2_connected, directed=FALSE, 
-                                      vertices = REs_bound %>% 
-                                        filter(bg == "AncSR2") %>% select(-bg) %>%
+                                      vertices = meanF_data_specificity %>% 
+                                        filter(bg == "AncSR2", nfxnal > 0) %>% 
+                                        select(AA_var, `functional_ERE (GT)`:nfxnal) %>%
                                         mutate(AA_var = as.character(AA_var)))
 write_graph(AncSR2_graph, 
             file.path(results_dir, "AncSR2_RH_network.graphml"),
+            format="graphml")
+```
+
+
+RH-RE networks
+
+```{r, purl = FALSE}
+# AncSR1
+AncSR1_RHRE_comb <- combn(meanF_data_specificity %>% 
+                            filter(bg == "AncSR1", nfxnal > 0) %>% 
+                            select(bg, AA_var, 
+                                   `functional_ERE (GT)`:functional_TT) %>%
+                            pivot_longer(`functional_ERE (GT)`:functional_TT, 
+                                         names_to = "RE", 
+                                         names_prefix = "functional_", 
+                                         values_to = "functional") %>%
+                            filter(functional) %>%
+                            mutate(RE = sub(".+ \\(", "", RE)) %>%
+                            mutate(RE = sub("\\)", "", RE)) %>%
+                            unite(AA_var, RE, col = "var", sep = "") %>%
+                            pull(var), 2)
+AncSR1_RHRE_edges <- t(AncSR1_RHRE_comb)
+AncSR1_RHRE_connected <- apply(AncSR1_RHRE_edges, 1, connected_RH_RE)
+AncSR1_RHRE_connected <- AncSR1_RHRE_edges[AncSR1_RHRE_connected,]
+AncSR1_RHRE_vertices <- unique(as.character(AncSR1_RHRE_comb))
+AncSR1_RHRE_vertices <- data.frame(var = AncSR1_RHRE_vertices,
+                                   RE = sub("....", "", AncSR1_RHRE_vertices))
+
+AncSR1_RHRE_graph <- graph_from_data_frame(AncSR1_RHRE_connected, directed=FALSE, 
+                                           vertices = AncSR1_RHRE_vertices)
+write_graph(AncSR1_RHRE_graph, 
+            file.path(results_dir, "AncSR1_RHRE_network.graphml"),
+            format="graphml")
+```
+
+```{r, purl = TRUE}
+# AncSR2
+AncSR2_RHRE_comb <- combn(meanF_data_specificity %>% 
+                            filter(bg == "AncSR2", nfxnal > 0) %>% 
+                            select(bg, AA_var, 
+                                   `functional_ERE (GT)`:functional_TT) %>%
+                            pivot_longer(`functional_ERE (GT)`:functional_TT, 
+                                         names_to = "RE", 
+                                         names_prefix = "functional_", 
+                                         values_to = "functional") %>%
+                            filter(functional) %>%
+                            mutate(RE = sub(".+ \\(", "", RE)) %>%
+                            mutate(RE = sub("\\)", "", RE)) %>%
+                            unite(AA_var, RE, col = "var", sep = "") %>%
+                            pull(var), 2)
+AncSR2_RHRE_edges <- t(AncSR2_RHRE_comb)
+if(!file.exists(file.path(results_dir, "AncSR2_RHRE_connected.rda"))) {
+  AncSR2_RHRE_connected <- apply(AncSR2_RHRE_edges, 1, connected_RH_RE)
+  save(AncSR2_RHRE_connected, file = file.path(results_dir, "AncSR2_RHRE_connected.rda"))
+} else load(file.path(results_dir, "AncSR2_RHRE_connected.rda"))
+AncSR2_RHRE_connected <- AncSR2_RHRE_edges[AncSR2_RHRE_connected,]
+AncSR2_RHRE_vertices <- unique(as.character(AncSR2_RHRE_comb))
+AncSR2_RHRE_vertices <- data.frame(var = AncSR2_RHRE_vertices,
+                                   RE = sub("....", "", AncSR2_RHRE_vertices))
+
+AncSR2_RHRE_graph <- graph_from_data_frame(AncSR2_RHRE_connected, directed=FALSE, 
+                                           vertices = AncSR2_RHRE_vertices)
+write_graph(AncSR2_RHRE_graph, 
+            file.path(results_dir, "AncSR2_RHRE_network.graphml"),
             format="graphml")
 ```
 
