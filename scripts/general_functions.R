@@ -102,18 +102,30 @@ bg_color <- function(bg = c("AncSR1", "AncSR2")) {
 
 
 # get colors palette for REs
-RE_color <- function(RE = REs[[1]]) {
+RE_color <- function(RE = REs[[1]], print = FALSE, colorblind = NULL) {
   rotate <- function(x) t(apply(x, 2, rev))
   n <- 4
   mm <- tcrossprod(seq(1,0,length.out = n))
   
   tmp1 <- sapply(col2rgb("#9bec0d")/255, function(x) 1-mm*(1-x))
   tmp2 <- sapply(col2rgb("#ec0d2b")/255, function(x) 1-rotate(mm)*(1-x))
+  # tmp2 <- sapply(col2rgb("#FFB000")/255, function(x) 1-rotate(mm)*(1-x))
   tmp3 <- sapply(col2rgb("#0deccd")/255, function(x) 1-rotate(rotate(mm))*(1-x))
+  # tmp3 <- sapply(col2rgb("#ec0d2b")/255, function(x) 1-rotate(rotate(mm))*(1-x))
   tmp4 <- sapply(col2rgb("#5e0dec")/255, function(x) 1-rotate(rotate(rotate(mm)))*(1-x))
   
   tmp <- (tmp1*tmp2*tmp3*tmp4)
   RE_palette <- matrix(rgb(tmp), nrow = n)
+  if(print) {
+    require(grid)
+    if(!is.null(colorblind)) {
+      require(dichromat)
+      RE_palette <- matrix(dichromat(RE_palette, type = colorblind), nrow = n)
+    }
+    grid.newpage()
+    grid.raster(RE_palette, interpolate=FALSE)
+    print(RE_palette)
+  }
   RE_palette_legend <- matrix(c("SRE1 (AA)", "CA", "AC", "CC", 
                                 "SRE2 (GA)", "TA", "GC", "TC", 
                                 "AT", "CT","AG", "CG", 
@@ -123,6 +135,21 @@ RE_color <- function(RE = REs[[1]]) {
   names(RE_palette) <- as.vector(RE_palette_legend)
   return(RE_palette[as.character(RE)])
 }
+
+# https://mokole.com/palette.html
+visually_distinct1 <- c("#7cfc00", "#6b8e23", "#2f4f4f", "#ff00ff",
+                                  "#7f0000", "#4b0082", "#ff0000", "#ffd700",
+                                  "#00fa9a", "#00ffff", "#f4a460", "#0000ff",
+                                  "#1e90ff", "#dda0dd", "#fdf5e6", "#ff1493")
+names(visually_distinct1) <- levels(REs[[2]])
+
+
+# http://medialab.github.io/iwanthue/
+visually_distinct2 <- c("#4e8812", "#81f5a2", "#981a2b", "#6630d6", 
+                                 "#e41e38", "#482613", "#f5be4f", "#ddf83f", 
+                                 "#247854", "#285c67", "#6fb4f8", "#232961", 
+                                 "#9c83fa", "#26167b", "#f672f3", "#b91d94")
+names(visually_distinct2) <- levels(REs[[2]])
 
 
 # determine whether two amino acid sequences can be connected by a single 
@@ -140,4 +167,21 @@ connected <- function(seqs) {
       sum(do.call("!=", strsplit(as.character(x), ""))) == 1)
     return(sum(connected) > 0)
   } else return(FALSE)
+}
+
+connected_RH_RE <- function(seqs) {
+  seq1 <- unlist(strsplit(seqs[1], ""))
+  seq2 <- unlist(strsplit(seqs[2], ""))
+  
+  if(sum(seq1 != seq2) == 1) {
+    i <- which(seq1 != seq2)
+    if(i %in% 1:4) {  # AA difference
+      codons1 <- names(GENETIC_CODE[GENETIC_CODE==seq1[i]])
+      codons2 <- names(GENETIC_CODE[GENETIC_CODE==seq2[i]])
+      pairs <- expand.grid(list(codons1, codons2), stringsAsFactors=FALSE)
+      connected <- apply(pairs, 1, function(x) 
+        sum(do.call("!=", strsplit(as.character(x), ""))) == 1)
+      return(sum(connected) > 0)
+    } else return(TRUE)  # nt difference
+  } else return (FALSE)  # Hamming distance != 1
 }
