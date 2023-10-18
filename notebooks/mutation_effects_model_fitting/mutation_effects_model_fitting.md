@@ -117,23 +117,27 @@ AncSR2_nullF <- meanF_data %>%
 
 AncSR1_model_data <- meanF_data %>%
   filter(type == "exp", bg == "AncSR1", sig != "nonsense") %>%
-  select(AA_var, RE, avg_meanF) %>%
+  mutate(active = sig == "significant") %>%
+  select(AA_var, RE, avg_meanF, active) %>%
   mutate(type = "binned") %>%
   bind_rows(debulk_data %>% 
               filter(bg == "AncSR1", !grepl("\\*", AA_var)) %>%
               distinct(AA_var, RE) %>%  # remove duplicated variants from redo libraries
-              mutate(avg_meanF = AncSR1_nullF, type = "debulk")) %>%
+              mutate(avg_meanF = AncSR1_nullF, active = FALSE, 
+                     type = "debulk")) %>%
   distinct(AA_var, RE, .keep_all = TRUE) %>%  # remove debulk sort variants if they are in the binned sort dataset
   arrange(AA_var, RE)
 
 AncSR2_model_data <- meanF_data %>%
   filter(type == "exp", bg == "AncSR2", sig != "nonsense") %>%
-  select(AA_var, RE, avg_meanF) %>%
+  mutate(active = sig == "significant") %>%
+  select(AA_var, RE, avg_meanF, active) %>%
   mutate(type = "binned") %>%
   bind_rows(debulk_data %>% 
               filter(bg == "AncSR2", !grepl("\\*", AA_var)) %>%
               select(AA_var, RE) %>% 
-              mutate(avg_meanF = AncSR2_nullF, type = "debulk")) %>%
+              mutate(avg_meanF = AncSR2_nullF, active = FALSE,
+                     type = "debulk")) %>%
   distinct(AA_var, RE, .keep_all = TRUE) %>%  # remove debulk sort variants if they are in the binned sort dataset
   arrange(AA_var, RE)
 
@@ -165,17 +169,17 @@ We will build covariate matrices containing the following effects:
 
 | effect         | nterms |
 |:---------------|:-------|
-| RH             | 80     |
+| AA             | 80     |
 | RE             | 8      |
-| RHxRH          | 2400   |
-| RExRE          | 16     |
-| RHxRE          | 640    |
-| RHxRHxRH       | 32000  |
-| RHxRHxRE       | 19200  |
-| RHxRExRE       | 1280   |
-| RHxRHxRExRE    | 38400  |
-| RHxRHxRHxRE    | 256000 |
-| RHxRHxRHxRExRE | 512000 |
+| AA:AA          | 2400   |
+| RE:RE          | 16     |
+| AA:RE          | 640    |
+| AA:AA:AA       | 32000  |
+| AA:AA:RE       | 19200  |
+| AA:RE:RE       | 1280   |
+| AA:AA:RE:RE    | 38400  |
+| AA:AA:AA:RE    | 256000 |
+| AA:AA:AA:RE:RE | 512000 |
 | total          | 862024 |
 
 Note that some of the above effect terms are redundant. For example,
@@ -213,7 +217,10 @@ if(!file.exists(file.path(results_dir, "AncSR2_full_mat.rda"))) {
 } else load(file.path(results_dir, "AncSR2_full_mat.rda"))
 ```
 
-### Checking mutation frequencies
+### Checking state frequencies
+
+Let’s check how often each combination of amino acid and nucleotide
+states is observed in the datasets.
 
 ``` r
 mutfreq <- data.frame(mut = colnames(AncSR1_full_mat),
@@ -227,8 +234,13 @@ mutfreq <- data.frame(mut = colnames(AncSR1_full_mat),
 # plot the number of variants in the dataset containing a mutant state
 # or state combination of a given order
 mutfreq %>%
-  ggplot(aes(x = order, y = nvars, fill = background)) +
-  geom_boxplot() +
+  ggplot(aes(x = order, y = nvars)) +
+  geom_boxplot(aes(fill = background)) +
+  geom_point(data = cov_table, 
+             aes(x = factor(effect, levels = levels(mutfreq$order)), 
+                 y = 2560000 / c(20, 4, 20^2, 4^2, 20*4, 20^3, 20^2*4, 20*4^2, 
+                                 20^2*4^2, 20^3*4, 20^3*4^2)), 
+             color = "red") +
   scale_y_continuous(trans = log10plus1, labels = label_comma()) +
   labs(title = "Mutant state frequencies", x = "State combination", 
        y = "Number of variants + 1") +
@@ -237,7 +249,7 @@ mutfreq %>%
         text = element_text(size = 14))
 ```
 
-![](mutation_effects_model_fitting_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+![](mutation_effects_model_fitting_files/figure-gfm/statefreqs-1.png)<!-- -->
 
 ``` r
 # how many mutation combinations are observed in 3 or fewer variants,
@@ -310,6 +322,110 @@ mutfreq %>%
 | AncSR2     | AA:AA:AA:RE    |      981 |       0.004 |
 | AncSR2     | AA:AA:RE:RE    |        1 |       0.000 |
 | AncSR2     | AA:AA:AA:RE:RE |    24706 |       0.048 |
+
+Now let’s just restrict the analysis to active mutants, i.e. those with
+fluorescence significantly greater than nonsense variants.
+
+``` r
+mutfreqactive <- data.frame(mut = colnames(AncSR1_full_mat),
+                            AncSR1 = colSums(AncSR1_full_mat[AncSR1_model_data$active,]),
+                            AncSR2 = colSums(AncSR2_full_mat[AncSR2_model_data$active,])) %>%
+  pivot_longer(cols = 2:3, names_to = "background", values_to = "nvars") %>%
+  mutate(order = gsub("AA..", "AA", mut)) %>%
+  mutate(order = gsub("RE..", "RE", order)) %>%
+  mutate(order = factor(order, levels = unique(order)))
+
+# plot the number of active variants in the dataset containing a mutant state
+# or state combination of a given order
+mutfreqactive %>%
+  ggplot(aes(x = order, y = nvars)) +
+  geom_boxplot(aes(fill = background)) +
+  geom_point(data = cov_table, 
+             aes(x = factor(effect, levels = levels(mutfreq$order)), 
+                 y = 2560000 / c(20, 4, 20^2, 4^2, 20*4, 20^3, 20^2*4, 20*4^2, 
+                                 20^2*4^2, 20^3*4, 20^3*4^2)), 
+             color = "red") +
+  scale_y_continuous(trans = log10plus1, labels = label_comma()) +
+  labs(title = "Mutant state frequencies, active variants", x = "State combination", 
+       y = "Number of variants + 1") +
+  theme_light() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        text = element_text(size = 14))
+```
+
+![](mutation_effects_model_fitting_files/figure-gfm/statefreqsactive-1.png)<!-- -->
+
+``` r
+# how many mutation combinations are observed in 3 or fewer active variants,
+# according to mutation order, and what is the proportion out of all possible
+# combinations?
+mutfreqactive %>%
+  group_by(background, order) %>%
+  summarize(nlessthan4 = sum(nvars <= 3),
+            proplessthan4 = round(sum(nvars <= 3) / n(), 3)) %>%
+  as.data.frame() %>% knitr::kable()
+```
+
+| background | order          | nlessthan4 | proplessthan4 |
+|:-----------|:---------------|-----------:|--------------:|
+| AncSR1     | AA             |         24 |         0.300 |
+| AncSR1     | RE             |          0 |         0.000 |
+| AncSR1     | AA:AA          |       2243 |         0.935 |
+| AncSR1     | RE:RE          |          2 |         0.125 |
+| AncSR1     | AA:RE          |        437 |         0.683 |
+| AncSR1     | AA:AA:AA       |      31904 |         0.997 |
+| AncSR1     | AA:AA:RE       |      18872 |         0.983 |
+| AncSR1     | AA:RE:RE       |       1168 |         0.912 |
+| AncSR1     | AA:AA:AA:RE    |     255841 |         0.999 |
+| AncSR1     | AA:AA:RE:RE    |      38242 |         0.996 |
+| AncSR1     | AA:AA:AA:RE:RE |     511933 |         1.000 |
+| AncSR2     | AA             |          0 |         0.000 |
+| AncSR2     | RE             |          0 |         0.000 |
+| AncSR2     | AA:AA          |       1470 |         0.613 |
+| AncSR2     | RE:RE          |          0 |         0.000 |
+| AncSR2     | AA:RE          |        142 |         0.222 |
+| AncSR2     | AA:AA:AA       |      30420 |         0.951 |
+| AncSR2     | AA:AA:RE       |      15955 |         0.831 |
+| AncSR2     | AA:RE:RE       |        666 |         0.520 |
+| AncSR2     | AA:AA:AA:RE    |     252317 |         0.986 |
+| AncSR2     | AA:AA:RE:RE    |      36115 |         0.940 |
+| AncSR2     | AA:AA:AA:RE:RE |     510540 |         0.997 |
+
+``` r
+# how many mutation combinations are observed in no active variants,
+# according to mutation order, and what is the proportion out of all possible
+# combinations?
+mutfreqactive %>%
+  group_by(background, order) %>%
+  summarize(nmissing = sum(nvars == 0),
+            propmissing = round(sum(nvars == 0) / n(), 3)) %>%
+  as.data.frame() %>% knitr::kable()
+```
+
+| background | order          | nmissing | propmissing |
+|:-----------|:---------------|---------:|------------:|
+| AncSR1     | AA             |        2 |       0.025 |
+| AncSR1     | RE             |        0 |       0.000 |
+| AncSR1     | AA:AA          |     1753 |       0.730 |
+| AncSR1     | RE:RE          |        0 |       0.000 |
+| AncSR1     | AA:RE          |      236 |       0.369 |
+| AncSR1     | AA:AA:AA       |    31144 |       0.973 |
+| AncSR1     | AA:AA:RE       |    17375 |       0.905 |
+| AncSR1     | AA:RE:RE       |      942 |       0.736 |
+| AncSR1     | AA:AA:AA:RE    |   253947 |       0.992 |
+| AncSR1     | AA:AA:RE:RE    |    37285 |       0.971 |
+| AncSR1     | AA:AA:AA:RE:RE |   510851 |       0.998 |
+| AncSR2     | AA             |        0 |       0.000 |
+| AncSR2     | RE             |        0 |       0.000 |
+| AncSR2     | AA:AA          |      622 |       0.259 |
+| AncSR2     | RE:RE          |        0 |       0.000 |
+| AncSR2     | AA:RE          |       56 |       0.088 |
+| AncSR2     | AA:AA:AA       |    27031 |       0.845 |
+| AncSR2     | AA:AA:RE       |    11722 |       0.611 |
+| AncSR2     | AA:RE:RE       |      434 |       0.339 |
+| AncSR2     | AA:AA:AA:RE    |   240162 |       0.938 |
+| AncSR2     | AA:AA:RE:RE    |    31621 |       0.823 |
+| AncSR2     | AA:AA:AA:RE:RE |   500066 |       0.977 |
 
 ### Fitting nonspecific epistasis
 
@@ -1984,7 +2100,7 @@ AncSR2_complete_data %>%
 AncSR1_complete_data %>%
   filter(avg_meanF > AncSR2.SRE1.f) %>%
   group_by(RE, type) %>%
-  count() %>%
+  dplyr::count() %>%
   mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
   ggplot(aes(x = RE, y = n, fill = type)) +
   geom_col(position = "stack") +
@@ -1999,7 +2115,7 @@ AncSR1_complete_data %>%
 AncSR2_complete_data %>%
   filter(avg_meanF > AncSR2.SRE1.f) %>%
   group_by(RE, type) %>%
-  count() %>%
+  dplyr::count() %>%
   mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
   ggplot(aes(x = RE, y = n, fill = type)) +
   geom_col(position = "stack") +
@@ -2016,7 +2132,7 @@ AncSR2_complete_data %>%
 AncSR1_complete_table <- AncSR1_complete_data %>%
   filter(avg_meanF >= AncSR2.SRE1.f) %>%
   group_by(RE, type) %>%
-  count() %>% 
+  dplyr::count() %>% 
   pivot_wider(names_from = type, values_from = n) %>%
   replace_na(list(binned = 0, predicted = 0)) %>%
   dplyr::rename(observed = binned) %>%
@@ -2060,7 +2176,7 @@ AncSR1 functional variants (total)
 AncSR2_complete_table <- AncSR2_complete_data %>%
   filter(avg_meanF >= AncSR2.SRE1.f) %>%
   group_by(RE, type) %>%
-  count() %>% 
+  dplyr::count() %>% 
   pivot_wider(names_from = type, values_from = n) %>%
   replace_na(list(binned = 0, predicted = 0)) %>%
   dplyr::rename(observed = binned) %>%
@@ -2106,107 +2222,514 @@ AncSR2_complete_table %>%
 
 AncSR1 functional variants (total)
 
+## SRE2 correction
+
+The SRE2 yeast strain used in the sort-seq experiments was modified from
+the original SRE2 strain to include mutations at nucleotide sites
+flanking the core SRE2 motif. This was to correct for an artifact in the
+original SRE2 strain that caused high basal fluorescence in the absence
+of DBD protein. We expected that these flanking mutations would not
+affect the binding affinity of SR DBD to the RE site; however, two lines
+of evidence suggest that the flanking mutations did in fact lower the
+affinity of the protein for the SRE2 site. First, the wild type AncSR2
+protein, which is known to bind and activate gene expression on SRE2 to
+a similar level as on SRE1 when the flanking sequence is kept constant
+(McKeown *et al., Cell* 2014; Anderson, McKeown & Thornton, *eLife*
+2015), is at the lower bound of fluorescence in our sort-seq assay,
+whereas wild type AncSR2 on SRE1 is within the dynamic range. Second, we
+used flow cytometry to measure the fluorescence for a panel of SR DBD
+variants in the ERE, SRE1, and the modified SRE2 strain, and compared
+this to *in vitro* affinity measurements for this same panel of SR DBD
+variants on the same REs, but with the flanking sequence kept constant
+(McKeown *et al., Cell* 2014; Anderson, McKeown & Thornton, *eLife*
+2015). We observed that the affinity-fluorescence relationship appears
+similar for ERE and SRE1, but is right-shifted for SRE2, such that
+fluorescence is lower than expected in SRE2 based on affinity. This is
+shown below.
+
 ``` r
-# # What fraction of the total variants with greater fluorescence than  
-# # WT AncSR2:SRE1 come from observations vs. predictions? What is the number and
-# # fraction of variants that are expected to be false positives and false
-# # negatives given the out-of-sample error observed in the cross-validation?
-# 
-# ## AncSR1
-# 
-# # proportion of predicted negatives that are false negatives in CV models
-# AncSR1.FN.PN <- sapply(1:10, function(x)
-#    AncSR1.FN[x] / 
-#      sum(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i] < AncSR2.SRE1.f))
-# # proportion of predicted positives that are false positives in CV models
-# AncSR1.FP.PP <- sapply(1:10, function(x)
-#   AncSR1.FP[x] /
-#     sum(AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i] >= AncSR2.SRE1.f))
-# 
-# AncSR1_complete_table %>%
-#   ungroup %>%
-#   summarize(observed = sum(observed), predicted = sum(predicted)) %>%
-#   mutate(total = observed + predicted,
-#          frac.pred = predicted / total,
-#          FN.exp = round(mean((length(AncSR1.missing.pred) - predicted) *
-#                                AncSR1.FN.PN)),
-#          FN.sd = round(sd((length(AncSR1.missing.pred) - predicted) *
-#                             AncSR1.FN.PN)),
-#          FP.exp = round(mean(predicted * AncSR1.FP.PP)),
-#          FP.sd = round(sd(predicted * AncSR1.FP.PP)),
-#          true.total.exp = round(mean(total +
-#                                        ((length(AncSR1.missing.pred) - predicted) *
-#                                           AncSR1.FN.PN) -
-#                                        (predicted * AncSR1.FP.PP))),
-#          true.total.sd = round(sd(total +
-#                                     ((length(AncSR1.missing.pred) - predicted) *
-#                                           AncSR1.FN.PN) -
-#                                     (predicted * AncSR1.FP.PP))),
-#          frac.missing.exp = round(mean((length(AncSR1.missing.pred) - predicted) *
-#                                          AncSR1.FN.PN / 
-#                                          (total +
-#                                             ((length(AncSR1.missing.pred) - predicted) *
-#                                                AncSR1.FN.PN) -
-#                                             (predicted * AncSR1.FP.PP))), 3),
-#          frac.missing.sd = round(sd((length(AncSR1.missing.pred) - predicted) *
-#                                       AncSR1.FN.PN / 
-#                                       (total +
-#                                          ((length(AncSR1.missing.pred) - predicted) *
-#                                             AncSR1.FN.PN) -
-#                                          (predicted * AncSR1.FP.PP))), 3),
-#          frac.FP.exp = round(mean(predicted * AncSR1.FP.PP / total), 3),
-#          frac.FP.sd = round(sd(predicted * AncSR1.FP.PP / total), 3)) %>%
-#   print()
-# 
-# ## AncSR2
-# 
-# # proportion of predicted negatives that are false negatives in CV models
-# AncSR2.FN.PN <- sapply(1:10, function(x)
-#    AncSR2.FN[x] / 
-#      sum(AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i] < AncSR2.SRE1.f))
-# # proportion of predicted positives that are false positives in CV models
-# AncSR2.FP.PP <- sapply(1:10, function(x)
-#   AncSR2.FP[x] /
-#     sum(AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i] >= AncSR2.SRE1.f))
-# 
-# AncSR2_complete_table %>%
-#   ungroup %>%
-#   summarize(observed = sum(observed), predicted = sum(predicted)) %>%
-#   mutate(total = observed + predicted,
-#          frac.pred = predicted / total,
-#          FN.exp = round(mean((length(AncSR2.missing.pred) - predicted) *
-#                                AncSR2.FN.PN)),
-#          FN.sd = round(sd((length(AncSR2.missing.pred) - predicted) *
-#                             AncSR2.FN.PN)),
-#          FP.exp = round(mean(predicted * AncSR2.FP.PP)),
-#          FP.sd = round(sd(predicted * AncSR2.FP.PP)),
-#          true.total.exp = round(mean(total +
-#                                        ((length(AncSR2.missing.pred) - predicted) *
-#                                           AncSR2.FN.PN) -
-#                                        (predicted * AncSR2.FP.PP))),
-#          true.total.sd = round(sd(total +
-#                                     ((length(AncSR2.missing.pred) - predicted) *
-#                                           AncSR2.FN.PN) -
-#                                     (predicted * AncSR2.FP.PP))),
-#          frac.missing.exp = round(mean((length(AncSR2.missing.pred) - predicted) *
-#                                          AncSR2.FN.PN / 
-#                                          (total +
-#                                             ((length(AncSR2.missing.pred) - predicted) *
-#                                                AncSR2.FN.PN) -
-#                                             (predicted * AncSR2.FP.PP))), 3),
-#          frac.missing.sd = round(sd((length(AncSR2.missing.pred) - predicted) *
-#                                       AncSR2.FN.PN / 
-#                                       (total +
-#                                          ((length(AncSR2.missing.pred) - predicted) *
-#                                             AncSR2.FN.PN) -
-#                                          (predicted * AncSR2.FP.PP))), 3),
-#          frac.FP.exp = round(mean(predicted * AncSR2.FP.PP / total), 3),
-#          frac.FP.sd = round(sd(predicted * AncSR2.FP.PP / total), 3)) %>%
-#   print()
+# read in functions for parsing flow cytometry data
+source(file.path(basedir, "scripts", "FACS_functions.R"))
+
+# extract mean GFP fluorescence from flow cytometry data on isogenic strains
+# measured on ERE, SRE1, and the modified SRE2
+fcs_files <- list.files(file.path(basedir, "data", "flow_cytometry", "SRE2_test"), 
+                        full.names = TRUE)
+iso_GFP <- sapply(fcs_files, function(x) mean(extract_GFP(x)), USE.NAMES = FALSE)
+
+# read in affinity measurements for isogenic strains measured on ERE, SRE1, and
+# unmodified SRE2
+iso_KD <- read.table(file.path(basedir, "data", "DBDvariants_KD_vals.txt"), 
+                     sep = "\t", header = TRUE)
+
+# combine data
+iso_strains <- data.frame(sample = str_extract(fcs_files, ".RE2?\\+."),
+                          meanGFP = iso_GFP) %>%
+  left_join(select(iso_KD, sample, DBD, log10_Kmac)) %>%
+  separate(sample, sep = "\\+", into = c("RE", "DBD_variant")) %>%
+  mutate(RE = map_chr(RE, ~ if(.x == "ERE") {levels(REs[[1]])[1]} 
+                      else if(.x == "SRE") {levels(REs[[1]])[2]} 
+                      else levels(REs[[1]])[3]))
+
+# fit logistic function to log10(KD) vs. fluorescence,
+# with range constrained to the range of the AncSR1 reference free model
+
+# Define maximum range of fluorescence
+AncSR1.range <- AncSR1.U - AncSR1.L
+
+# Fit curves with the same midpoint for all REs
+iso_X <- select(iso_strains, log10_Kmac)
+# KD_F_fit_1midpoint <- optim(c(AncSR1.L, mean(iso_strains$log10_Kmac), 1), 
+#                             obj_logis_iso,
+#                             X = iso_X,
+#                             y = iso_strains$meanGFP,
+#                             range = AncSR1.range)
+KD_F_fit_1midpoint <- nls(meanGFP ~ L + AncSR1.range / (1 + exp((xmid - log10_Kmac) / scal)),
+                          iso_strains, 
+                          start = c(L = AncSR1.L, 
+                                    xmid = mean(iso_strains$log10_Kmac), 
+                                    scal = 1))
+# calculate log-likelihood
+ll_1midpoint <- as.numeric(logLik(KD_F_fit_1midpoint))
+
+# Likelihood ratio test to test for significant RE effects
+KD_F_fit_2midpoint <- list()
+ll_2midpoint <- numeric(length = 3)
+for(i in 1:3) {
+  re <- unique(iso_strains$RE)[i]
+  # fit curves with an effect for one RE, and the other two have the same midpoint
+  KD_F_fit_2midpoint[[i]] <- nls(meanGFP ~ L + AncSR1.range / (1 + exp((xmid + xmid1*RE1 - log10_Kmac) / scal)),
+                                 mutate(iso_strains, RE1 = RE == re), 
+                                 start = c(L = AncSR1.L, 
+                                           xmid = mean(iso_strains$log10_Kmac), 
+                                           xmid1 = 0, scal = 1))
+  names(KD_F_fit_2midpoint)[i] <- re
+  
+  # LRT against one-midpoint model
+  ll_2midpoint[i] <- as.numeric(logLik(KD_F_fit_2midpoint[[i]]))
+  LRS <- -2 * (ll_1midpoint - ll_2midpoint[i])
+  pval <- pchisq(LRS, df = 1, lower.tail = FALSE)
+  print(paste(re, "p =", pval))
+}
 ```
 
-<!-- In the AncSR1 complete dataset (observed + inferred phenotypes for all possible variants), the total number of variants with fluorescence greater than or equal to the WT AncSR2:SRE1 variant (hereafter "functional" variants) is 189, of which 36 (19%) are inferred from the model. Based on the frequency of false positive and false negative predictions in the 10-fold CV models, the estimated number of true functional variants is $254 \pm 24$, implying that we are missing $28 \pm 5.5\%$ of functional variants in this background due to prediction error ($71 \pm 19$ variants). The estimated percentage of functional variants that are false positives is much smaller at $3.3 \pm 3.7\%$ ($6 \pm 7$ variants). -->
-<!-- For the AncSR2 complete dataset, the total number of functional variants is 3983, of which 680 (21%) are inferred from the model. The estimated number of true functional variants based on the 10-fold CV error is $4578 \pm 81$, implying that we are missing $15 \pm 1.5\%$ of functional variants due to prediction error ($675 \pm 78$ variants). The estimated percentage of false positives is $2.0 \pm 0.2\%$ ($80 \pm 9$ variants). -->
+    ## [1] "ERE (GT) p = 0.0550764442855373"
+    ## [1] "SRE1 (AA) p = 0.00576760521129481"
+    ## [1] "SRE2 (GA) p = 1.23097165530305e-07"
+
+``` r
+# fit curves with a separate midpoint for each RE
+KD_F_fit_3midpoint <- nls(meanGFP ~ L + AncSR1.range / (1 + exp((xmid + xmid1*RE1 + xmid2*RE2 - log10_Kmac) / scal)),
+                          mutate(iso_strains, RE1 = RE == "SRE1 (AA)", RE2 = RE == "SRE2 (GA)"), 
+                          start = c(L = AncSR1.L, 
+                                    xmid = mean(iso_strains$log10_Kmac), 
+                                    xmid1 = 0, xmid2 = 0, scal = 1))
+# LRT against best two-midpoint model (SRE2)
+ll_3midpoint <- as.numeric(logLik(KD_F_fit_3midpoint))
+LRS <- -2 * (max(ll_2midpoint) - ll_3midpoint)
+pval <- pchisq(LRS, df = 1, lower.tail = FALSE)
+print(paste("p = ", pval))
+```
+
+    ## [1] "p =  0.128316813061119"
+
+``` r
+# print summary of best fit model
+KD_F_fit_best <- KD_F_fit_2midpoint[[3]]
+summary(KD_F_fit_best)
+```
+
+    ## 
+    ## Formula: meanGFP ~ L + AncSR1.range/(1 + exp((xmid + xmid1 * RE1 - log10_Kmac)/scal))
+    ## 
+    ## Parameters:
+    ##       Estimate Std. Error t value Pr(>|t|)    
+    ## L     -4.70324    0.05596 -84.045  < 2e-16 ***
+    ## xmid  14.82701    0.07603 195.013  < 2e-16 ***
+    ## xmid1  0.95423    0.11892   8.024 1.11e-07 ***
+    ## scal   0.23747    0.07187   3.304  0.00354 ** 
+    ## ---
+    ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+    ## 
+    ## Residual standard error: 0.2253 on 20 degrees of freedom
+    ## 
+    ## Number of iterations to convergence: 10 
+    ## Achieved convergence tolerance: 8.454e-06
+
+``` r
+# Plot log10(KD) vs. fluorescence for best fit model (SRE2 effect).
+# Solid lines show the best-fit logistic curves with midpoints specific for 
+# ERE/SRE1 and SRE2. Dashed lines show confidence intervals for the ERE/SRE1
+# midpoint and SRE2 midpoint.
+SRE2affcoefs <- coef(KD_F_fit_best)
+SRE2affcoefsse <- summary(KD_F_fit_best)$coefficients[,2]
+ggplot(iso_strains, aes(x = log10_Kmac, y = meanGFP, color = RE)) +
+  geom_point() +
+  scale_color_manual(values = visually_distinct1[names(visually_distinct1) %in% levels(REs[[1]])[1:3]]) +
+  theme_classic() +
+  stat_function(fun = function(x, L, xmid, scal) L + AncSR1.range / (1 + exp((xmid - x) / scal)),
+                args = list(L = SRE2affcoefs[1],
+                            xmid = SRE2affcoefs[2],
+                            scal = SRE2affcoefs[4]),
+                color = "black") +
+  stat_function(fun = function(x, L, xmid, scal) L + AncSR1.range / (1 + exp((xmid - x) / scal)),
+                args = list(L = SRE2affcoefs[1],
+                            xmid = SRE2affcoefs[2] - SRE2affcoefsse[2]*1.96,
+                            scal = SRE2affcoefs[4]),
+                color = "black", linetype = "dashed") +
+  stat_function(fun = function(x, L, xmid, scal) L + AncSR1.range / (1 + exp((xmid - x) / scal)),
+                args = list(L = SRE2affcoefs[1],
+                            xmid = SRE2affcoefs[2] + SRE2affcoefsse[2]*1.96,
+                            scal = SRE2affcoefs[4]),
+                color = "black", linetype = "dashed") +
+  stat_function(fun = function(x, L, xmid, scal) L + AncSR1.range / (1 + exp((xmid - x) / scal)),
+                args = list(L = SRE2affcoefs[1],
+                            xmid = sum(SRE2affcoefs[2:3]),
+                            scal = SRE2affcoefs[4]),
+                color = visually_distinct1[names(visually_distinct1) == "SRE2 (GA)"]) +
+  stat_function(fun = function(x, L, xmid, scal) L + AncSR1.range / (1 + exp((xmid - x) / scal)),
+                args = list(L = SRE2affcoefs[1],
+                            xmid = sum(SRE2affcoefs[2:3]) + sum(SRE2affcoefsse[2:3])*1.96,
+                            scal = SRE2affcoefs[4]),
+                color = visually_distinct1[names(visually_distinct1) == "SRE2 (GA)"],
+                linetype = "dashed") +
+  stat_function(fun = function(x, L, xmid, scal) L + AncSR1.range / (1 + exp((xmid - x) / scal)),
+                args = list(L = SRE2affcoefs[1],
+                            xmid = sum(SRE2affcoefs[2:3]) - sum(SRE2affcoefsse[2:3])*1.96,
+                            scal = SRE2affcoefs[4]),
+                color = visually_distinct1[names(visually_distinct1) == "SRE2 (GA)"],
+                linetype = "dashed") +
+  labs(x = bquote(log[10](K[D]) ~ "(same flanking sequence)"), 
+       y = "Fluorescence (SRE2 modified flanking sequence)")
+```
+
+![](mutation_effects_model_fitting_files/figure-gfm/affinityfluorescence-1.png)<!-- -->
+
+The above shows that a logistic curve with one midpoint for ERE and SRE1
+and a right-shifted midpoint for SRE2 best fits the data, with dashed
+lines denoting 95% confidence intervals for the midpoints. (The
+confidence interval is wider for the SRE2 curve because it incorporates
+uncertainty in both the ERE/SRE1 midpoint and the SRE2 effect.) These
+observations suggest that the flanking mutations have an
+affinity-decreasing effect, which causes a global decrease in the
+fluorescence measured for DBD variants on SRE2 relative to what would
+have been expected without the flanking mutations.
+
+To correct for this effect, it is not enough to simply adjust all of the
+SRE2 fluorescence values up because of the nonlinear relationship
+between affinity and fluorescence. Instead, we can take advantage of the
+genetic scores inferred from our reference-free models, which account
+for this nonlinear relationship. Specifically, the effect of the
+flanking mutations on fluorescence, $\Delta F$, can be expressed either
+in terms of an effect on affinity, $\Delta\log_{10}(K_D)$, or an effect
+on genetic score $\Delta x$, *i.e.*
+
+$$
+\begin{align*}
+  \Delta F &= \left(L + \frac{R}{1 + e^{-x_{\text{WT}}}}\right) - \left(L + \frac{R}{1 + e^{-(x_{\text{WT}} + \Delta x)}}\right) \\
+  \Delta F &= \left(L + L' + \frac{R}{1 + e^{-[{\log_{10}(K_D)}_{\text{WT}} - C] / a}}\right) - \left(L + L' + \frac{R}{1 + e^{-[{\log_{10}(K_D)}_{\text{WT}} + \Delta\log_{10}(K_D) - C] / a}}\right)
+\end{align*}
+$$ where $C$ is the midpoint of the $\log_{10}(K_D)$-fluorescence curve
+for ERE and SRE1, $a$ is its steepness, $L'$ is the difference between
+the lower bound of the reference-free model and that of the
+affinity-fluorescence curve, and $x_{\text{WT}}$ and
+${\log_{10}(K_D)}_{\text{WT}}$ are the genetic score and affinity of the
+unmodified RE sequence, respectively. Setting these expressions equal to
+each other and solving for $\Delta x$, we obtain
+
+$$
+\Delta x = -\ln\left(\frac{R\left(1 + e^{-\Delta\log_{10}(K_D) / a}\right)}{L'\left(1 + e^{-\Delta\log_{10}(K_D) / a}\right) + R} - 1\right).
+$$
+
+We can thus correct for the effect of the flanking substitutions on SRE2
+library variants by taking the inferred effect on affinity, transforming
+it to a genetic score scale, and subtracting this value from the genetic
+score inferred for each SRE2 variant to infer corrected fluorescence
+values for those variants. This is done below using the inferred SRE2
+effect on affinity as well as the 95% confidence interval bounds for the
+effect.
+
+``` r
+# scale SRE2 affinity effect to genetic score scale
+z <- 1 + exp(-SRE2affcoefs[3] / SRE2affcoefs[4])
+SRE2GSeffect <- -log(AncSR1.range * z / ((SRE2affcoefs[1] - AncSR1.L) * z + AncSR1.range) - 1)
+zupper <- 1 + exp(-(SRE2affcoefs[3] + 1.96*SRE2affcoefsse[3]) / SRE2affcoefs[4])
+SRE2GSeffectupper <- -log(AncSR1.range * zupper / ((SRE2affcoefs[1] - AncSR1.L) * zupper + AncSR1.range) - 1)
+zlower <- 1 + exp(-(SRE2affcoefs[3] - 1.96*SRE2affcoefsse[3]) / SRE2affcoefs[4])
+SRE2GSeffectlower <- -log(AncSR1.range * zlower / ((SRE2affcoefs[1] - AncSR1.L) * zlower + AncSR1.range) - 1)
+
+# correct SRE2 genetic scores
+AncSR1.SRE2.observed.gs.corrected <- full.gs.final.AncSR1[AncSR1_model_data$RE == "SRE2 (GA)"] + SRE2GSeffect
+AncSR1.SRE2.missing.gs.corrected <- AncSR1.missing.gs[AncSR1_missing_data$RE == "SRE2 (GA)"] + SRE2GSeffect
+AncSR2.SRE2.observed.gs.corrected <- full.gs.final.AncSR2[AncSR2_model_data$RE == "SRE2 (GA)"] + SRE2GSeffect
+AncSR2.SRE2.missing.gs.corrected <- AncSR2.missing.gs[AncSR2_missing_data$RE == "SRE2 (GA)"] + SRE2GSeffect
+
+AncSR1.SRE2.observed.gs.corrected.upper <- full.gs.final.AncSR1[AncSR1_model_data$RE == "SRE2 (GA)"] + SRE2GSeffectupper
+AncSR1.SRE2.missing.gs.corrected.upper <- AncSR1.missing.gs[AncSR1_missing_data$RE == "SRE2 (GA)"] + SRE2GSeffectupper
+AncSR2.SRE2.observed.gs.corrected.upper <- full.gs.final.AncSR2[AncSR2_model_data$RE == "SRE2 (GA)"] + SRE2GSeffectupper
+AncSR2.SRE2.missing.gs.corrected.upper <- AncSR2.missing.gs[AncSR2_missing_data$RE == "SRE2 (GA)"] + SRE2GSeffectupper
+
+AncSR1.SRE2.observed.gs.corrected.lower <- full.gs.final.AncSR1[AncSR1_model_data$RE == "SRE2 (GA)"] + SRE2GSeffectlower
+AncSR1.SRE2.missing.gs.corrected.lower <- AncSR1.missing.gs[AncSR1_missing_data$RE == "SRE2 (GA)"] + SRE2GSeffectlower
+AncSR2.SRE2.observed.gs.corrected.lower <- full.gs.final.AncSR2[AncSR2_model_data$RE == "SRE2 (GA)"] + SRE2GSeffectlower
+AncSR2.SRE2.missing.gs.corrected.lower <- AncSR2.missing.gs[AncSR2_missing_data$RE == "SRE2 (GA)"] + SRE2GSeffectlower
+
+# correct fluorescence
+AncSR1.SRE2.observed.fluor.corrected <- logistic(AncSR1.SRE2.observed.gs.corrected,
+                                                 L = AncSR1.L, U = AncSR1.U)
+AncSR1.SRE2.missing.fluor.corrected <- logistic(AncSR1.SRE2.missing.gs.corrected,
+                                                L = AncSR1.L, U = AncSR1.U)
+AncSR2.SRE2.observed.fluor.corrected <- logistic(AncSR2.SRE2.observed.gs.corrected,
+                                                 L = AncSR2.L, U = AncSR2.U)
+AncSR2.SRE2.missing.fluor.corrected <- logistic(AncSR2.SRE2.missing.gs.corrected,
+                                                L = AncSR2.L, U = AncSR2.U)
+
+AncSR1.SRE2.observed.fluor.corrected.upper <- logistic(AncSR1.SRE2.observed.gs.corrected.upper,
+                                                 L = AncSR1.L, U = AncSR1.U)
+AncSR1.SRE2.missing.fluor.corrected.upper <- logistic(AncSR1.SRE2.missing.gs.corrected.upper,
+                                                L = AncSR1.L, U = AncSR1.U)
+AncSR2.SRE2.observed.fluor.corrected.upper <- logistic(AncSR2.SRE2.observed.gs.corrected.upper,
+                                                 L = AncSR2.L, U = AncSR2.U)
+AncSR2.SRE2.missing.fluor.corrected.upper <- logistic(AncSR2.SRE2.missing.gs.corrected.upper,
+                                                L = AncSR2.L, U = AncSR2.U)
+
+AncSR1.SRE2.observed.fluor.corrected.lower <- logistic(AncSR1.SRE2.observed.gs.corrected.lower,
+                                                 L = AncSR1.L, U = AncSR1.U)
+AncSR1.SRE2.missing.fluor.corrected.lower <- logistic(AncSR1.SRE2.missing.gs.corrected.lower,
+                                                L = AncSR1.L, U = AncSR1.U)
+AncSR2.SRE2.observed.fluor.corrected.lower <- logistic(AncSR2.SRE2.observed.gs.corrected.lower,
+                                                 L = AncSR2.L, U = AncSR2.U)
+AncSR2.SRE2.missing.fluor.corrected.lower <- logistic(AncSR2.SRE2.missing.gs.corrected.lower,
+                                                L = AncSR2.L, U = AncSR2.U)
+
+# concatenate final results
+AncSR1_complete_data_corrected <- AncSR1_model_data %>%
+  mutate(avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)", 
+                             AncSR1.SRE2.observed.fluor.corrected),
+         avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
+                                        AncSR1.SRE2.observed.fluor.corrected.upper),
+         avg_meanF_SRE2_lower = replace(avg_meanF, RE == "SRE2 (GA)",
+                                        AncSR1.SRE2.observed.fluor.corrected.lower)) %>%
+  left_join(meanF_data %>%
+              dplyr::filter(type == "exp", bg == "AncSR1") %>%
+              select(AA_var, RE, meanF_REP1:meanF_REP4, sd_meanF, p:sig),
+            by = c("AA_var", "RE")) %>%
+  bind_rows(mutate(AncSR1_missing_data, type = "predicted", 
+                   avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)",
+                                       AncSR1.SRE2.missing.fluor.corrected),
+                   avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
+                                                  AncSR1.SRE2.missing.fluor.corrected.upper),
+                   avg_meanF_SRE2_lower = replace(avg_meanF, RE == "SRE2 (GA)",
+                                                  AncSR1.SRE2.missing.fluor.corrected.lower))) %>%
+  arrange(AA_var, RE)
+AncSR2_complete_data_corrected <- AncSR2_model_data %>%
+  mutate(avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)", 
+                             AncSR2.SRE2.observed.fluor.corrected),
+         avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
+                                        AncSR2.SRE2.observed.fluor.corrected.upper),
+         avg_meanF_SRE2_lower = replace(avg_meanF, RE == "SRE2 (GA)",
+                                        AncSR2.SRE2.observed.fluor.corrected.lower)) %>%
+  left_join(meanF_data %>%
+              dplyr::filter(type == "exp", bg == "AncSR2") %>%
+              select(AA_var, RE, meanF_REP1:meanF_REP4, sd_meanF, p:sig),
+            by = c("AA_var", "RE")) %>%
+  bind_rows(mutate(AncSR2_missing_data, type = "predicted", 
+                   avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)",
+                                       AncSR2.SRE2.missing.fluor.corrected),
+                   avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
+                                                  AncSR2.SRE2.missing.fluor.corrected.upper),
+                   avg_meanF_SRE2_lower = replace(avg_meanF, RE == "SRE2 (GA)",
+                                                  AncSR2.SRE2.missing.fluor.corrected.lower))) %>%
+  arrange(AA_var, RE)
+
+# check old vs. new SRE2 fluorescence values
+data.frame(old = AncSR1_complete_data %>% 
+             dplyr::filter(RE == "SRE2 (GA)") %>% 
+             pull(avg_meanF),
+           new = AncSR1_complete_data_corrected %>% 
+             dplyr::filter(RE == "SRE2 (GA)") %>% 
+             pull(avg_meanF)) %>%
+  ggplot(aes(x = old, y = new)) +
+  geom_bin_2d() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_hline(yintercept = AncSR1.L) +
+  scale_fill_viridis(trans = "log10") +
+  labs(title = "AncSR1", 
+       x = "original SRE2 fluorescence", 
+       y = "corrected SRE2 fluorescence") +
+  theme_classic() +
+  theme(text = element_text(size = 16))
+```
+
+![](mutation_effects_model_fitting_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+
+``` r
+data.frame(old = AncSR2_complete_data %>% 
+             dplyr::filter(RE == "SRE2 (GA)") %>% 
+             pull(avg_meanF),
+           new = AncSR2_complete_data_corrected %>% 
+             dplyr::filter(RE == "SRE2 (GA)") %>% 
+             pull(avg_meanF)) %>%
+  ggplot(aes(x = old, y = new)) +
+  geom_bin_2d() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_hline(yintercept = AncSR2.L) +
+  scale_fill_viridis(trans = "log10") +
+  labs(title = "AncSR2", 
+       x = "original SRE2 fluorescence", 
+       y = "corrected SRE2 fluorescence") +
+  theme_classic() +
+  theme(text = element_text(size = 16))
+```
+
+![](mutation_effects_model_fitting_files/figure-gfm/unnamed-chunk-1-2.png)<!-- -->
+
+``` r
+# How many variants are above AncSR2-WT:SRE1 threshold on SRE2 with correction?
+AncSR1_complete_data_corrected %>%
+  group_by(RE) %>%
+  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f),
+            nupper = sum(avg_meanF_SRE2_upper >= AncSR2.SRE1.f),
+            nlower = sum(avg_meanF_SRE2_lower >= AncSR2.SRE1.f))
+```
+
+    ## # A tibble: 16 × 4
+    ##    RE            n nupper nlower
+    ##    <chr>     <int>  <int>  <int>
+    ##  1 AC           14     14     14
+    ##  2 AG            0      0      0
+    ##  3 AT           35     35     35
+    ##  4 CA           13     13     13
+    ##  5 CC            0      0      0
+    ##  6 CG            2      2      2
+    ##  7 CT            0      0      0
+    ##  8 ERE (GT)     72     72     72
+    ##  9 GC            0      0      0
+    ## 10 GG            4      4      4
+    ## 11 SRE1 (AA)    34     34     34
+    ## 12 SRE2 (GA)    11     15      7
+    ## 13 TA           11     11     11
+    ## 14 TC            0      0      0
+    ## 15 TG            0      0      0
+    ## 16 TT            3      3      3
+
+``` r
+AncSR1_complete_data %>%
+  group_by(RE) %>%
+  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f))
+```
+
+    ## # A tibble: 16 × 2
+    ##    RE            n
+    ##    <chr>     <int>
+    ##  1 AC           14
+    ##  2 AG            0
+    ##  3 AT           35
+    ##  4 CA           13
+    ##  5 CC            0
+    ##  6 CG            2
+    ##  7 CT            0
+    ##  8 ERE (GT)     72
+    ##  9 GC            0
+    ## 10 GG            4
+    ## 11 SRE1 (AA)    34
+    ## 12 SRE2 (GA)     1
+    ## 13 TA           11
+    ## 14 TC            0
+    ## 15 TG            0
+    ## 16 TT            3
+
+``` r
+AncSR2_complete_data_corrected %>%
+  group_by(RE) %>%
+  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f),
+            nupper = sum(avg_meanF_SRE2_upper >= AncSR2.SRE1.f),
+            nlower = sum(avg_meanF_SRE2_lower >= AncSR2.SRE1.f))
+```
+
+    ## # A tibble: 16 × 4
+    ##    RE            n nupper nlower
+    ##    <chr>     <int>  <int>  <int>
+    ##  1 AC          213    213    213
+    ##  2 AG          190    190    190
+    ##  3 AT          417    417    417
+    ##  4 CA          556    556    556
+    ##  5 CC            3      3      3
+    ##  6 CG           97     97     97
+    ##  7 CT          105    105    105
+    ##  8 ERE (GT)    183    183    183
+    ##  9 GC           99     99     99
+    ## 10 GG           25     25     25
+    ## 11 SRE1 (AA)  1208   1208   1208
+    ## 12 SRE2 (GA)   542    571    491
+    ## 13 TA          413    413    413
+    ## 14 TC            7      7      7
+    ## 15 TG           50     50     50
+    ## 16 TT          172    172    172
+
+``` r
+AncSR2_complete_data %>%
+  group_by(RE) %>%
+  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f))
+```
+
+    ## # A tibble: 16 × 2
+    ##    RE            n
+    ##    <chr>     <int>
+    ##  1 AC          213
+    ##  2 AG          190
+    ##  3 AT          417
+    ##  4 CA          556
+    ##  5 CC            3
+    ##  6 CG           97
+    ##  7 CT          105
+    ##  8 ERE (GT)    183
+    ##  9 GC           99
+    ## 10 GG           25
+    ## 11 SRE1 (AA)  1208
+    ## 12 SRE2 (GA)   245
+    ## 13 TA          413
+    ## 14 TC            7
+    ## 15 TG           50
+    ## 16 TT          172
+
+``` r
+# comparing AncSR2-WT on SRE1 and SRE2 with correction
+AncSR2_complete_data_corrected %>%
+  dplyr::filter(AA_var == "GSKV", RE %in% c("SRE1 (AA)", "SRE2 (GA)"))
+```
+
+    ##   AA_var        RE avg_meanF active   type avg_meanF_SRE2_upper
+    ## 1   GSKV SRE1 (AA) -3.978001   TRUE binned            -3.978001
+    ## 2   GSKV SRE2 (GA) -4.283700  FALSE binned            -4.268800
+    ##   avg_meanF_SRE2_lower meanF_REP1 meanF_REP2 meanF_REP3 meanF_REP4    sd_meanF
+    ## 1            -3.978001  -3.983844  -3.918519  -4.031640         NA 0.056786297
+    ## 2            -4.313878  -4.459648         NA  -4.460512         NA 0.000611014
+    ##          p      padj             sig
+    ## 1 0.000000 0.0000000     significant
+    ## 2 0.606914 0.9635849 not significant
+
+``` r
+AncSR2_complete_data %>%
+  dplyr::filter(AA_var == "GSKV", RE %in% c("SRE1 (AA)", "SRE2 (GA)"))
+```
+
+    ##   AA_var        RE avg_meanF active   type meanF_REP1 meanF_REP2 meanF_REP3
+    ## 1   GSKV SRE1 (AA) -3.978001   TRUE binned  -3.983844  -3.918519  -4.031640
+    ## 2   GSKV SRE2 (GA) -4.460080  FALSE binned  -4.459648         NA  -4.460512
+    ##      sd_meanF
+    ## 1 0.056786297
+    ## 2 0.000611014
+
+``` r
+# export corrected datasets
+write.csv(AncSR1_complete_data_corrected, 
+          file = gzfile(file.path(results_dir, "AncSR1_complete_data_corrected.csv.gz")),
+          row.names = FALSE)
+write.csv(AncSR2_complete_data_corrected, 
+          file = gzfile(file.path(results_dir, "AncSR2_complete_data_corrected.csv.gz")),
+          row.names = FALSE)
+```
 
 ## Bias correction
 
