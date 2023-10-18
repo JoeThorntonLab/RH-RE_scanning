@@ -23,6 +23,7 @@ Sort bin populations were then exported as FCS files for analysis here.
 require("knitr")
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(fig.width=5, fig.height=5)
+basedir <- file.path("..", "..")
 
 # check for packages and install any that are missing
 packages <- c("flowCore", "dplyr", "ggplot2")
@@ -32,45 +33,27 @@ if(any(installed_packages == F)) {
 }
 # load packages
 invisible(lapply(packages, library, character.only=TRUE))
+```
 
+    ## Warning: package 'flowCore' was built under R version 4.2.1
+
+``` r
 # make output directory
-if(!dir.exists(file.path("..", "results", "sort_bin_fluorescence"))) {
-  dir.create(file.path("..", "results", "sort_bin_fluorescence"))
+if(!dir.exists(file.path(basedir, "results", "sort_bin_fluorescence"))) {
+  dir.create(file.path(basedir, "results", "sort_bin_fluorescence"))
 }
 ```
 
 ## Functions
 
-First, we create a function to extract normalized GFP fluorescence
-values from FCS files. GFP fluorescence is recorded in the FITC channel.
-We assume FSC-A to be proportional to the area of the cross section of a
-cell. We normalize GFP by cell volume by taking
-![\textrm{FITC-A} / \textrm{FSC-A}^{1.5}](https://latex.codecogs.com/png.image?%5Cdpi%7B110%7D&space;%5Cbg_white&space;%5Ctextrm%7BFITC-A%7D%20%2F%20%5Ctextrm%7BFSC-A%7D%5E%7B1.5%7D "\textrm{FITC-A} / \textrm{FSC-A}^{1.5}").
-The log-10 of this value our measure of fluorescence.
+Read in functions for extracting normalized GFP fluorescence values from
+FCS files. These read in data and normalize GFP by cell volume by taking
+$\textrm{FITC-A} / \textrm{FSC-A}^{1.5}$, where FSC-A is assumed to be
+proportional to the area of the cross section of a cell. The log-10 of
+this value is the mean fluorescence output.
 
 ``` r
-extract_GFP <- function(fcs_dir, GFPfluor = 'FITC', norm_method = 1.5) {
-  
-  # extract FCS data
-  fcs <- flowCore::read.FCS(fcs_dir)
-  data <- flowCore::exprs(fcs)
-  
-  # extract GFP fluroescence from the FITC-A channel
-  GFP <- data[, grepl(GFPfluor, colnames(data)) & grepl('-A', colnames(data))]
-  FSC_A <- data[, 'FSC-A']
-  
-  # remove cells that are at the upper and lower bounds of the FSC-A range
-  filter_out <- (FSC_A == 2 ^ 18 - 1) | (GFP <= 0)
-  GFP <- GFP[!filter_out]
-  FSC_A <- FSC_A[!filter_out]
-  
-  # normalize by FSC_A^norm_method
-  # norm_method=1.5 normalizes GFP to cell volume (default)
-  # norm_method=1 normalizes GFP to cell surface area
-  norm_GFP <- log(GFP / FSC_A^norm_method, 10)
-  
-  return(norm_GFP)
-}
+source(file.path(basedir, "scripts", "FACS_functions.R"))
 ```
 
 ## Calculating mean fluorescence
@@ -84,7 +67,7 @@ fcs_files <- list()  # to store file names for each replicate
 
 for(i in 1:4) {  # for each sorting replicate
   #list fcs files
-  dir <- paste0(file.path("..", "data", "flow_cytometry", "binned_sort_rep"), i)
+  dir <- paste0(file.path(basedir, "data", "flow_cytometry", "binned_sort_rep"), i)
   fcs_files[[i]] <- list.files(dir, full.names = TRUE, pattern = ".+fcs$")
   
   # sample names
@@ -104,7 +87,9 @@ for(i in 1:4) {
   samples <- unique(samples)
   
   # create data frame to store values
-  meanF[[i]] <- data.frame(sample = samples, bin1 = NA, bin2 = NA, bin3 = NA, bin4 = NA, total = NA)
+  meanF[[i]] <- data.frame(sample = samples, 
+                           bin1 = NA, bin2 = NA, bin3 = NA, bin4 = NA, 
+                           total = NA)
   
   # calculate meanF from each fcs file
   for(j in 1:length(fcs_files[[i]])) {
@@ -113,26 +98,28 @@ for(i in 1:4) {
     sample_bin <- unlist(strsplit(names(fcs_files[[i]])[j], "_bin "))
     
     # extract normalized GFP values
-    GFP <- extract_GFP(fcs_files[[i]][j])
+    GFP <- extract_GFP(fcs_files[[i]][j], mCherryfluor = NULL)
     
     # concatenate GFP values for current sample
     if(sample_bin[2] == "1") GFP_total <- GFP
     else GFP_total <- c(GFP_total, GFP)
     
     # add mean bin GFP to data frame
-    meanF[[i]][meanF[[i]]$sample == sample_bin[1], paste0("bin", sample_bin[2])] <- mean(GFP)
+    meanF[[i]][meanF[[i]]$sample == sample_bin[1], 
+               paste0("bin", sample_bin[2])] <- mean(GFP)
     
     # add mean GFP across bins to data frame
-    if(sample_bin[2] == 4) meanF[[i]][meanF[[i]]$sample == sample_bin[1], "total"] <- mean(GFP_total)
+    if(sample_bin[2] == 4) 
+      meanF[[i]][meanF[[i]]$sample == sample_bin[1], "total"] <- mean(GFP_total)
   }
 }
 
 # create data frame from list with column for replicate
 meanF <- bind_rows(meanF, .id = "replicate")
 
-
 # write results to a table
-write.table(meanF, file.path("..", "results", "sort_bin_fluorescence", "binned_sort_FACS_fluorescence.txt"), 
+write.table(meanF, file.path(basedir, "results", "sort_bin_fluorescence", 
+                             "binned_sort_FACS_fluorescence.txt"), 
             sep='\t', row.names = FALSE)
 ```
 
