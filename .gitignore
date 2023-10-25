@@ -1,0 +1,13 @@
+*.RData
+scripts/prelim_analyses/*
+scripts/genotype_phenotype_distributions/*
+scripts/phenotype_frequency_distributions_SRE2_corrected/*
+scripts/phenotype_frequency_distributions_final/*
+scripts/mutation_effects_model/*
+notebooks/prelim_analyses/*
+notebooks/phenotype_frequency_distributions_SRE2_corrected/*
+results/mutation_effects_model/*.rda
+results/prelim_analyses/*
+results/phenotype_frequency_distributions_SRE2_corrected/*
+figures/*
+
