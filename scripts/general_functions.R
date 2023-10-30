@@ -30,6 +30,14 @@ REs[[5]] <- factor(REs[[1]],
                             "CC", "TC", "GC", "AC",
                             "ERE (GT)", "TT", "CT", "AT",
                             "TG", "GG", "AG", "CG"))
+REs[[6]] <- factor(c("SRE (AA)", "GA", "ERE (GT)", "AC", 
+                     "AG", "AT", "CA", "CC", 
+                     "CG", "CT", "GC", "GG", 
+                     "TA", "TC", "TG", "TT"), 
+                   levels=c("ERE (GT)", "SRE (AA)", "AC", "AG", 
+                            "AT", "CA", "CC", "CG", 
+                            "CT", "GA", "GC", "GG", 
+                            "TA", "TC", "TG", "TT"))
 
 # convert REBC number to RE variant
 REBC_to_RE <- function(REBC, levels=1) {
@@ -96,7 +104,7 @@ log10plus1 <- scales::trans_new(name = "log10plus1",
 # get colors for ancestral backgrounds
 # bg: character vector of ancestral backgrounds
 bg_color <- function(bg = c("AncSR1", "AncSR2")) {
-  colors <- list(AncSR1 = "#5E0DEC", AncSR2 = "#A2CB5B")
+  colors <- list(AncSR1 = "#5E0DEC", AncSR2 = "#9bec0d")
   return(sapply(bg, function(x) colors[[x]]))
 }
 
