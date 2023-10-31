@@ -1,7 +1,7 @@
 #===============================================
 # Evolutionary simulations on empirical GP maps
 #===============================================
-# Last modified: Sept 03, 2023
+# Last modified: Sept 28, 2023
 #
 # Functions to build, simulate and work with discrete Markov processes on RH-RE DMS data
 
@@ -275,8 +275,7 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,type=1,no
   # nodes = a vector with vertex character names or data.frame (see argument 'node_attributes')
   # build_mat = logical value to indicate whether to generate adjacency matrix (default: TRUE)
   # adj_mat = if build_mat=FALSE, then pass the corresponding adjacency matrix to generate the network (default: NULL)
-  # type: specify how to build the adjacency matrix. 1 - simple link through genetic code; 2 - fraction
-    # of codons; 3 - mutational paths (default: 1)
+  # type: specify how to build the adjacency matrix. See options for 'build_mutation_matrix' (default: 1)
   # node_attributes = logical value to indicate whether the nodes contain annotations. If TRUE 'nodes' should be a data frame containing
     # the attrbitues per node (each column contains a node attribute). This option is mostly for plotting the network, so only undirected 
     # networks will be built. Can also work with build_mat=TRUE/FALSE.
@@ -300,7 +299,7 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,type=1,no
     }
     else if(type == 1 || type == 5){
       if(node_attributes){
-        links <- graph.adjacency(adj_mat,mode = "undirected")
+        links <- graph.adjacency(adj_mat,weighted = "1")
         edges <- get.edgelist(links) # generate edgelist from matrix
         net <- graph_from_data_frame(d=edges, vertices=nodes, directed=F) # network with annotations per node
       }
@@ -338,7 +337,7 @@ get_phenotype <- function(aa_var,Bg,pheno_table,phenotype="mean",complex=FALSE){
   # complex = whether to extract phenotypes of prot-DNA complexes (default: FALSE)
   
   # check inconsistent parameters
-  if(complex & !("complex" %in% colnames(pheno_table))){
+  if(complex && !("complex" %in% colnames(pheno_table))){
     stop("The phenotypic table provided does not include prot-DNA complexes")
   }
 
@@ -687,6 +686,8 @@ extract_main_ntwrk <- function(graph,tr_mat,nodes=FALSE){
   # tr_mat = a probability transition matrix
   # nodes = logical value to indicate whether to return the nodes of the main sub-network (filtered matrix)
   
+  graph = as.undirected(graph)
+
   subnetworks <- components(graph,mode="weak")
   main_net <- which(subnetworks$csize==max(subnetworks$csize)) # index of the biggest sub-network
   genotypes_main <- names(subnetworks$membership[which(subnetworks$membership==main_net)]) # genotypes of the main sub-network
@@ -766,23 +767,25 @@ simulate_markov_chain <- function(states_0,tr_mat,n_steps,freqs_states_0=NULL){
 }
 
 # Compute probability distribution of functional variation (PDFV) accessible to a focal node(s).
-get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FALSE,complex=FALSE){
+get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=phenotypes_tbl,specific=FALSE,complex=FALSE,graph=NULL){
   # state_freqs = a vector of state frequencies after N steps of a discrete Markov chain (output of 'simulate_markov_chain' function) (default: NULL)
   # type = a string indicating how the PDFV should be computed:
-      # "network" = PDFV is proportional to the number of genotypes in the entire network (default)
-      # "local network" = PDFV is proportional to the number of *accessible* genotypes
+      # "network" = PDFV is proportional to the number of genotypes in the entire network
+      # "main network" = PDFV is proportional to the number of genotypes in the main component of the network
       # "simulated mc" = PDFV is computed according to the probabilities from the 'state_freqs' vector.
   # Bg = a string indicating the DBD background ("AncSR1" or "AncSR2")
   # model = a string indicating the name of model (default: NA)
+  # pheno_tbl = table with annotated phenotypes per variant
   # specific = logical argument to indicate whether to compute PDFV using specific genotypes (TRUE) or including promiscuous (FALSE) (default: FALSE).
   # complex = a logical argument to indicate whether PDFV is to be computed for prot-DNA complexes
+  # graph = a genotype network (igraph object)
 
   # Check for inconsistent parameters
   if(!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg)){
     stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
   }
-  if(is.null(type) || !(type %in% c("network", "local network","simulated mc"))){
-    stop("Select the type of PDFV to compute: 'network', 'local network', or 'simulated mc'")
+  if(is.null(type) || !(type %in% c("network", "main network","simulated mc"))){
+    stop("Select the type of PDFV to compute: 'network', 'main network', or 'simulated mc'")
   }
   if(is.null(state_freqs) && (type=="local network" || type=="simulated mc")){
     stop("Provide a vector of state frequencies after N steps of a discrete Markov chain")
@@ -790,22 +793,25 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
   if(type=="network" && !is.null(state_freqs)){
     message("Ignoring vector of frequencies...")
   }
-  if(complex & !("complex" %in% colnames(phenotypes_tbl))){
+  if(complex & !("complex" %in% colnames(pheno_tbl))){
     stop("The phenotypic table does not contain prot-DNA complexes")
+  }
+  if(type == "main network" && is.null(graph)){
+    stop("Need to provide a graph to extract the main sub-component")
   }
   
   if(type=="network"){
     # Compute the expected PDFV as the fraction of genotypes encoding each function in the network.
     if(specific){
       # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
-      phenotypes_tbl %>% ungroup() %>% filter(bg==Bg) %>%
+      pheno_tbl %>% ungroup() %>% filter(bg==Bg) %>%
         reframe(RE =  REs[[2]],
                 count = table(factor(specificity,levels=REs[[2]])),
                 Norm_F_prob = count/sum(count),
                 model=model) %>% select(RE,Norm_F_prob,model)
     }
     else{
-      phenotypes_tbl %>% ungroup() %>% filter(bg==Bg) %>% 
+      pheno_tbl %>% ungroup() %>% filter(bg==Bg) %>% 
         unnest(cols = c(bound_REs)) %>% 
         reframe(RE =  REs[[1]],
                 count = table(factor(bound_REs,levels=REs[[1]])),
@@ -813,49 +819,39 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
                 model=model) %>% select(RE,Norm_F_prob,model)
     }
   }
-  else if(type=="local network"){
-    # Compute the expected PDFV as the fraction of accessible genotypes encoding each function.
+  else if(type=="main network"){
+    # Compute the expected PDFV as the fraction of genotypes encoding each function in the main network
     
-    # Accessible RH states after N steps of a markov chain
-    acc_states <- state_freqs[state_freqs>0]
+    # Extract genotypes from main network
+    net_vars <- extract_main_ntwrk(graph=graph,tr_mat=NULL,nodes=TRUE)
     
     if(complex){
-    # Compute PDFV from prot-DNA complexes
-      if(specific){
-      # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
-        data.frame(complex=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
-          reframe(RE =  REs[[2]],
-                  count = table(factor(specificity,levels=REs[[2]])),
-                  Norm_F_prob = count/sum(count),
-                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
-      }
-      else{
-      # Combine specific and promiscuous genotypes 
-        data.frame(complex=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
+      # Compute PDFV from prot-DNA complexes
+      pheno_tbl %>% ungroup() %>% filter(bg == Bg & complex %in% net_vars) %>% 
           unnest(cols = c(bound_REs)) %>% 
           reframe(RE =  REs[[1]],
                   count = table(factor(bound_REs,levels=REs[[1]])),
                   Norm_F_prob = count/sum(count),
-                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
-      }
+                  model=model) %>% select(RE,Norm_F_prob,model)
     }
     else{
+      # Compute PDFV from protein variants
       if(specific){
-      # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
-        data.frame(AA_var=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
-          reframe(RE =  REs[[2]],
-                  count = table(factor(specificity,levels=REs[[2]])),
-                  Norm_F_prob = count/sum(count),
-                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+        # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
+        pheno_tbl %>% ungroup() %>% filter(bg == Bg & AA_var %in% net_vars) %>% 
+        reframe(RE =  REs[[2]],
+                count = table(factor(specificity,levels=REs[[2]])),
+                Norm_F_prob = count/sum(count),
+                model=model) %>% select(RE,Norm_F_prob,model)
       }
       else{
       # Combine specific and promiscuous genotypes 
-        data.frame(AA_var=names(acc_states),bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
-          unnest(cols = c(bound_REs)) %>% 
-          reframe(RE =  REs[[1]],
-                  count = table(factor(bound_REs,levels=REs[[1]])),
-                  Norm_F_prob = count/sum(count),
-                  model = "local GPmap") %>% select(RE,Norm_F_prob,model)
+        pheno_tbl %>% ungroup() %>% filter(bg == Bg & AA_var %in% net_vars) %>% 
+        unnest(cols = c(bound_REs)) %>% 
+        reframe(RE =  REs[[1]],
+                count = table(factor(bound_REs,levels=REs[[1]])),
+                Norm_F_prob = count/sum(count),
+                model=model) %>% select(RE,Norm_F_prob,model)
       }
     }
   }
@@ -869,7 +865,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
     # Compute PDFV from prot-DNA complexes
       if(specific){
       # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
-        data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
+        data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("complex","bg")) %>%
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
           # Report final normalized probability for all 16 phenotypes.
           group_by(specificity) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
@@ -879,7 +875,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
       }
       else{
       # Combine specific and promiscuous genotypes 
-        data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("complex","bg")) %>%
+        data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("complex","bg")) %>%
           unnest(cols = c(bound_REs)) %>% 
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
           # Report final normalized probability for all 16 phenotypes.
@@ -892,7 +888,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
     else{
       if(specific){
       # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
-        data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
+        data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("AA_var","bg")) %>%
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
           # Report final normalized probability for all 16 phenotypes.
           group_by(specificity) %>% reframe(F_prob = sum(prob)) %>% mutate(Norm_F_prob = F_prob/sum(F_prob)) %>%
@@ -902,7 +898,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,specific=FAL
       }
       else{
       # Combine specific and promiscuous genotypes 
-        data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,phenotypes_tbl,by=c("AA_var","bg")) %>%
+        data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("AA_var","bg")) %>%
           unnest(cols = c(bound_REs)) %>% 
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
           # Report final normalized probability for all 16 phenotypes.
@@ -1081,7 +1077,7 @@ circular_PDFV_v2 <- function(data,cols = "#00AFBB",title = NULL,legend=T,fill=T,
 }
 
 # Compute the probability of all pairwise phenotypic transitions given a number of mutation steps.
-phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_mat,bg,n_steps,specific=F,normalize=T,complex=FALSE){
+phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_mat,bg,n_steps,specific=F,normalize=T,complex=FALSE,graph){
   # from, to = vectors containing the names of the DNA phenotypes to compute the trajectory (default: all REs)
   # from_nodes = alternative vector to 'from' which, instead of DNA phenotypes, includes the vector of starting genotypes.
   # tr_mat = a probability transition matrix
@@ -1106,6 +1102,9 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
   }
   if(is.null(n_steps) || n_steps==0){
     stop("Provide a correct number of steps to run the markov chain (n_steps > 0)")
+  }
+  if(is.null(graph)){
+    stop("Need to provide a genotype network")
   }
   
   if(!is.null(from_nodes) & complex==FALSE){
@@ -1152,11 +1151,13 @@ phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_
       # extract amino acid variants from the ith neutral network 
       phenotype_vars <- phenotypes_tbl %>% filter(complex %in% states) %>%
           filter(bg == bg & specificity == i) %>% pull(complex)
+      phenotype_vars <- phenotype_vars[phenotype_vars %in% extract_main_ntwrk(graph,tr_mat=NULL,nodes = T)]
     }
     else{
       # extract amino acid variants from the ith neutral network 
       phenotype_vars <- phenotypes_tbl %>% filter(AA_var %in% states) %>%
           filter(bg == bg & specificity == i) %>% pull(AA_var)
+      phenotype_vars <- phenotype_vars[phenotype_vars %in% extract_main_ntwrk(graph,tr_mat=NULL,nodes = T)]
     }
     
     # if specific genotypes are not part of the main network, or no specific genotypes, continue:
@@ -1210,8 +1211,8 @@ pairwise_neutral_network_proximity <- function(n_ntwrk1,n_ntwrk2,Bg,graph,type=1
     # Compute fraction overlap due to promiscuous genotypes: AnB/AuB
 
     # Extract genotypes from each neutral network: all binders
-    all_vars_ntwrk1 <- unique(pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk1) %>% pull(AA_var))
-    all_vars_ntwrk2 <- unique(pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk2) %>% pull(AA_var))
+    all_vars_ntwrk1 <- unique(pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk1 & bg == Bg) %>% pull(AA_var))
+    all_vars_ntwrk2 <- unique(pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk2 & bg == Bg) %>% pull(AA_var))
 
     # Filter variants to retain those present in main component genotype network
     net_vars <- extract_main_ntwrk(graph=graph,tr_mat=NULL,nodes=TRUE)
@@ -1247,17 +1248,10 @@ pairwise_neutral_network_proximity <- function(n_ntwrk1,n_ntwrk2,Bg,graph,type=1
     # Check that neutral networks are encoded by at least one genotype 
     if(!identical(vars_ntwrk1, character(0)) && !identical(vars_ntwrk2, character(0))){
       # Compute all direct links
-      # Create all variant combinations, but only keep unique comparisons: (r+n-1)!/(r!*(n-1)!)        
-      if(complex){
-        tmp <- unique(t(apply(expand.grid(vars_ntwrk1,vars_ntwrk2), 1, sort))) %>% as.data.frame(.) %>%
-          mutate(link = map2_int(as.character(.[,1]),as.character(.[,2]),connect_complex),
-                 link = ifelse(link > 0,1,0))
-      }
-      else{
-        tmp <- unique(t(apply(expand.grid(vars_ntwrk1,vars_ntwrk2), 1, sort))) %>% as.data.frame(.) %>%
-          mutate(link = map2_int(as.character(.[,1]),as.character(.[,2]),connect_aa_variants))
-      }
-      prox <- sum(tmp$link)
+      tmp1 <- get.data.frame(graph) %>% filter(from %in% vars_ntwrk1 & to %in% vars_ntwrk2)
+      tmp2 <- get.data.frame(graph) %>% filter(from %in% vars_ntwrk2 & to %in% vars_ntwrk1)
+
+      prox <- dim(tmp1)[1] + dim(tmp2)[1]
     }
   }
   return(prox) 
@@ -1329,3 +1323,44 @@ simulate_GPmap <- function(graph,type=1,which="net",cores=1,seed = NULL,n_sample
   else if(which == "both") res <- list(tmp_net,adj_mat)
   return(res)
 }
+
+# Function to check whether phenotype is in encoded by at least one variant
+is.encoded <- function(RE,graph,pheno_df,Bg,complex=FALSE){
+  # extract binders
+  if(complex) vars_RE<- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(complex)
+  else vars_RE <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == RE & bg == Bg) %>% pull(AA_var)
+
+  return(!identical(vars_RE, character(0)))
+}
+
+# Function to check whether phenotype is in main network
+is.in.ntwrk <- function(RE,graph,pheno_df,Bg,specific=FALSE,complex=FALSE){
+  # genotypes in main component genotype network
+  net_vars <- extract_main_ntwrk(graph=graph,tr_mat=NULL,nodes=TRUE)
+
+  # extract binders
+  if(complex) vars_RE<- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(complex)
+  else{
+    if(specific){
+      vars_RE <- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(AA_var)
+    }
+    else vars_RE <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == RE & bg == Bg) %>% pull(AA_var)
+  }
+
+  #filter variants to those present in the main network
+  vars_RE <- vars_RE[vars_RE %in% net_vars]
+
+  return(!identical(vars_RE, character(0)))
+}
+
+# Function to check whether phenotype is in bound specifically (for protein netwrok)
+is.bound.specific <- function(RE,graph,pheno_df,Bg){
+  # extract specific binders
+  vars_RE <- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(AA_var)
+
+  return(!identical(vars_RE, character(0)))
+}
+
+
+
+
