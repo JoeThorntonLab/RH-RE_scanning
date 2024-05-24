@@ -11,25 +11,21 @@ editor_options:
 require("knitr")
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(fig.width=5, fig.height=5, warning = FALSE, 
-                      message = FALSE, purl = TRUE)
+                      message = FALSE)
 basedir <- file.path("..", "..")
 
 # check for packages and install any that are missing
-packages <- c("tidyr", "ggplot2", "Matrix", "stringr", "tibble", "purrr",
+packages <- c("tidyr", "ggplot2", "Matrix", "stringr", "tibble", "purrr", "tune", 
               "MASS", "patchwork", "viridis", "lemon", "ggsignif", "dunn.test", 
-              "doParallel", "ggpattern", "ggseqlogo", "ggalluvial", "ggrepel",
+              "doParallel", "ggseqlogo", "ggalluvial", "ggrepel",
               "gplots", "Biostrings", "igraph", "forcats", "magrittr", "scales", 
-              "dplyr")
+              "dplyr", "onls")
 bioconductor_packages <- c()
 installed_packages <- packages %in% rownames(installed.packages())
 installed_bioc_packages <- bioconductor_packages %in% 
   rownames(installed.packages())
 
-# install packages if running locally (purl = FALSE)
-if(any(installed_packages == F)) {
-  if(!opts_chunk$get()$purl) install.packages(packages[!installed_packages])
-}
-
+install.packages(packages[!installed_packages])
 if(any(installed_bioc_packages == F)) {
   if(!require("BiocManager", quietly = T)) install.packages("BiocManager")
   BiocManager::install(bioconductor_packages[!installed_bioc_packages])
@@ -61,17 +57,16 @@ This notebook classifies variants as functional vs. nonfunctional based on their
 
 2. "Debulk" variants are those whose fluorescence is inferred null due to being observed at high frequency in the first-round (debulk) sort-seq experiment and absent in the binned sort-seq experiment (`data_cleaning.Rmd`).
 
-3. "Predicted" variants are those which not observed in either the binned or debulk datasets, whose fluorescence is inferred from the reference free model (`mutation_effects_model_fitting.Rmd`).
+3. "Predicted" variants are those which not observed in either the binned or debulk datasets, whose fluorescence is inferred from the genetic effects model (`mutation_effects_model_fitting.Rmd`).
 
-4. SRE2 variants, whose original fluorescence came from any of the three sources above. These original fluorescence values have been corrected to account for a general affinity-decreasing effect of the SRE2 background, which is different from that of the other 15 strains (`mutation_effects_model_fitting.Rmd`). (The CC RE strain has yet a different background which likely also has an effect on affinity, but we are unable to estimate the size of this effect. The unmodified fluorescence values are thus used for this strain.)
+4. GARE variants, whose original fluorescence came from any of the three sources above. These original fluorescence values have been corrected to account for a general affinity-decreasing effect of the GARE background, which is different from that of the other 15 strains (`mutation_effects_model_fitting.Rmd`). (The CCRE strain has yet a different background which likely also has an effect on affinity, but we are unable to estimate the size of this effect. The unmodified fluorescence values are thus used for this strain.)
 
 ## Loading data and functions
 
 ```{r load, purl = T}
 # load general functions
 source(file.path(basedir, "scripts", "general_functions.R"))
-
-# reading in cleaned data from binned sort experiment
+source(file.path(basedir, "scripts", "onlsmod.R"))
 
 # reading in complete fluorescence data
 AncSR1_meanF_data <- read.csv(file.path(basedir, "results", 
@@ -92,36 +87,47 @@ rm(AncSR1_meanF_data, AncSR2_meanF_data)
 
 ## How many functional variants are there in each ancestral background?
 
-We define "functional" variants as those with fluorescence at least as high as that of the wild type complex for the respective background (*i.e.* EGKA:ERE for the AncSR1 background and GKSV:SRE1 for the AncSR2 background).
+We define "functional" variants as those with fluorescence at least as high as that of the wild type complex for the respective background (*i.e.* EGKA:ERE for the AncSR1 background and GKSV:SRE for the AncSR2 background).
 
 ```{r fcutoff, purl = T}
 # defining minimum fluorescence cutoffs for functional variants
 AncSR1WT_ERE_data <- meanF_data %>% 
   filter(AA_var == "EGKA", bg == "AncSR1", RE == "ERE (GT)")
-AncSR2WT_SRE1_data <- meanF_data %>% 
-  filter(AA_var == "GSKV", bg == "AncSR2", RE == "SRE1 (AA)")
+AncSR2WT_SRE_data <- meanF_data %>% 
+  filter(AA_var == "GSKV", bg == "AncSR2", RE == "SRE (AA)")
 ```
 
 
-To classify variants as functional or nonfunctional, we test whether their fluorescence is significantly lower than that of the reference variant. If it is, then variants are classified as nonfunctional, otherwise they are considered functional.
+To classify variants as functional or nonfunctional, we test whether their fluorescence is significantly lower than that of the reference variant. If it is, then variants are classified as nonfunctional; otherwise they are considered functional.
 
 Since our fluorescence estimates come from different sources (observed vs. inferred), we use different tests to classify the variants whose fluorescence is estimated from the binned sort data, the debulk sort data, and the mutation effects models:
 
-1. Debulk variants are automatically considered nonfunctional (except for SRE2 variants whose original fluorescence estimates were from the debulk sort; these are classified using the method for predicted variants described below). 
+1. Debulk variants are automatically considered nonfunctional (except for GARE variants whose original fluorescence estimates were from the debulk sort; these are classified using the method for predicted variants described below). 
 
-2. Binned variants are classified using a two sample t-test, with the null hypothesis that their fluorescence is greater than or equal to that of the reference variant. SRE2 variants whose fluorescence was originally measured in the binned sort experiment are also classified this way, but using the corrected mean fluorescence. The deviations from the mean observed in the original binned sort measurements are taken as the error around the corrected mean.
+2. Binned variants are classified using a two sample t-test, with the null hypothesis that their fluorescence is greater than or equal to that of the reference variant. GARE variants whose fluorescence was originally measured in the binned sort experiment are also classified this way, but using the corrected mean fluorescence. The deviations from the mean observed in the original binned sort measurements are taken as the error around the corrected mean.
 
-3. Predicted variants are classified using a nonparametric bootstrap test, with the same null hypothesis as above. This approach takes advantage of the fact that we can use the prediction error observed during model cross-validation as an estimate of the error associated with each predicted variant's fluorescence. For each variant with predicted fluorescence $F_{\text{test}}$, we take the distribution of cross-validation residuals in the interval $F_{\text{test}} \pm 0.1$ as an estimate of the prediction error distribution for that variant. We then create bootstrap fluorescence samples from this distribution and compute the p-value as the fraction of the bootstrap sample with fluorescence greater than or equal to the reference variant. This is done separately for AncSR1 vs. AncSR2 variants, since the models were fit separately for each protein background and thus have different error distributions.
+3. Predicted variants are classified using a nonparametric bootstrap test, with the same null hypothesis as above. This approach takes advantage of the fact that we can use the prediction error observed during cross-validation of the genetic effects models as an estimate of the error associated with each predicted variant's fluorescence. For each variant with predicted fluorescence $F_{\text{test}}$, we take the distribution of cross-validation residuals in the interval $F_{\text{test}} \pm 0.1$ as an estimate of the prediction error distribution for that variant. We then create bootstrap fluorescence samples from this distribution and compute the p-value as the fraction of the bootstrap sample with fluorescence greater than or equal to the reference variant. This is done separately for AncSR1 vs. AncSR2 variants, since the models were fit separately for each protein background and thus have different error distributions.
 
-A false-discovery rate of 0.1 is used for multiple testing correction.
+After computing p-values, we use a false-discovery rate of 0.25 for multiple testing correction. Since we are testing whether variants are significantly less fluorescent than the reference variant, this means that we expect 25% of variants called nonfunctional to actually be functional (*i.e.* not significantly less fluorescent than the reference variant). While this may seem like a high FDR rate, this helps us to control the rate at which variants are erroneously classified as functional, which is likely to be high for predicted variants. This is due to the low prediction accuracy of the genetic effects models in the dynamic range of fluorescence, especially for the AncSR1 dataset (see below).
 
-```{r pfunctionalbinned, purl = FALSE}
+```{r pfunctionalbinned, purl = TRUE}
 # Compute p-value for calling variants functional that were observed in the 
 # binned sort experiment.
 #
 # H0: Variant is at least as fluorescent as reference variant.
 # HA: Variant is less fluorescent than reference variant.
-# Use a t-test and FDR-adjusted p-value. Variants with padj < 0.1 are called nonfunctional.
+# Use a t-test and FDR-adjusted p-value. Variants with padj < 0.25 are called 
+# nonfunctional.
+
+# First, adjust measurement error to be centered around predicted meanF for GA
+# predicted variants
+meanF_data <- meanF_data %>%
+  mutate(orig_meanF = rowMeans(select(., meanF_REP1:meanF_REP4), na.rm = TRUE),
+         meanF_REP1 = avg_meanF + (meanF_REP1 - orig_meanF),
+         meanF_REP2 = avg_meanF + (meanF_REP2 - orig_meanF),
+         meanF_REP3 = avg_meanF + (meanF_REP3 - orig_meanF),
+         meanF_REP4 = avg_meanF + (meanF_REP4 - orig_meanF)) %>%
+  select(-orig_meanF)
 
 if(!file.exists(file.path(results_dir, "pbinned.rda"))) {
   # parallel processing
@@ -129,18 +135,9 @@ if(!file.exists(file.path(results_dir, "pbinned.rda"))) {
   cl <- parallel::makeCluster(cores, "FORK", outfile = "")
   registerDoParallel(cl)
   pbinned <- foreach(i = c("AncSR1", "AncSR2"), .combine = 'c') %dopar% {
-    data <- meanF_data %>%
-      filter(type == "binned", bg == i, RE == "SRE2 (GA)") %>%
-      mutate(orig_meanF = rowMeans(select(., meanF_REP1:meanF_REP4), na.rm = TRUE),
-             meanF_REP1 = avg_meanF + (meanF_REP1 - orig_meanF),
-             meanF_REP2 = avg_meanF + (meanF_REP2 - orig_meanF),
-             meanF_REP3 = avg_meanF + (meanF_REP3 - orig_meanF),
-             meanF_REP4 = avg_meanF + (meanF_REP4 - orig_meanF)) %>%
-      select(-orig_meanF) %>%
-      bind_rows(filter(meanF_data, type == "binned", bg == i, RE != "SRE2 (GA)")) %>%
-      arrange(AA_var, RE)
-    ref <- ifelse(i == "AncSR1", AncSR1WT_RE_data, AncSR2WT_SRE1_data)
-    apply(select(filter(data, bg == i), meanF_REP1:meanF_REP4), 1, function(x)
+    ref <- ifelse(i == "AncSR1", AncSR1WT_RE_data, AncSR2WT_SRE_data)
+    apply(select(filter(meanF_data, bg == i), meanF_REP1:meanF_REP4), 
+          1, function(x)
       t.test(as.numeric(x), 
              as.numeric(select(ref, meanF_REP1:meanF_REP4)),
              "less", na.action = "na.omit")$p.value)
@@ -152,7 +149,7 @@ if(!file.exists(file.path(results_dir, "pbinned.rda"))) {
 ```
 
 
-```{r pfunctionalpredictedAncSR1, purl = TRUE}
+```{r pfunctionalpredictedAncSR1, purl = TRUE, fig.height = 4}
 # For variants with predicted fluorescence from reference-free model, test for
 # fluorescence less than the reference with a nonparametric bootstrap test,
 # where bootstrapped fluorescence samples are taken from the cross-validation
@@ -249,7 +246,7 @@ if(!file.exists(file.path(results_dir, "ppredicted.AncSR1.rda"))) {
 rm(bspred.AncSR1)
 ```
 
-```{r pfunctionalpredictedAncSR2, purl = FALSE}
+```{r pfunctionalpredictedAncSR2, purl = TRUE, fig.height = 4}
 # Repeat for AncSR2 predicted variants
 
 # first load the cross-validation fits from the model fitting
@@ -277,9 +274,9 @@ ggplot(AncSR2.cv, aes(x = pred, y = obs)) +
   geom_abline(intercept = 0, slope = 1, color = "red") +
   labs(x = "Predicted fluorescence", y = "Observed fluorescence", 
        title = "AncSR2 cross-validation fits, concatenated") +
-  geom_hline(yintercept = AncSR2WT_SRE1_data$avg_meanF, color = "gray", 
+  geom_hline(yintercept = AncSR2WT_SRE_data$avg_meanF, color = "gray", 
              linetype = "dashed")  +
-  geom_vline(xintercept = AncSR2WT_SRE1_data$avg_meanF, color = "gray", 
+  geom_vline(xintercept = AncSR2WT_SRE_data$avg_meanF, color = "gray", 
              linetype = "dashed")  +
   theme_classic()
 
@@ -327,18 +324,17 @@ if(!file.exists(file.path(results_dir, "bspred.AncSR2.rda"))) {
 # that are greater than or equal to that of the mean AncSR2:SRE1 WT variant.
 if(!file.exists(file.path(results_dir, "ppredicted.AncSR2.rda"))) {
   ppredicted.AncSR2 <- apply(bspred.AncSR2, 2, function(x) 
-    sum(x >= AncSR2WT_SRE1_data$avg_meanF) / 250)
+    sum(x >= AncSR2WT_SRE_data$avg_meanF) / 250)
   save(ppredicted.AncSR2, file = file.path(results_dir, "ppredicted.AncSR2.rda"))
 } else load(file.path(results_dir, "ppredicted.AncSR2.rda"))
 
 rm(bspred.AncSR2)
 ```
 
-```{r classifyfunctional, purl = FALSE, fig.width = 8}
-# classify variants as functional if padj >= 0.1 (not significantly less 
+```{r classifyfunctional, purl = TRUE, fig.width = 8}
+# classify variants as functional if padj >= 0.25 (not significantly less 
 # fluorescent than AncSR2:SRE1 WT)
-meanF_data <- rbind(meanF_data %>% 
-                      filter(type == "binned") %>%
+meanF_data <- rbind(meanF_data %>% filter(type == "binned") %>%
                       mutate(p = pbinned),
                     meanF_data %>%
                       filter(type == "predicted" | 
@@ -353,7 +349,11 @@ meanF_data <- rbind(meanF_data %>%
                     meanF_data %>%
                       filter(type == "debulk" & RE != "SRE2 (GA)") %>%
                       mutate(p = 0)) %>%
-  mutate(padj = p.adjust(p, "fdr"), functional = padj >= 0.25) %>%
+  mutate(padj = p.adjust(p, "fdr"), functional = padj >= 0.25, 
+         RE = as.character(RE)) %>%
+  mutate(RE = gsub("SRE2 \\(GA\\)", "GA", RE)) %>%
+  mutate(RE = gsub("SRE1", "SRE", RE)) %>%
+  mutate(RE = factor(RE, levels = levels(REs[[6]]))) %>%
   arrange(bg, AA_var, RE)
 
 # export data
@@ -381,18 +381,8 @@ meanF_data %>%
   geom_histogram(position = "stack") +
   scale_y_continuous(trans = log10plus1, name = "Count + 1") +
   scale_alpha_manual(values = c(0.6, 1)) +
-  geom_vline(xintercept = AncSR2WT_SRE1_data$avg_meanF, 
+  geom_vline(xintercept = AncSR2WT_SRE_data$avg_meanF, 
              color = "gray30", linetype = 2) +
-  theme_classic() +
-  labs(x = "Fluorescence")
-
-# same histogram just for functional variants
-ggplot(filter(meanF_data, functional), aes(x = avg_meanF, fill = type)) +
-  geom_histogram(position = "identity", alpha = 0.75) +
-  scale_y_continuous() +
-  geom_vline(xintercept = AncSR2WT_SRE1_data$avg_meanF, 
-             color = "gray30", linetype = 2) +
-  facet_grid(cols = vars(bg)) +
   theme_classic() +
   labs(x = "Fluorescence")
 
@@ -407,7 +397,7 @@ meanF_data %>%
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
 ```
 
-The histograms above show the distribution of fluorescence for variants classified as functional vs. nonfunctional. The vertical dashed line shows the fluorescence of the reference variant. 
+The histograms above show the distribution of fluorescence for variants classified as functional vs. nonfunctional. The vertical dashed line shows the fluorescence of the reference variant. We can see that in the AncSR1 background, the fluorescence range for functional "predicted" variants extends much lower than the fluorescence of the reference variant. This is because the genetic effects model for the AncSR1 dataset exhibits a negative prediction bias as well as high error in the range of the reference variant (see cross-validation error plots, above). This means that AncSR1 variants with predicted fluorescence down to $\sim-4.0$ cannot be confidently inferred to have fluorescence significantly lower than that of the reference ($\sim-3.4$), and are classified as functional. Despite this, the majority of functional variants are binned variants (see table below), and the addition of the predicted variants does not have a qualitative impact on the distribution of functional variants per RE (except for GARE which has corrected up; see above bar plots). The fluorescence range for functional binned and predicted variants in the AncSR2 dataset is more similar because there is less bias and less prediction error in the AncSR2 model.
 
 Let's look at the number of variants classified as functional on each ancestral background.
 
@@ -494,390 +484,6 @@ fxnalproteinREbgplot + plot_spacer() + fxnalproteinbgplot +
   plot_layout(widths = c(2, 0.5, 2))
 ```
 
-```{r, purl = FALSE, eval = F}
-# histogram of fluorescence colored by FDR <= 0.15
-# meanF_data_active %>%
-#   ggplot(aes(x = avg_meanF, fill = padjfunctional <= 0.15)) +
-#   geom_histogram() +
-#   geom_vline(xintercept = AncSR2WT_SRE1_data$avg_meanF) +  # fluorescence of reference
-#   theme_classic() +
-#   labs(title = "active variants", x = "fluorescence", fill = "significant")
-# 
-# meanF_data_functional <- meanF_data_active %>% filter(padjfunctional > 0.15)
-```
-
-
-## What is the mechanism behind more functional variants in the AncSR2 vs. AncSR1 background?
-
-```{r meanF_data_fxnal, purl = FALSE}
-# get protein:RE variants that are functional in both backgrounds
-meanF_data_fxnal <- meanF_data %>%
-  select(bg:avg_meanF, type, meanF_REP1:meanF_REP4, functional, active) %>%
-  pivot_wider(names_from = bg, values_from = avg_meanF:active) %>%
-  filter(functional_AncSR1 | functional_AncSR2)
-```
-
-```{r permissivemech, purl = FALSE, fig.width = 7, eval = FALSE}
-# How many variants that are functional in at least one ancestral background 
-# have higher fluorescence in AncSR2? Use a nonparametric bootstrap test (like 
-# the one used above for classifying functional variants) for variants with 
-# model-predicted fluorescence in at least one background; for all others, use a 
-# t-test.
-if(!file.exists(file.path(results_dir, "phigherAncSR2.rda"))) {
-  nbootstrap <- 1000
-  # phigherAncSR2 <- numeric(length = nrow(meanF_data_fxnal))
-  for(i in 1:nrow(meanF_data_fxnal)) {
-    # if fluorescence is from binned sort in both backgrounds, use a t-test
-    if(meanF_data_fxnal$type_AncSR1[i] == "binned" && 
-       meanF_data_fxnal$type_AncSR2[i] == "binned") {
-      next
-      p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
-                    select(grep("meanF_REP._AncSR1", 
-                                colnames(meanF_data_fxnal), 
-                                value = T)),
-                  meanF_data_fxnal %>% slice(i) %>% 
-                    select(grep("meanF_REP._AncSR2", 
-                                colnames(meanF_data_fxnal), 
-                                value = T)),
-                  alternative = "less",
-                  na.action = "na.omit")$p.value
-    } 
-    # if fluorescence is model-predicted in either background, use bootstrap test
-    else if(meanF_data_fxnal$type_AncSR1[i] == "predicted" ||
-              meanF_data_fxnal$type_AncSR2[i] == "predicted") {
-      next
-      meanF_AncSR1 <- meanF_data_fxnal$avg_meanF_AncSR1[i]
-      meanF_AncSR2 <- meanF_data_fxnal$avg_meanF_AncSR2[i]
-      if(meanF_data_fxnal$type_AncSR1[i] == "predicted") {
-        # residual distribution centered around meanF of AncSR1 test variant
-        res <- AncSR1.cv %>% 
-          filter(pred > meanF_AncSR1 - 0.1 & pred < meanF_AncSR1 + 0.1) %>% 
-          pull(res)
-        # bootstrap
-        meanF_AncSR1 <- sample(meanF_AncSR1 + res, nbootstrap, replace = TRUE)
-      }
-      if(meanF_data_fxnal$type_AncSR2[i] == "predicted") {
-        # residual distribution centered around meanF of AncSR2 test variant
-        res <- AncSR2.cv %>% 
-          filter(pred > meanF_AncSR2 - 0.1 & pred < meanF_AncSR2 + 0.1) %>% 
-          pull(res)
-        # bootstrap
-        meanF_AncSR2 <- sample(meanF_AncSR2 + res, nbootstrap, replace = TRUE)
-      }
-      p <- sum(meanF_AncSR1 >= meanF_AncSR2) / nbootstrap
-    } 
-    # otherwise one variant must have fluorescence inferred from binned sort and
-    # the other from debulk sort; use a one-sample t-test
-    else {
-      if(meanF_data_fxnal$type_AncSR1[i] == "debulk") {
-        p <- t.test(meanF_data_fxnal %>% slice(i) %>%
-                      select(grep("meanF_REP._AncSR2",
-                                  colnames(meanF_data_fxnal),
-                                  value = T)),
-                    alternative = "greater",
-                    mu = meanF_data_fxnal$avg_meanF_AncSR1[i],
-                    na.action = "na.omit")$p.value
-      } else {
-        p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
-                      select(grep("meanF_REP._AncSR1", 
-                                  colnames(meanF_data_fxnal), 
-                                  value = T)),
-                    alternative = "less",
-                    mu = meanF_data_fxnal$avg_meanF_AncSR2[i],
-                    na.action = "na.omit")$p.value
-      }
-    }
-    # # if fluorescence inferred null in AncSR1 from debulk sort, use a t-test
-    # else if(meanF_data_fxnal$type_AncSR1[i] == "debulk") {
-    #   p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
-    #                 select(grep("meanF_REP._AncSR2", 
-    #                             colnames(meanF_data_fxnal), 
-    #                             value = T)),
-    #               alternative = "greater",
-    #               mu = meanF_data_fxnal$avg_meanF_AncSR1[i],
-    #               na.action = "na.omit")$p.value
-    # } 
-    # # if fluorescence is inferred null in AncSR2 from debulk sort, then it cannot 
-    # # be higher in AncSR1
-    # else if(meanF_data_fxnal$type_AncSR2[i] == "debulk") {
-    #   p <- 1
-    # }
-    phigherAncSR2[i] <- p
-  }
-  
-  save(phigherAncSR2, file = file.path(results_dir, "phigherAncSR2.rda"))
-} else load(file.path(results_dir, "phigherAncSR2.rda"))
-
-# FDR correction
-padjhigherAncSR2 <- p.adjust(phigherAncSR2, "fdr")
-print(paste("variants with higher fluorescence in AncSR2:", 
-            sum(padjhigherAncSR2 < 0.05)))
-print(paste("Fraction variants with higher fluorescence in AncSR2 out of those that are functional in either background:", 
-            sum(padjhigherAncSR2 < 0.05) / nrow(meanF_data_fxnal)))
-
-# plot fluorescence in each background colored by significance
-bgfluorscatterplot <- meanF_data_fxnal %>%
-  mutate(padj = padjhigherAncSR2) %>%
-  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
-  geom_point(alpha = 0.5) +
-  scale_color_discrete(labels = c(paste0("Not significant (", 
-                                         signif((1 - sum(padjhigherAncSR2 < 0.05) / 
-                                                   nrow(meanF_data_fxnal)) * 100, 2), "%)"),
-                                  paste0("Significant (", 
-                                         signif(sum(padjhigherAncSR2 < 0.05) / 
-                                                  nrow(meanF_data_fxnal) * 100, 2), "%)")),
-                       name = "Higher fluorescence in\nAncSR2 background") +
-  labs(x = "Fluorescence in AncSR1 background",
-       y = "Fluorescence in AncSR2 background") +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
-  theme(text = element_text(size = fontsize)) +
-  theme_classic()
-bgfluorscatterplot
-
-# replot, split by ERE variants vs. non-ERE variants
-bgfluorscatterplotnonERE <- meanF_data_fxnal %>%
-  mutate(padj = padjhigherAncSR2) %>%
-  filter(RE != "ERE (GT)") %>%
-  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
-  geom_point(alpha = 0.5) +
-  # scale_color_discrete(labels = c(paste0("Not significant (", 
-  #                                        signif((1 - sum(padjhigherAncSR2 < 0.05) / 
-  #                                                  nrow(meanF_data_fxnal)) * 100, 2), "%)"),
-  #                                 paste0("Significant (", 
-  #                                        signif(sum(padjhigherAncSR2 < 0.05) / 
-  #                                                 nrow(meanF_data_fxnal) * 100, 2), "%)")),
-  #                      name = "Higher fluorescence in\nAncSR2 background") +
-  scale_color_discrete(labels = c("Not significant", "Significant"), 
-                       name = "Higher fluorescence in\nAncSR2 background") +
-  labs(title = "non-ERE variants",
-       x = "Fluorescence in AncSR1 background",
-       y = "Fluorescence in AncSR2 background") +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
-  theme(text = element_text(size = fontsize)) +
-  theme_classic()
-bgfluorscatterplotERE <- meanF_data_fxnal %>%
-  mutate(padj = padjhigherAncSR2) %>%
-  filter(RE == "ERE (GT)") %>%
-  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
-  geom_point(alpha = 0.5) +
-  # scale_color_discrete(labels = c(paste0("Not significant (", 
-  #                                        signif((1 - sum(padjhigherAncSR2 < 0.05) / 
-  #                                                  nrow(meanF_data_fxnal)) * 100, 2), "%)"),
-  #                                 paste0("Significant (", 
-  #                                        signif(sum(padjhigherAncSR2 < 0.05) / 
-  #                                                 nrow(meanF_data_fxnal) * 100, 2), "%)")),
-  #                      name = "Higher fluorescence in\nAncSR2 background") +
-  scale_color_discrete(labels = c("Not significant", "Significant"), 
-                       name = "Higher fluorescence in\nAncSR2 background") +
-  labs(title = "ERE variants",
-       x = "Fluorescence in AncSR1 background",
-       y = "Fluorescence in AncSR2 background") +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
-  theme(text = element_text(size = fontsize)) +
-  theme_classic()
-bgfluorscatterplotnonERE + bgfluorscatterplotERE + plot_layout(guides = "collect")
-
-bgfluorscatterbyRE <- meanF_data_fxnal %>%
-  mutate(padj = padjhigherAncSR2) %>%
-  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
-  geom_point(alpha = 0.5) +
-  facet_wrap(vars(RE)) +
-  scale_color_discrete(labels = c("Not significant", "Significant"), 
-                       name = "Higher fluorescence in\nAncSR2 background\nFDR = 0.05") +
-  labs(x = "Fluorescence in AncSR1 background",
-       y = "Fluorescence in AncSR2 background") +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
-  theme(text = element_text(size = fontsize)) +
-  theme_classic()
-bgfluorscatterbyRE
-
-meanF_data_fxnal %>%
-  mutate(padj = padjhigherAncSR2 < 0.05) %>%
-  group_by(RE, padj) %>%
-  count() %>%
-  group_by(RE) %>%
-  mutate(frac = n / sum(n)) %>%
-  filter(padj)
-
-
-# boxplot of the distribution of fluorescence in each background; p-value from 
-# Wilcoxon paired-sample test
-bgfluorboxplot <- meanF_data_fxnal %>%
-  select(AA_var:avg_meanF_AncSR2) %>%
-  pivot_longer(3:4, names_to = "bg", names_prefix = "avg_meanF_", 
-               values_to = "avg_meanF") %>%
-  ggplot(aes(x = bg, y = avg_meanF, fill = bg)) +
-  # geom_violin(width = 2, draw_quantiles = c(0.25, 0.5, 0.75)) +
-  stat_boxplot() +
-  # stat_summary(geom = "point", fun = "median") +
-  geom_signif(comparisons = list(c("AncSR1", "AncSR2")), test = "wilcox.test",
-              test.args = list(alternative = "less", paired = TRUE), 
-              map_signif_level = TRUE) +
-  scale_fill_manual(values = bg_color(), drop = FALSE) +
-  xlab("Ancestral background") +
-  ylab("Fluorescence") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        legend.position = "none")
-bgfluorboxplot
-
-# boxplots of the distribution of fluorescence in each background, plotted 
-# separately for each RE; p-value from Wilcoxon paired-sample test
-bgREfluorboxplot <- meanF_data_fxnal %>%
-  select(AA_var:avg_meanF_AncSR2) %>%
-  pivot_longer(3:4, names_to = "bg", names_prefix = "avg_meanF_", 
-               values_to = "avg_meanF") %>%
-  ggplot(aes(x = bg, y = avg_meanF, fill = bg)) +
-  # geom_violin() +
-  stat_boxplot(outlier.size = 1) +
-  facet_wrap(vars(RE), nrow = 2) +
-  geom_signif(comparisons = list(c("AncSR1", "AncSR2")), test = "wilcox.test",
-              test.args = list(alternative = "less", paired = TRUE), 
-              map_signif_level = TRUE, textsize = 3) +
-  scale_fill_manual(values = bg_color(), drop = FALSE, 
-                    name = "Ancestral\nbackground") +
-  xlab("") +
-  ylab("Fluorescence") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        legend.position = "right",
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        strip.text = element_text(size = fontsize - 8))
-bgREfluorboxplot
-
-# adjusted p-values for RE-wise Wilcoxon test
-phigherAncSR2RE <- sapply(sort(unique(meanF_data_fxnal$RE)), function(x) {
-  data <- meanF_data_fxnal %>% filter(RE == x)
-  wilcox.test(data$avg_meanF_AncSR1, data$avg_meanF_AncSR2, alternative = "less",
-              paired = TRUE)$p.value
-})
-padjhigherAncSR2RE <- p.adjust(phigherAncSR2RE, "fdr")
-# check whether FDR < 0.05 for RE-wise Wilcoxon test
-print(sum(padjhigherAncSR2RE < 0.05))
-```
-
-
-Which variants have significantly *lower* expression in the AncSR2 background?
-
-```{r, purl = FALSE, eval = FALSE}
-# How many variants that are functional in at least one ancestral background 
-# have lower fluorescence in AncSR2? Use a nonparametric bootstrap test (like 
-# the one used above for classifying functional variants) for variants with 
-# model-predicted fluorescence in at least one background; for all others, use a 
-# t-test.
-if(!file.exists(file.path(results_dir, "plowerAncSR2.rda"))) {
-  nbootstrap <- 1000
-  plowerAncSR2 <- numeric(length = nrow(meanF_data_fxnal))
-  for(i in 1:nrow(meanF_data_fxnal)) {
-    # if fluorescence is from binned sort in both backgrounds, use a two-sample 
-    # t-test
-    if(meanF_data_fxnal$type_AncSR1[i] == "binned" && 
-       meanF_data_fxnal$type_AncSR2[i] == "binned") {
-      p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
-                    select(grep("meanF_REP._AncSR1", 
-                                colnames(meanF_data_fxnal), 
-                                value = T)),
-                  meanF_data_fxnal %>% slice(i) %>% 
-                    select(grep("meanF_REP._AncSR2", 
-                                colnames(meanF_data_fxnal), 
-                                value = T)),
-                  alternative = "greater",
-                  na.action = "na.omit")$p.value
-    } 
-    # if fluorescence is model-predicted in either background, use bootstrap test
-    else if(meanF_data_fxnal$type_AncSR1[i] == "predicted" ||
-              meanF_data_fxnal$type_AncSR2[i] == "predicted") {
-      meanF_AncSR1 <- meanF_data_fxnal$avg_meanF_AncSR1[i]
-      meanF_AncSR2 <- meanF_data_fxnal$avg_meanF_AncSR2[i]
-      if(meanF_data_fxnal$type_AncSR1[i] == "predicted") {
-        # residual distribution centered around meanF of AncSR1 test variant
-        res <- AncSR1.cv %>% 
-          filter(pred > meanF_AncSR1 - 0.1 & pred < meanF_AncSR1 + 0.1) %>% 
-          pull(res)
-        # bootstrap
-        meanF_AncSR1 <- sample(meanF_AncSR1 + res, nbootstrap, replace = TRUE)
-      }
-      if(meanF_data_fxnal$type_AncSR2[i] == "predicted") {
-        # residual distribution centered around meanF of AncSR2 test variant
-        res <- AncSR2.cv %>% 
-          filter(pred > meanF_AncSR2 - 0.1 & pred < meanF_AncSR2 + 0.1) %>% 
-          pull(res)
-        # bootstrap
-        meanF_AncSR2 <- sample(meanF_AncSR2 + res, nbootstrap, replace = TRUE)
-      }
-      p <- sum(meanF_AncSR2 >= meanF_AncSR1) / nbootstrap
-    } 
-    # otherwise one variant must have fluorescence inferred from binned sort and
-    # the other from debulk sort; use a one-sample t-test
-    else {
-      if(meanF_data_fxnal$type_AncSR1[i] == "debulk") {
-        p <- t.test(meanF_data_fxnal %>% slice(i) %>%
-                      select(grep("meanF_REP._AncSR2",
-                                  colnames(meanF_data_fxnal),
-                                  value = T)),
-                    alternative = "less",
-                    mu = meanF_data_fxnal$avg_meanF_AncSR1[i],
-                    na.action = "na.omit")$p.value
-      } else {
-        p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
-                      select(grep("meanF_REP._AncSR1", 
-                                  colnames(meanF_data_fxnal), 
-                                  value = T)),
-                    alternative = "greater",
-                    mu = meanF_data_fxnal$avg_meanF_AncSR2[i],
-                    na.action = "na.omit")$p.value
-      }
-    }
-    # # if fluorescence inferred null in AncSR2 from debulk sort, use a t-test
-    # else if(meanF_data_fxnal$type_AncSR2[i] == "debulk") {
-    #   p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
-    #                 select(grep("meanF_REP._AncSR1", 
-    #                             colnames(meanF_data_fxnal), 
-    #                             value = T)),
-    #               alternative = "greater",
-    #               mu = meanF_data_fxnal$avg_meanF_AncSR2[i],
-    #               na.action = "na.omit")$p.value
-    # } 
-    # # if fluorescence is inferred null in AncSR1 from debulk sort, then it cannot 
-    # # be higher in AncSR2
-    # else if(meanF_data_fxnal$type_AncSR1[i] == "debulk") {
-    #   p <- 1
-    # }
-    plowerAncSR2[i] <- p
-  }
-  
-  save(plowerAncSR2, file = file.path(results_dir, "plowerAncSR2.rda"))
-} else load(file.path(results_dir, "plowerAncSR2.rda"))
-padjlowerAncSR2 <- p.adjust(plowerAncSR2, method = "fdr")
-
-bgfluorscatterbyRElowerAncSR2 <- meanF_data_fxnal %>%
-  mutate(p = plowerAncSR2, padj = padjlowerAncSR2) %>%
-  # filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
-  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.2)) +
-  geom_point(alpha = 0.5) +
-  facet_wrap(vars(RE)) +
-  scale_color_discrete(labels = c("Not significant", "Significant"), 
-                       name = "Lower fluorescence in\nAncSR2 background,\nFDR = 0.2") +
-  labs(title = "ERE variants",
-       x = "Fluorescence in AncSR1 background",
-       y = "Fluorescence in AncSR2 background") +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
-  theme(text = element_text(size = fontsize)) +
-  theme_classic()
-bgfluorscatterbyRElowerAncSR2
-
-meanF_data_fxnal %>%
-  ungroup() %>%
-  mutate(padj = padjlowerAncSR2 < 0.2) %>%
-  count(RE, padj) %>%
-  complete(RE, padj, fill = list(n = 0)) %>%
-  group_by(RE) %>%
-  mutate(frac = n / sum(n)) %>%
-  filter(padj)
-```
-
-
 
 ## How many functional protein variants bind to each RE?
 
@@ -935,432 +541,39 @@ fxnalREbarplotdodge <- nboundRE %>%
 
 fxnalREbarplotdodge
 
-# scatter plot
-fxnalREscatterplot <- nboundRE %>%
-  pivot_wider(names_from = bg, values_from = n) %>%
-  ggplot(aes(x = AncSR1, y = AncSR2)) +
-  geom_smooth(method = "lm", color = "red") +
-  geom_point() +
-  geom_text_repel(aes(label = RE), box.padding = 0.15) +
-  labs(x = "Number of protein variants bound in AncSR1 background",
-       y = "Number of protein variants bound in AncSR2 background") +
-  theme(text = element_text(size = fontsize)) +
-  theme_classic()
-fxnalREscatterplot
+# AncSR1 bar plot, sorted in decreasing order
+nboundRE %>%
+  filter(bg == "AncSR1") %>%
+  arrange(desc(n)) %>%
+  # ggplot(aes(x = RE, y = n, fill = bg)) +
+  ggplot(aes(x = factor(as.character(RE), levels = as.character(RE)),
+             y = n, fill = bg)) +
+  geom_col(position = "dodge", fill = "black") +
+  scale_x_discrete(drop = FALSE) +
+  # scale_fill_manual(values = bg_color(), drop = FALSE) +
+  labs(title = "AncSR1 background", x = "RE", 
+       y = "Number of protein\nvariants bound") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.position = "none") +
+  guides(x = guide_axis(angle = 45))
 
-# fitting linear model to number of protein variants bound per RE in each bg
-nfxnalbglm <- nboundRE %>%
-  pivot_wider(names_from = bg, values_from = n) %>%
-  column_to_rownames("RE") %>%
-  lm(formula = AncSR2 ~ AncSR1, data = .)
-summary(nfxnalbglm)
-# outlier detection
-par(mfrow = c(2,2))
-plot(nfxnalbglm)  # ERE is likely an extreme outlier, and SRE1 a moderate outlier
-cooksD <- cooks.distance(nfxnalbglm)
-print(cooksD)
-outliers <- cooksD[cooksD > (3 * mean(cooksD, na.rm = TRUE))]
-print(outliers)
-# refit model with outlier removed
-nfxnalbglmnooutliers <- nboundRE %>%
-  pivot_wider(names_from = bg, values_from = n) %>%
-  filter(!RE %in% names(outliers)) %>%
-  column_to_rownames("RE") %>%
-  lm(formula = AncSR2 ~ AncSR1, data = .)
-summary(nfxnalbglmnooutliers)
-
-# replot, show linear fit with outlier removed
-fxnalREscatterplotnooutlier <- nboundRE %>%
-  pivot_wider(names_from = bg, values_from = n) %>%
-  ggplot(aes(x = AncSR1, y = AncSR2)) +
-  geom_smooth(data = . %>% filter(!RE %in% names(outliers)),
-              method = "lm", color = "red", fullrange = TRUE) +
-  geom_point() +
-  geom_text_repel(aes(label = RE), box.padding = 0.15) +
-  labs(x = "Number of protein variants bound in AncSR1 background",
-       y = "Number of protein variants bound in AncSR2 background") +
-  theme(text = element_text(size = fontsize)) +
-  theme_classic()
-fxnalREscatterplotnooutlier
-
-nfxnalbgnoERESRE1lm <- nboundRE %>%
-  filter(!RE %in% c("ERE (GT)", "SRE1 (AA)")) %>%
-  pivot_wider(names_from = bg, values_from = n) %>%
-  lm(formula = AncSR2 ~ AncSR1, data = .)
-summary(nfxnalbgnoERESRE1lm)
-
-# # number of functional protein:RE variants on each background
-# a <- meanF_data_functional %>%
-#   group_by(bg) %>%
-#   count() %>%
-#   ggplot(aes(x = bg, y = n, fill = bg)) +
-#   geom_col(width = 0.9) +
-#   geom_text(aes(label = n), vjust = -0.5, color = "black", size = 3.5) +
-#   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-#   scale_fill_manual(values = bg_color(), drop = FALSE) +
-#   scale_x_discrete(drop = FALSE) +
-#   labs(x = "Ancestral\nbackground", 
-#        y = "number of functional\nprotein:response element variants") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         legend.position = "none") +
-#   guides(x = guide_axis(angle = 45))
-# 
-# # number of functional protein variants on each background
-# a2 <- meanF_data_functional %>%
-#   group_by(bg) %>%
-#   distinct(AA_var, .keep_all = TRUE) %>%
-#   count() %>%
-#   ggplot(aes(x = bg, y = n, fill = bg)) +
-#   geom_col(width = 0.9) +
-#   # geom_text(aes(label = n), vjust = -0.5, color = "black", size = 3.5) +
-#   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-#   scale_fill_manual(values = bg_color(), drop = FALSE) +
-#   scale_x_discrete(drop = FALSE) +
-#   labs(x = "Ancestral\nbackground", 
-#        y = "number of bound protein variants") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         legend.position = "none") +
-#   guides(x = guide_axis(angle = 45))
-# 
-# # number of functional variants on each background that bind to each RE
-# b <- meanF_data_functional %>%
-#   group_by(bg, RE) %>%
-#   count() %>%
-#   mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
-#   ggplot(aes(x = RE, y = n, fill = bg)) +
-#   geom_col(width = 0.9) +
-#   facet_grid(rows = vars(bg), scales = "free") +
-#   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-#   scale_fill_manual(values = bg_color(), drop = FALSE) +
-#   scale_x_discrete(drop = FALSE) +
-#   # geom_text(aes(label = n), vjust = -0.5, color = "black", size = 3.5) +
-#   labs(x = "Response element", y = "Number of bound protein variants", 
-#        fill = "Ancestral\nbackground") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         legend.text = element_text(size = 14),
-#         strip.background = element_blank(),
-#         strip.text.y = element_blank(),
-#         legend.position = c(0.9, 0.9)) +
-#   guides(x = guide_axis(angle = 45))
-# 
-# # same as b but plotting the backgrounds next to each other
-# b2 <- meanF_data_functional %>%
-#   group_by(bg, RE) %>%
-#   count() %>%
-#   ungroup() %>%
-#   complete(bg, RE, fill = list(n = 0)) %>%
-#   mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
-#   ggplot(aes(x = RE, y = n, fill = bg)) +
-#   geom_col(width = 0.9, position = "dodge") +
-#   # geom_text(aes(label = n), vjust = -0.5, color = "black",
-#   #           size = 3.5, position = position_dodge(width = 0.9)) +
-#   scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
-#   scale_fill_manual(values = bg_color(), drop = FALSE) +
-#   scale_x_discrete(drop = FALSE) +
-#   labs(x = "Response element", y = "Number of bound protein variants", 
-#        fill = "Ancestral\nbackground") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         legend.text = element_text(size = 14),
-#         strip.background = element_blank(),
-#         strip.text.y = element_blank(),
-#         legend.position = c(0.9, 0.9)) +
-#   guides(x = guide_axis(angle = 45))
-# 
-# a + plot_spacer() + b + plot_layout(widths = c(1, 0.5, 5))
-# a2 + plot_spacer() + b + plot_layout(widths = c(1, 0.5, 10))
-# a2 + plot_spacer() + b2 + plot_layout(widths = c(1, 0.5, 10))
-```
-
-
-```{r, purl = FALSE, eval = F}
-# # get number of protein variants that bind each RE in only AncSR1 background,
-# # only AncSR2 background, or both backgrounds
-# variants_bound_by_bg <- meanF_data_functional %>%
-#   filter(type == "exp") %>%
-#   select(AA_var, RE, bg) %>%
-#   group_by(RE) %>%
-#   mutate(n = 1) %>%
-#   pivot_wider(names_from = bg, values_from = n) %>%
-#   mutate(both = AncSR1 + AncSR2 == 2) %>%
-#   summarize(AncSR1 = sum(AncSR1, na.rm = T),
-#             AncSR2 = sum(AncSR2, na.rm = T), 
-#             both = sum(both, na.rm = T)) %>%
-#   mutate(AncSR1 = AncSR1 - both,
-#          AncSR2 = AncSR2 - both,
-#          RE = factor(RE, levels = c("all", levels(REs[[1]])))) %>%
-#   rbind(c("all", colSums(select(., 2:4)))) %>%
-#   mutate(AncSR1 = as.numeric(AncSR1), AncSR2 = as.numeric(AncSR2),
-#          both = as.numeric(both))
-# 
-# # compute p-value for overlap by bootstrap sampling variants in each background 
-# # and computing amount of random overlap
-# variants_bound_by_bg$p <- apply(select(variants_bound_by_bg, 2:4), 1,
-#                                 function(x) {
-#                                   overlaps <- numeric(length = 1000)
-#                                   for(i in 1:1000) {
-#                                     AncSR1_sample <- sample(160000, sum(x[c(1,3)]))
-#                                     AncSR2_sample <- sample(160000, sum(x[2:3]))
-#                                     overlaps[i] <- length(intersect(AncSR1_sample, AncSR2_sample))
-#                                   }
-#                                   p <- sum(overlaps >= x[3]) / 1000
-#                                   p
-#                                 })
-# variants_bound_by_bg$padj <- p.adjust(variants_bound_by_bg$p, 
-#                                       method = "bonferroni")
-# 
-# # plot fraction of protein variants per RE that are functional in the AncSR1,
-# # AncSR2, or both backgrounds
-# a <- variants_bound_by_bg %>%
-#   mutate(AncSR1_total = AncSR1 + both) %>%
-#   pivot_longer(2:4, names_to = "background") %>%
-#   filter(background != "AncSR2") %>%
-#   ggplot(aes(x = RE, y = value, 
-#              fill = factor(background, levels = c("both", "AncSR1")))) +
-#   geom_col(position = "stack", width = 0.9) +
-#   scale_fill_manual(values = c(both = "deepskyblue", bg_color("AncSR1")),
-#                     labels = c("AncSR1 and AncSR2", "AncSR1 only"),
-#                     drop = FALSE) +
-#   scale_x_discrete(drop = FALSE) +
-#   geom_text(aes(y = AncSR1_total, label = ifelse(padj <= .05, "*", "")), 
-#             vjust = 0, color = "black", size = 6) +
-#   scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
-#   labs(title = "Variants functional on AncSR1", x = "Response element", 
-#        y = "Number of protein variants", fill = "Ancestral background") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         plot.title = element_text(size = 14),
-#         legend.text = element_text(size =12),
-#         legend.title = element_text(size = 14),
-#         legend.position = c(0.8, 0.9),
-#         plot.caption = element_text(hjust = 0)) +
-#   guides(x = guide_axis(angle = 45))
-# 
-# # plot the distribution of fluorescence for protein variants that bind in 
-# # both backgrounds
-# fluorescence_both_backgrounds <- meanF_data_functional %>%
-#   select(AA_var, RE, bg, avg_meanF) %>%
-#   group_by(RE) %>%
-#   pivot_wider(names_from = bg, values_from = avg_meanF) %>%
-#   drop_na()
-# fluorescence_bg_p <- fluorescence_both_backgrounds %>%
-#   ungroup() %>%
-#   summarize(p = wilcox.test(AncSR1, AncSR2, alternative = "less")$p.value)
-# 
-# b <- fluorescence_both_backgrounds %>%
-#   pivot_longer(3:4, names_to = "background") %>%
-#   ggplot(aes(x = factor(RE, levels = levels(REs[[1]])), y = value, 
-#              fill = background)) +
-#   geom_boxplot() +
-#   scale_fill_manual(values = c(bg_color()), drop = FALSE) +
-#   scale_x_discrete(drop = FALSE) +
-#   labs(x = "Response element", y = "Fluorescence", 
-#        fill = "Ancestral\nbackground") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         legend.text = element_text(size = 14),
-#         axis.line.x = element_line(color = "black",),
-#         legend.position = "right",
-#         plot.caption = element_text(hjust = 0)) +
-#   guides(x = guide_axis(angle = 45))
-# 
-# c <- fluorescence_both_backgrounds %>%
-#   pivot_longer(3:4, names_to = "background") %>%
-#   ggplot(aes(x = background, y = value, fill = background)) +
-#   geom_boxplot() +
-#   scale_fill_manual(values = c(bg_color()), drop = FALSE) +
-#   labs(title = "Variants functional on\nboth backgrounds", 
-#        x = "Ancestral\nbackground", y = "Fluorescence") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         plot.title = element_text(size = 14),
-#         legend.text = element_text(size = 14),
-#         axis.line.x = element_line(color = "black",),
-#         legend.position = "none",
-#         plot.caption = element_text(hjust = 0)) +
-#   guides(x = guide_axis(angle = 45)) +
-#   geom_signif(comparisons = list(c("AncSR1", "AncSR2")), 
-#               test = "wilcox.test",
-#               test.args = list(alternative = "less"),
-#               map_signif_level = TRUE)
-# 
-# a + plot_spacer() + c + plot_layout(widths = c(5, 0.5, 2))
-# 
-# # plot fluorescence in each background for variants that bind in both backgrounds
-# d <- fluorescence_both_backgrounds %>%
-#   ggplot(aes(x = AncSR1, y = AncSR2)) +
-#   geom_point()
-# d
-```
-
-
-### What is the distribution of fluorescence for variants that bind to each RE?
-
-```{r fluorRE, purl = FALSE, eval = FALSE}
-# fluorREplot <- meanF_data %>%
-#   filter(functional) %>%
-#   ggplot(aes(x = bg, y = avg_meanF, fill = bg)) +
-#   # geom_violin(scale = "width") +
-#   # stat_summary(geom = "point", fun = "median") +
-#   geom_boxplot() +
-#   facet_wrap(vars(RE), nrow = 2) +
-#   scale_x_discrete(drop = FALSE, name = "") +
-#   scale_fill_manual(values = bg_color(), drop = FALSE, 
-#                     name = "Ancestral\nbackground") +
-#   ylab("Fluorescence") +
-#   theme_classic() +
-#   theme(text = element_text(size = fontsize),
-#         legend.text = element_text(size = fontsize),
-#         strip.text = element_text(size = fontsize - 8),
-#         strip.background = element_blank(),
-#         axis.text.x = element_blank(),
-#         axis.ticks.x = element_blank(),
-#         axis.line.x = element_blank()) +
-#   guides(x = guide_axis(angle = 45))
-# fluorREplot
-```
-
-
-
-
-## How many protein variants bind promiscuously?
-
-<!-- Let's now determine which protein variants bind promiscuously, *i.e.* are functional on multiple REs. Simply counting the number of REs on which each protein variant is classified as functional will overestimate the number of promiscuous variants due to multiple testing (each protein variant has been tested on 16 REs). To correct for this, for each possible set of $k$ REs where $k \in [1:16]$, we will compute a p-value for each protein variant as the probability that it is at least as fluorescent as the reference variant on all $k$ REs in the set. This is simply the product across all $k$ REs of the p-values computed for each RE:protein variant individually. We will again use an FDR threshold of 0.1 to classify variants as functional vs. nonfunctional on each set of REs. -->
-
-```{r ppromiscuous, purl = TRUE, eval = FALSE}
-# # Compute p-values for binding to multiple REs
-# if(!file.exists(file.path(results_dir, "ppromiscuous.rda"))) {
-#   # Create list to store p-values for the null hypothesis that a variant is at
-#   # least as fluorescent as the reference variant on n RE variants, where 
-#   # k in [1:16]. Each element is a dataframe listing the p-values for binding to
-#   # k REs; each row is a protein:RE set combination, and there are k columns
-#   # listing the REs in the set
-#   ppromiscuous <- list()
-#   
-#   # The dataframe for k=1 simply lists the p-values for individual REs computed
-#   # above, including only variant combinations with p>0 for computational 
-#   # efficiency.
-#   ppromiscuous[[1]] <- meanF_data %>% filter(p > 0) %>% select(bg:RE, p)
-#   
-#   # number of REs per protein variant with p > 0
-#   npg0 <- ppromiscuous[[1]] %>% group_by(bg, AA_var) %>% count(name = "nRE")
-#   
-#   # Compute p-values for each k > 1
-#   for(k in 2:16) {
-#     print(paste("k =", k))
-#     
-#     # subset of data for which p > 0 for at least n REs per protein variant
-#     datak <- ppromiscuous[[1]] %>% semi_join(filter(npg0, nRE >= k))
-#     
-#     # subset data by protein background (parallel)
-#     cl <- makeCluster(2, "FORK", outfile = "")
-#     registerDoParallel(cl)
-#     
-#     ppromiscuous[[k]] <- foreach(background = unique(as.character(datak$bg)), 
-#                                  .combine = "rbind") %dopar% {
-#       print(background)
-#       databg <- filter(datak, bg == background)
-#       out <- data.frame(matrix(nrow = 0, ncol = 0))
-#       aas <- unique(as.character(databg$AA_var))
-#       
-#       # subset data by amino acid variant
-#       for(aa in aas) {
-#         print(aa)
-#         dataaa <- filter(databg, AA_var == aa)
-#         
-#         # get all possible combinations of k REs
-#         REcombos <- data.frame(t(combn(as.character(dataaa$RE), k)))
-#         colnames(REcombos) <- sapply(1:k, function(x) paste0("RE", x))
-#         
-#         # compute p-val for each combination of REs
-#         p <- apply(REcombos, 1, function(x)
-#           dataaa %>% filter(RE %in% x) %>% pull(p) %>% prod())
-#         
-#         out <- rbind(out, data.frame(bg = background, AA_var = aa, REcombos, p))
-#       }
-#     }
-#     stopCluster(cl)
-#   }
-#   
-#   save(ppromiscuous, file = file.path(results_dir, "ppromiscuous.rda"))
-# } else load(file.path(results_dir, "ppromiscuous.rda"))
-```
-
-```{r, purl = FALSE, eval = FALSE}
-# if(!file.exists(file.path(results_dir, "multiple_REs_bound_data.rda"))) {
-#   multiple_REs_bound_data <- list(AncSR1 = list(), AncSR2 = list())
-#   multiple_REs_bound_data[["AncSR1"]][[1]] <- meanF_data_functional %>% 
-#     filter(bg == "AncSR1") %>% 
-#     mutate(p = pfunctional, padj = padjfunctional, RE1 = RE) %>%
-#     select(AA_var, RE1, p, padj)
-#   multiple_REs_bound_data[["AncSR2"]][[1]] <- meanF_data_functional %>% 
-#     filter(bg == "AncSR2") %>% 
-#     mutate(p = pfunctional, padj = padjfunctional, RE1 = RE) %>%
-#     select(AA_var, RE1, p, padj)
-#   
-#   # initialize data frames
-#   for(background in c("AncSR1", "AncSR2")) {
-#     for(i in 2:16) {
-#       df <- data.frame(AA_var = NA)
-#       df[sapply(1:i, function(x) paste0("RE", x))] <- NA
-#       df$p <- NA
-#       multiple_REs_bound_data[[background]][[i]] <- df
-#     }
-#   }
-#   
-#   for(background in c("AncSR1", "AncSR2")) {
-#     AA_vars <- meanF_data_active %>%
-#         filter(bg == background) %>% pull("AA_var") %>% 
-#         unique() %>% as.character() %>% sort()
-#     
-#     for(aa in AA_vars) {
-#       print(aa)
-#       aa_df <- meanF_data_active %>% 
-#           filter(AA_var == aa, bg == background) %>%
-#           select(RE, meanF_REP1:meanF_REP4, pfunctional)
-#       i <- 2
-#       while(i <= nrow(aa_df)) {
-#         # compute all possible sets of i REs for variant aa
-#         RE_combs <- combn(as.character(aa_df$RE), i)
-#         
-#         # compute p-value of aa being worse than AncSR2-WT:SRE1 on any of the
-#         # set of REs
-#         p <- apply(RE_combs, 2, function(x) {
-#           df2 <- aa_df %>% filter(RE %in% x)
-#           prod(df2$pfunctional)
-#         })
-#         
-#         new_df <- data.frame(AA_var = rep(aa, ncol(RE_combs)))
-#         new_df[sapply(1:i, function(x) paste0("RE", x))] <- t(RE_combs)
-#         new_df$p <- p
-#         multiple_REs_bound_data[[background]][[i]] <- 
-#           multiple_REs_bound_data[[background]][[i]] %>%
-#           rbind(new_df)
-#         
-#         i <- i + 1
-#       }
-#     }
-#   }
-#   
-#   # merge data for AncSR1 & AncSR2
-#   multiple_REs_bound_data <- lapply(1:16, function(x) 
-#     rbind(multiple_REs_bound_data[[1]][[x]] %>% 
-#             slice(-1) %>% mutate(bg = "AncSR1"), 
-#           multiple_REs_bound_data[[2]][[x]] %>% 
-#             slice(-1) %>% mutate(bg = "AncSR2")))
-#   
-#   # compute adjusted p-values
-#   multiple_REs_bound_data <- lapply(multiple_REs_bound_data, function(x)
-#     mutate(x, padj = p.adjust(p, "fdr")))
-#   
-#   save(multiple_REs_bound_data, 
-#        file = file.path(results_dir, "multiple_REs_bound_data.rda"))
-# } else load(file = file.path(results_dir, "multiple_REs_bound_data.rda"))
-# 
-# # TODO: check what's up with AncSR1 AAKM
+# AncSR2 bar plot, sorted in decreasing order
+nboundRE %>%
+  filter(bg == "AncSR2") %>%
+  arrange(desc(n)) %>%
+  # ggplot(aes(x = RE, y = n, fill = bg)) +
+  ggplot(aes(x = factor(as.character(RE), levels = as.character(RE)),
+             y = n, fill = bg)) +
+  geom_col(position = "dodge", fill = "black") +
+  scale_x_discrete(drop = FALSE) +
+  # scale_fill_manual(values = bg_color(), drop = FALSE) +
+  labs(title = "AncSR2 background", x = "RE", 
+       y = "Number of protein\nvariants bound") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.position = "none") +
+  guides(x = guide_axis(angle = 45))
 ```
 
 
@@ -1420,7 +633,7 @@ nspecificRE <- meanF_data_specificity %>%
   select(-c(3:18, nfxnal)) %>%
   pivot_longer(3:18, names_to = "RE", values_to = "fxnal", 
                names_prefix = "functional_") %>%
-  mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
+  mutate(RE = factor(RE, levels = levels(REs[[6]]))) %>%
   filter(fxnal) %>%
   group_by(bg, RE) %>%
   count(name = "nproteinvars") %>%
@@ -1473,25 +686,31 @@ nspecificpromiscuous <- meanF_data_specificity %>%
                        function(x) 
                          do.call(paste, 
                                  as.list(c(sub("functional_", "", colnames(.)[2:17])[x], sep = ", ")))),
-         nREs = rowSums(select(., `functional_ERE (GT)`:functional_TT)))
+         nREs = as.integer(rowSums(select(., `functional_ERE (GT)`:functional_TT))))
 
 nspecificpromiscuous %>%
   filter(bg == "AncSR1") %>%
-  ggplot(aes(x = factor(label, levels = label), y = n, fill = factor(nREs))) +
+  ggplot(aes(x = factor(label, levels = label), y = n, fill = factor(nREs, levels = 1:5))) +
   geom_col() +
-  scale_fill_viridis(discrete = TRUE, option = "C") +
-  labs(title = "AncSR1", x = "REs bound", y = "Number of protein variants", fill = "Number of REs") +
+  scale_fill_viridis(discrete = TRUE, option = "C", drop = FALSE) +
+  # scale_fill_manual(values = seq_gradient_pal(bg_color("AncSR1"), "yellow")(seq(0, 1, length.out = 5))) +
+  labs(title = "AncSR1", x = "REs bound", 
+       y = "Number of protein\nvariants bound", fill = "Number of\nREs") +
   theme_classic() +
+  theme(text = element_text(size = fontsize)) +
   guides(x = guide_axis(angle = 45))
 
 nspecificpromiscuous %>%
   filter(bg == "AncSR2") %>%
-  slice_head(n = 40) %>%
-  ggplot(aes(x = factor(label, levels = label), y = n, fill = factor(nREs))) +
+  slice_head(n = 20) %>%
+  ggplot(aes(x = factor(label, levels = label), y = n, fill = factor(nREs, levels = 1:5))) +
   geom_col() +
-  scale_fill_viridis(discrete = TRUE, option = "C") +
-  labs(title = "AncSR2", x = "REs bound", y = "Number of protein variants", fill = "Number of REs") +
+  scale_fill_viridis(discrete = TRUE, option = "C", drop = FALSE) +
+  # scale_fill_manual(values = seq_gradient_pal(bg_color("AncSR2"), "yellow")(seq(0, 1, length.out = 5))) +
+  labs(title = "AncSR2", x = "REs bound", 
+       y = "Number of protein\nvariants bound", fill = "Number of\nREs") +
   theme_classic() +
+  theme(text = element_text(size = fontsize)) +
   guides(x = guide_axis(angle = 45))
 ```
 
@@ -1499,65 +718,105 @@ nspecificpromiscuous %>%
 Barplot with total bound and specifically bound variants per RE.
 
 ```{r nboundspecificRE, purl = FALSE, fig.height = 6, fig.width = 7}
-nspecificboundbarplot <- meanF_data_specificity %>%
-  ungroup() %>%
-  filter(nfxnal > 0) %>%
-  mutate(phenotype = ifelse(nfxnal == 1, "specific", "promiscuous")) %>%
-  select(bg, AA_var, `functional_ERE (GT)`:functional_TT, phenotype) %>%
-  pivot_longer(`functional_ERE (GT)`:functional_TT, names_to = "RE",
-               values_to = "bound", names_prefix = "functional_") %>%
-  filter(bound) %>%
-  # left_join(select(meanF_data, bg, RE, AA_var, type)) %>%
-  # filter(type == "binned") %>%
-  mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
-  ggplot(aes(x = RE, fill = phenotype)) +
-  geom_bar(position = "stack") +
-  facet_grid(rows = vars(bg), scales = "free_y") +
-  theme_classic() +
-  guides(x = guide_axis(angle = 45))
-nspecificboundbarplot
-  
-  
-# split plots by background
+# plot in decreasing order of number of specifically bound protein variants
 nspecificboundbarplotAncSR1 <- meanF_data_specificity %>%
   ungroup() %>%
   filter(nfxnal > 0, bg == "AncSR1") %>%
-  mutate(phenotype = ifelse(nfxnal == 1, "specific", "promiscuous")) %>%
+  mutate(phenotype = ifelse(nfxnal == 1, "Specific", "Promiscuous")) %>%
   select(bg, AA_var, `functional_ERE (GT)`:functional_TT, phenotype) %>%
   pivot_longer(`functional_ERE (GT)`:functional_TT, names_to = "RE",
                values_to = "bound", names_prefix = "functional_") %>%
   filter(bound) %>%
-  # left_join(select(meanF_data, bg, RE, AA_var, type)) %>%
-  # filter(type == "binned") %>%
-  mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
-  ggplot(aes(x = RE, fill = phenotype)) +
-  geom_bar(position = "stack") +
+  mutate(RE = factor(RE, levels = levels(REs[[6]]))) %>%
+  count(RE, phenotype) %>%
+  complete(RE, phenotype, fill = list(n = 0)) %>%
+  pivot_wider(names_from = "phenotype", values_from = "n") %>%
+  arrange(desc(Specific), desc(Promiscuous)) %>%
+  pivot_longer(cols = 2:3, names_to = "phenotype", values_to = "n") %>%
+  ggplot(aes(x = factor(as.character(RE), levels = unique(as.character(RE))),
+             y = n, fill = phenotype)) +
+  geom_col(position = "stack", color = "black") +
   scale_x_discrete(drop = FALSE) +
-  labs(title = "AncSR1 functional variants", y = "Number of protein variants") +
+  scale_fill_manual(values = c("Specific" = "gray50", "Promiscuous" = "white")) +
+  labs(title = "AncSR1", x = "RE", y = "Number of DBD variants", fill = "") +
   theme_classic() +
-  theme(text = element_text(size = fontsize)) +
+  theme(text = element_text(size = fontsize),
+         legend.position = "bottom") +
   guides(x = guide_axis(angle = 45))
 nspecificboundbarplotAncSR1
 
 nspecificboundbarplotAncSR2 <- meanF_data_specificity %>%
   ungroup() %>%
   filter(nfxnal > 0, bg == "AncSR2") %>%
-  mutate(phenotype = ifelse(nfxnal == 1, "specific", "promiscuous")) %>%
+  mutate(phenotype = ifelse(nfxnal == 1, "Specific", "Promiscuous")) %>%
   select(bg, AA_var, `functional_ERE (GT)`:functional_TT, phenotype) %>%
   pivot_longer(`functional_ERE (GT)`:functional_TT, names_to = "RE",
                values_to = "bound", names_prefix = "functional_") %>%
   filter(bound) %>%
-  # left_join(select(meanF_data, bg, RE, AA_var, type)) %>%
-  # filter(type == "binned") %>%
-  mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
-  ggplot(aes(x = RE, fill = phenotype)) +
-  geom_bar(position = "stack") +
+  mutate(RE = factor(RE, levels = levels(REs[[6]]))) %>%
+  count(RE, phenotype) %>%
+  complete(RE, phenotype, fill = list(n = 0)) %>%
+  pivot_wider(names_from = "phenotype", values_from = "n") %>%
+  arrange(desc(Specific), desc(Promiscuous)) %>%
+  pivot_longer(cols = 2:3, names_to = "phenotype", values_to = "n") %>%
+  ggplot(aes(x = factor(as.character(RE), levels = unique(as.character(RE))),
+             y = n, fill = phenotype)) +
+  geom_col(position = "stack", color = "black") +
   scale_x_discrete(drop = FALSE) +
-  labs(title = "AncSR2 functional variants", y = "Number of protein variants") +
+  scale_fill_manual(values = c("Specific" = "gray50", "Promiscuous" = "white")) +
+  labs(title = "AncSR2", x = "RE", y = "Number of DBD variants", fill = "") +
   theme_classic() +
-  theme(text = element_text(size = fontsize)) +
+  theme(text = element_text(size = fontsize),
+         legend.position = "bottom") +
   guides(x = guide_axis(angle = 45))
 nspecificboundbarplotAncSR2
+```
+
+
+Plots for Santi
+
+```{r}
+nboundbarplotAncSR1sorted <- nboundRE %>%
+  filter(bg == "AncSR1") %>%
+  arrange(desc(n)) %>%
+  # ggplot(aes(x = RE, y = n, fill = phenotype)) +
+  ggplot(aes(x = factor(as.character(RE), levels = unique(as.character(RE))),
+             y = n, fill = RE)) +
+  geom_col() +
+  scale_fill_manual(values = c("ERE (GT)" = "#664797", "SRE (AA)" = "#00AC59",
+                               rep("gray", 14))) +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(sec.axis = sec_axis(trans = ~./sum(filter(nboundRE, bg == "AncSR1")$n), 
+                                         name = "Relative fraction")) +
+  labs(title = "AncSR1 background", x = "",
+       y = "Number of\nprotein variants", fill = "Binding\nspecificity") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.position = "none") +
+  guides(x = guide_axis(angle = 45))
+nboundbarplotAncSR1sorted + xlab("RE")
+  
+
+nboundbarplotAncSR2sorted <- nboundRE %>%
+  arrange(rep(desc(filter(nboundRE, bg == "AncSR1")$n), 2)) %>%
+  filter(bg == "AncSR2") %>%
+  ggplot(aes(x = factor(as.character(RE), levels = unique(as.character(RE))),
+             y = n, fill = RE)) +
+  geom_col() +
+  scale_fill_manual(values = c("ERE (GT)" = "#664797", "SRE (AA)" = "#00AC59",
+                               rep("gray", 14))) +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(sec.axis = sec_axis(trans = ~./sum(filter(nboundRE, bg == "AncSR2")$n), 
+                                         name = "Relative fraction")) +
+  labs(title = "AncSR2 background", x = "RE", 
+       y = "Number of\nprotein variants", fill = "Binding\nspecificity") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        legend.position = "none") +
+  guides(x = guide_axis(angle = 45))
+nboundbarplotAncSR2sorted
+
+(nboundbarplotAncSR1sorted + theme(axis.text.x = element_blank())) / nboundbarplotAncSR2sorted
 ```
 
 
@@ -1566,26 +825,47 @@ Does the number of protein variants bound specifically per RE correlate with the
 ```{r ntotalspecificREcor, purl = FALSE, fig.height = 5.5, fig.width = 8}
 # plot number of protein variants bound specifically vs. number bound total per
 # RE/bg
-nboundspecificvtotalplot <- nspecificRE %>%
+nboundspecificvtotalplotAncSR1 <- nspecificRE %>%
   rename(nspecific = nproteinvars) %>%
   full_join(nboundRE) %>%
   rename(ntotal = n) %>%
-  ggplot(aes(x = ntotal, y = nspecific)) +
+  filter(bg == "AncSR1") %>%
+  {ggplot(., aes(x = ntotal, y = nspecific)) +
   geom_smooth(method = "lm", color = "black") +
-  geom_point(aes(color = bg)) +
+  geom_point(color = bg_color("AncSR1")) +
   geom_text_repel(aes(label = RE), box.padding = 0.15) +
-  facet_wrap(vars(bg), ncol = 2, scales = "free") +
-  scale_color_manual(values = bg_color(), name = "Ancestral\nbackground") +
-  ylim(0, NA) +
-  labs(x = "Number of protein variants bound total",
-       y = "Number of protein variants bound specifically") +
+  annotate(geom = "text", x = 0, y = 40, hjust = 0, vjust = 1, size = 5,
+           label = paste(
+             "adj.~R^2==", round(summary(lm(nspecific ~ ntotal, .))$adj.r.squared, 2)
+           ), parse = TRUE) +
+  labs(title = "AncSR1", 
+       x = "Number of protein\nvariants bound total",
+       y = "Number of protein variants\nbound specifically") +
   theme_classic() +
   theme(text = element_text(size = fontsize),
-        legend.text = element_text(size = fontsize),
         strip.background = element_blank(),
-        strip.text = element_blank(),
-        legend.position = "right")
-nboundspecificvtotalplot
+        strip.text = element_blank())}
+nboundspecificvtotalplotAncSR2 <- nspecificRE %>%
+  rename(nspecific = nproteinvars) %>%
+  full_join(nboundRE) %>%
+  rename(ntotal = n) %>%
+  filter(bg == "AncSR2") %>%
+  {ggplot(., aes(x = ntotal, y = nspecific)) +
+  geom_smooth(method = "lm", color = "black") +
+  geom_point(color = bg_color("AncSR2")) +
+  geom_text_repel(aes(label = RE), box.padding = 0.15) +
+  annotate(geom = "text", x = 0, y = 600, hjust = 0, vjust = 1, size = 5,
+           label = paste(
+             "adj.~R^2==", round(summary(lm(nspecific ~ ntotal, .))$adj.r.squared, 2)
+           ), parse = TRUE) +
+  labs(title = "AncSR2", 
+       x = "Number of protein\nvariants bound total",
+       y = "Number of protein variants\nbound specifically") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        strip.background = element_blank(),
+        strip.text = element_blank())}
+nboundspecificvtotalplotAncSR1 + nboundspecificvtotalplotAncSR2
 
 # print Pearson's r^2 between total and specific variants bound per RE in each
 # background
@@ -1641,8 +921,8 @@ npromiscuousREpairs <- map_dfr(combn(colnames(meanF_data_specificity)[19:34], 2,
                                                          collapse = "_"),
                                            n = sum(n == 2))) %>%
   separate(pairs, c("RE1", "RE2"), sep = "_") %>%
-  mutate(RE1 = factor(RE1, levels = levels(REs[[1]])),
-         RE2 = factor(RE2, levels = levels(REs[[1]])))
+  mutate(RE1 = factor(RE1, levels = levels(REs[[6]])),
+         RE2 = factor(RE2, levels = levels(REs[[6]])))
 
 promiscuousheatmapAncSR1 <- npromiscuousREpairs %>%
   filter(bg == "AncSR1") %>%
@@ -1702,8 +982,8 @@ promiscuousheatmapbothbg <- npromiscuousREpairs %>%
   ggplot(aes(fill = frac)) +
   geom_tile(data = . %>% filter(bg == "AncSR1"), aes(x = RE1, y = RE2)) +
   geom_tile(data = . %>% filter(bg == "AncSR2"), aes(x = RE2, y = RE1)) +
-  scale_x_discrete(limits = levels(REs[[1]])) +
-  scale_y_discrete(limits = levels(REs[[1]])) +
+  scale_x_discrete(limits = levels(REs[[6]])) +
+  scale_y_discrete(limits = levels(REs[[6]])) +
   scale_fill_viridis(limits = c(0, 0.48)) +
   labs(x = "", y = "", fill = "Fraction of\nprotein variants") +
   theme_classic() +
@@ -1722,7 +1002,7 @@ specificheatmapAncSR1 <- nspecificRE %>%
                                   nrow())) %>%
   ggplot(aes(x = RE, y = "Specific", fill = frac)) +
   geom_tile() +
-  scale_x_discrete(limits = levels(REs[[1]]), position = "top") +
+  scale_x_discrete(limits = levels(REs[[6]]), position = "top") +
   scale_fill_viridis(limits = c(0, 0.48)) +
   labs(x = "AncSR1 background", y = "", fill = "Fraction of\nprotein variants") +
   theme_classic() +
@@ -1742,7 +1022,7 @@ specificheatmapAncSR2 <- nspecificRE %>%
                                   nrow())) %>%
   ggplot(aes(x = "Specific", y = RE, fill = frac)) +
   geom_tile() +
-  scale_y_discrete(limits = levels(REs[[1]]), position = "right") +
+  scale_y_discrete(limits = levels(REs[[6]]), position = "right") +
   scale_fill_viridis(limits = c(0, 0.48)) +
   labs(x = "", y = "AncSR2 background", fill = "Fraction of\nprotein variants") +
   theme_classic() +
@@ -1773,8 +1053,8 @@ promiscuousspecificheatmapAncSR1 <- nspecificRE %>%
   ggplot(aes(fill = n)) +
   geom_tile(aes(x = RE1, y = RE2)) +
   geom_tile(aes(x = RE2, y = RE1)) +
-  scale_x_discrete(limits = levels(REs[[1]])) +
-  scale_y_discrete(limits = levels(REs[[1]])) +
+  scale_x_discrete(limits = levels(REs[[6]])) +
+  scale_y_discrete(limits = levels(REs[[6]])) +
   scale_fill_viridis() +
   labs(x = "", y = "", title = "AncSR1", fill = "Number of\nprotein variants") +
   theme_classic() +
@@ -1796,8 +1076,8 @@ promiscuousspecificheatmapAncSR2 <- nspecificRE %>%
   ggplot(aes(fill = n)) +
   geom_tile(aes(x = RE1, y = RE2)) +
   geom_tile(aes(x = RE2, y = RE1)) +
-  scale_x_discrete(limits = levels(REs[[1]])) +
-  scale_y_discrete(limits = levels(REs[[1]])) +
+  scale_x_discrete(limits = levels(REs[[6]])) +
+  scale_y_discrete(limits = levels(REs[[6]])) +
   scale_fill_viridis() +
   labs(x = "", y = "", title = "AncSR2", fill = "Number of\nprotein variants") +
   theme_classic() +
@@ -1920,26 +1200,36 @@ coboundpairstruevpredplotAncSR1 <- REpairs %>%
   filter(bg == "AncSR1") %>%
   unite(RE1, RE2, col = "REs") %>%
   select(REs, p12true, p12pred) %>%
-  ggplot(aes(x = p12pred, y = p12true)) +
-  geom_point(color = bg_color()[1]) +
-  # geom_smooth(method = "lm", color = "red") +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
+  {ggplot(., aes(x = p12pred, y = p12true)) +
+  geom_point(color = bg_color("AncSR1")) +
+  geom_smooth(method = "lm", color = "black") +
+  # geom_abline(slope = 1, intercept = 0, color = "red") +
+  # coord_obs_pred() +
+  annotate(geom = "text", x = 0, y = 0.08, label = paste(
+    "adj.~R^2==", round(summary(lm(p12true ~ p12pred, .))$adj.r.squared, 2)
+  ), parse = TRUE, hjust = 0, size = 5, vjust = 1) +
   labs(y = "true co-binding frequency", 
-       x = "predicted independent co-binding frequency",
+       x = "predicted independent\nco-binding frequency",
        title = "AncSR1") +
-  theme_classic()
+  theme_classic() +
+  theme(text = element_text(size = fontsize))}
 coboundpairstruevpredplotAncSR2 <- REpairs %>%
   filter(bg == "AncSR2") %>%
   unite(RE1, RE2, col = "REs") %>%
   select(REs, p12true, p12pred) %>%
-  ggplot(aes(x = p12pred, y = p12true)) +
-  geom_point(color = bg_color()[2]) +
-  # geom_smooth(method = "lm", color = "red") +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
+  {ggplot(., aes(x = p12pred, y = p12true)) +
+  geom_point(color = bg_color("AncSR2")) +
+  geom_smooth(method = "lm", color = "black") +
+  # geom_abline(slope = 1, intercept = 0, color = "red") +
+  # coord_obs_pred() +
+  annotate(geom = "text", x = 0, y = 0.08, label = paste(
+    "adj.~R^2==", round(summary(lm(p12true ~ p12pred, .))$adj.r.squared, 2)
+  ), parse = TRUE, hjust = 0, size = 5, vjust = 1) +
   labs(y = "true co-binding frequency", 
-       x = "predicted independent co-binding frequency",
+       x = "predicted independent\nco-binding frequency",
        title = "AncSR2") +
-  theme_classic()
+  theme_classic() +
+  theme(text = element_text(size = fontsize))}
 coboundpairstruevpredplotAncSR1 + coboundpairstruevpredplotAncSR2
 
 # How much more likely is an RE variant to be cobound with another RE variant 
@@ -2045,6 +1335,770 @@ coboundpairstruevpredplotAncSR2SRE <- data.frame(pred = lmH1$fitted.values,
     labs(title = "AncSR2 independent frequency\npredictions + SRE1 + SRE2"))
 ```
 
+
+
+## What is the mechanism behind more functional variants in the AncSR2 vs. AncSR1 background?
+
+```{r meanF_data_fxnal, purl = TRUE}
+# get protein:RE variants that are functional in both backgrounds
+meanF_data_fxnal <- meanF_data %>%
+  select(bg:avg_meanF, type, meanF_REP1:meanF_REP4, sd_meanF, functional, active) %>%
+  pivot_wider(names_from = bg, values_from = avg_meanF:active) %>%
+  filter(functional_AncSR1 | functional_AncSR2)
+```
+
+```{r permissivemech, purl = TRUE, fig.width = 7}
+# How many variants that are functional in at least one ancestral background 
+# have higher fluorescence in AncSR2? Use a nonparametric bootstrap test (like 
+# the one used above for classifying functional variants) for variants with 
+# model-predicted fluorescence in at least one background; for all others, use a 
+# t-test.
+if(!file.exists(file.path(results_dir, "phigherAncSR2.rda"))) {
+  nbootstrap <- 1000
+  phigherAncSR2 <- numeric(length = nrow(meanF_data_fxnal))
+  for(i in 1:nrow(meanF_data_fxnal)) {
+    # if fluorescence is from binned sort in both backgrounds, use a t-test
+    if(meanF_data_fxnal$type_AncSR1[i] == "binned" && 
+       meanF_data_fxnal$type_AncSR2[i] == "binned") {
+      p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
+                    select(grep("meanF_REP._AncSR1", 
+                                colnames(meanF_data_fxnal), 
+                                value = T)),
+                  meanF_data_fxnal %>% slice(i) %>% 
+                    select(grep("meanF_REP._AncSR2", 
+                                colnames(meanF_data_fxnal), 
+                                value = T)),
+                  alternative = "less",
+                  na.action = "na.omit")$p.value
+    } 
+    # if fluorescence is model-predicted in either background, use bootstrap test
+    else if(meanF_data_fxnal$type_AncSR1[i] == "predicted" ||
+            meanF_data_fxnal$type_AncSR2[i] == "predicted" ||
+            (meanF_data_fxnal$RE[i] == "GA" &&
+             (meanF_data_fxnal$type_AncSR1[i] == "debulk" ||
+              meanF_data_fxnal$type_AncSR2[i] == "debulk"))) {
+      meanF_AncSR1 <- meanF_data_fxnal$avg_meanF_AncSR1[i]
+      meanF_AncSR2 <- meanF_data_fxnal$avg_meanF_AncSR2[i]
+      if(meanF_data_fxnal$type_AncSR1[i] %in% c("predicted", "debulk")) {
+        # residual distribution centered around meanF of AncSR1 test variant
+        res <- AncSR1.cv %>% 
+          filter(pred > meanF_AncSR1 - 0.1 & pred < meanF_AncSR1 + 0.1) %>% 
+          pull(res)
+        # bootstrap
+        meanF_AncSR1 <- sample(meanF_AncSR1 + res, nbootstrap, replace = TRUE)
+      }
+      if(meanF_data_fxnal$type_AncSR2[i] %in% c("predicted", "debulk")) {
+        # residual distribution centered around meanF of AncSR2 test variant
+        res <- AncSR2.cv %>% 
+          filter(pred > meanF_AncSR2 - 0.1 & pred < meanF_AncSR2 + 0.1) %>% 
+          pull(res)
+        # bootstrap
+        meanF_AncSR2 <- sample(meanF_AncSR2 + res, nbootstrap, replace = TRUE)
+      }
+      p <- sum(meanF_AncSR1 >= meanF_AncSR2) / nbootstrap
+    } 
+    # otherwise one variant must have fluorescence inferred from binned sort and
+    # the other from debulk sort; use a one-sample t-test
+    else {
+      if(meanF_data_fxnal$type_AncSR1[i] == "debulk") {
+        p <- t.test(meanF_data_fxnal %>% slice(i) %>%
+                      select(grep("meanF_REP._AncSR2",
+                                  colnames(meanF_data_fxnal),
+                                  value = T)),
+                    alternative = "greater",
+                    mu = meanF_data_fxnal$avg_meanF_AncSR1[i],
+                    na.action = "na.omit")$p.value
+      } else {
+        p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
+                      select(grep("meanF_REP._AncSR1", 
+                                  colnames(meanF_data_fxnal), 
+                                  value = T)),
+                    alternative = "less",
+                    mu = meanF_data_fxnal$avg_meanF_AncSR2[i],
+                    na.action = "na.omit")$p.value
+      }
+    }
+    phigherAncSR2[i] <- p
+  }
+  
+  save(phigherAncSR2, file = file.path(results_dir, "phigherAncSR2.rda"))
+} else load(file.path(results_dir, "phigherAncSR2.rda"))
+
+# FDR correction
+padjhigherAncSR2 <- p.adjust(phigherAncSR2, "fdr")
+print(paste("variants with higher fluorescence in AncSR2:", 
+            sum(padjhigherAncSR2 < 0.05)))
+print(paste("Fraction variants with higher fluorescence in AncSR2 out of those that are functional in either background:", 
+            sum(padjhigherAncSR2 < 0.05) / nrow(meanF_data_fxnal)))
+
+# FDR correction for only those variants that were measured in the binned sort
+# in both backgrounds
+padjhigherAncSR2binned <- p.adjust(
+  phigherAncSR2[meanF_data_fxnal$type_AncSR1 == "binned" & meanF_data_fxnal$type_AncSR2 == "binned"],
+  "fdr")
+print(paste("variants with higher fluorescence in AncSR2 (binned only):", 
+            sum(padjhigherAncSR2binned < 0.05)))
+print(paste("Fraction variants with higher fluorescence in AncSR2 out of those that are functional in either background (binned only):", 
+            sum(padjhigherAncSR2binned < 0.05) / length(padjhigherAncSR2binned)))
+
+# plot fluorescence in each background colored by significance (only variants
+# with binned sort measurements for both backgrounds)
+bgfluorscatterplot <- meanF_data_fxnal %>%
+  filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+  mutate(padj = padjhigherAncSR2binned) %>%
+  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
+  geom_point(alpha = 0.5) +
+  # geom_linerange(aes(xmin = avg_meanF_AncSR1 - sd_meanF_AncSR1 * 1.96,
+  #                    xmax = avg_meanF_AncSR1 + sd_meanF_AncSR1 * 1.96)) +
+  # geom_linerange(aes(ymin = avg_meanF_AncSR2 - sd_meanF_AncSR2 * 1.96,
+  #                    ymax = avg_meanF_AncSR2 + sd_meanF_AncSR2 * 1.96)) +
+  scale_color_discrete(labels = c(paste0("Not significant (", 
+                                         round((1 - sum(padjhigherAncSR2binned < 0.05) / 
+                                                   length(padjhigherAncSR2binned)) * 100, 1), "%)"),
+                                  paste0("Significant (", 
+                                         round(sum(padjhigherAncSR2binned < 0.05) / 
+                                                  length(padjhigherAncSR2binned) * 100, 1), "%)")),
+                       name = "Higher fluorescence in\nAncSR2 background") +
+  labs(x = "Fluorescence in AncSR1 background",
+       y = "Fluorescence in AncSR2 background") +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+bgfluorscatterplot
+
+# split scatter plot by RE
+bgfluorscatterbyRE <- meanF_data_fxnal %>%
+  filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+  mutate(padj = padjhigherAncSR2binned) %>%
+  group_by(RE) %>%
+  mutate(frachigher = sum(padj < 0.05) / n(), 2) %>%
+  {ggplot(., aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
+  geom_point(alpha = 0.5) +
+  # geom_linerange(aes(xmin = avg_meanF_AncSR1 - sd_meanF_AncSR1 * 1.96,
+  #                    xmax = avg_meanF_AncSR1 + sd_meanF_AncSR1 * 1.96)) +
+  # geom_linerange(aes(ymin = avg_meanF_AncSR2 - sd_meanF_AncSR2 * 1.96,
+  #                    ymax = avg_meanF_AncSR2 + sd_meanF_AncSR2 * 1.96)) +
+  facet_wrap(vars(RE)) +
+  scale_color_manual(labels = c("Not higher in AncSR2", "Higher in AncSR2"), 
+                     values = c("gray", "red"),
+                     name = "") +
+  geom_text(data = distinct(., RE, .keep_all = TRUE), 
+            aes(label = sprintf("%0.2f", frachigher)), x = -2.8, y = -4.4, color = "black",
+            vjust = 0, hjust = 1) +
+  labs(x = "Fluorescence in AncSR1 background",
+       y = "Fluorescence in AncSR2 background") +
+  geom_abline(slope = 1, intercept = 0, color = "gray", linetype = "dashed") +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()}
+bgfluorscatterbyRE
+
+
+# logo plots for ERE variants with higher vs. not higher fluorescence in AncSR2
+EREAncSR2logo <- list("All ERE binders" = meanF_data_fxnal %>%
+                              filter(RE == "ERE (GT)") %>%
+                              pull(AA_var) %>% as.character(),
+                            "Not higher on AncSR2" = meanF_data_fxnal %>%
+                              filter(RE == "ERE (GT)", padjhigherAncSR2 >= 0.05) %>%
+                              pull(AA_var) %>% as.character()) %>%
+  ggseqlogo(method = "probability") +
+  xlab("RH site") +
+  theme(legend.position = "none")
+EREAncSR2logo
+
+EREAncSR2logo <- list("Higher on AncSR2" = meanF_data_fxnal %>%
+                              filter(RE == "ERE (GT)", padjhigherAncSR2 < 0.05) %>%
+                        filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+                              pull(AA_var) %>% as.character(),
+                            "Not higher on AncSR2" = meanF_data_fxnal %>%
+                              filter(RE == "ERE (GT)", padjhigherAncSR2 >= 0.05) %>%
+                        filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+                              pull(AA_var) %>% as.character()) %>%
+  ggseqlogo(method = "probability") +
+  xlab("RH site") +
+  theme(legend.position = "none")
+EREAncSR2logo
+
+list("AncSR1" = meanF_data %>%
+       filter(RE == "ERE (GT)", bg == "AncSR1", functional) %>%
+       pull(AA_var) %>% as.character(),
+     "AncSR2" = meanF_data %>%
+       filter(RE == "ERE (GT)", bg == "AncSR2", functional) %>%
+       pull(AA_var) %>% as.character()) %>%
+  ggseqlogo(method = "probability") +
+  xlab("RH site") +
+  theme(legend.position = "none")
+```
+
+
+Which variants have significantly *lower* expression in the AncSR2 background?
+
+```{r, purl = FALSE, eval = FALSE}
+# How many variants that are functional in at least one ancestral background 
+# have lower fluorescence in AncSR2? Use a nonparametric bootstrap test (like 
+# the one used above for classifying functional variants) for variants with 
+# model-predicted fluorescence in at least one background; for all others, use a 
+# t-test.
+if(!file.exists(file.path(results_dir, "plowerAncSR2.rda"))) {
+  nbootstrap <- 1000
+  plowerAncSR2 <- numeric(length = nrow(meanF_data_fxnal))
+  for(i in 1:nrow(meanF_data_fxnal)) {
+    # if fluorescence is from binned sort in both backgrounds, use a two-sample 
+    # t-test
+    if(meanF_data_fxnal$type_AncSR1[i] == "binned" && 
+       meanF_data_fxnal$type_AncSR2[i] == "binned") {
+      p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
+                    select(grep("meanF_REP._AncSR1", 
+                                colnames(meanF_data_fxnal), 
+                                value = T)),
+                  meanF_data_fxnal %>% slice(i) %>% 
+                    select(grep("meanF_REP._AncSR2", 
+                                colnames(meanF_data_fxnal), 
+                                value = T)),
+                  alternative = "greater",
+                  na.action = "na.omit")$p.value
+    } 
+    # if fluorescence is model-predicted in either background, use bootstrap test
+    else if(meanF_data_fxnal$type_AncSR1[i] == "predicted" ||
+            meanF_data_fxnal$type_AncSR2[i] == "predicted" ||
+            (meanF_data_fxnal$RE[i] == "GA" &&
+             (meanF_data_fxnal$type_AncSR1[i] == "debulk" ||
+              meanF_data_fxnal$type_AncSR2[i] == "debulk"))) {
+      meanF_AncSR1 <- meanF_data_fxnal$avg_meanF_AncSR1[i]
+      meanF_AncSR2 <- meanF_data_fxnal$avg_meanF_AncSR2[i]
+      if(meanF_data_fxnal$type_AncSR1[i] %in% c("predicted", "debulk")) {
+        # residual distribution centered around meanF of AncSR1 test variant
+        res <- AncSR1.cv %>% 
+          filter(pred > meanF_AncSR1 - 0.1 & pred < meanF_AncSR1 + 0.1) %>% 
+          pull(res)
+        # bootstrap
+        meanF_AncSR1 <- sample(meanF_AncSR1 + res, nbootstrap, replace = TRUE)
+      }
+      if(meanF_data_fxnal$type_AncSR2[i] %in% c("predicted", "debulk")) {
+        # residual distribution centered around meanF of AncSR2 test variant
+        res <- AncSR2.cv %>% 
+          filter(pred > meanF_AncSR2 - 0.1 & pred < meanF_AncSR2 + 0.1) %>% 
+          pull(res)
+        # bootstrap
+        meanF_AncSR2 <- sample(meanF_AncSR2 + res, nbootstrap, replace = TRUE)
+      }
+      p <- sum(meanF_AncSR2 >= meanF_AncSR1) / nbootstrap
+    } 
+    # otherwise one variant must have fluorescence inferred from binned sort and
+    # the other from debulk sort; use a one-sample t-test
+    else {
+      if(meanF_data_fxnal$type_AncSR1[i] == "debulk") {
+        p <- t.test(meanF_data_fxnal %>% slice(i) %>%
+                      select(grep("meanF_REP._AncSR2",
+                                  colnames(meanF_data_fxnal),
+                                  value = T)),
+                    alternative = "less",
+                    mu = meanF_data_fxnal$avg_meanF_AncSR1[i],
+                    na.action = "na.omit")$p.value
+      } else {
+        p <- t.test(meanF_data_fxnal %>% slice(i) %>% 
+                      select(grep("meanF_REP._AncSR1", 
+                                  colnames(meanF_data_fxnal), 
+                                  value = T)),
+                    alternative = "greater",
+                    mu = meanF_data_fxnal$avg_meanF_AncSR2[i],
+                    na.action = "na.omit")$p.value
+      }
+    }
+    plowerAncSR2[i] <- p
+  }
+  
+  save(plowerAncSR2, file = file.path(results_dir, "plowerAncSR2.rda"))
+} else load(file.path(results_dir, "plowerAncSR2.rda"))
+
+# FDR correction
+padjlowerAncSR2 <- p.adjust(plowerAncSR2, method = "fdr")
+
+# FDR correction for only those variants that were measured in the binned sort
+# in both backgrounds
+padjlowerAncSR2binned <- p.adjust(
+  plowerAncSR2[meanF_data_fxnal$type_AncSR1 == "binned" & 
+                  meanF_data_fxnal$type_AncSR2 == "binned"],
+  "fdr")
+
+bgfluorscatterbyRElowerAncSR2 <- meanF_data_fxnal %>%
+  filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+  mutate(padj = padjlowerAncSR2binned) %>%
+  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = padj < 0.05)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(vars(RE)) +
+  scale_color_discrete(labels = c("Not significant", "Significant"), 
+                       name = "Lower fluorescence in\nAncSR2 background,\nFDR = 0.2") +
+  labs(title = "ERE variants",
+       x = "Fluorescence in AncSR1 background",
+       y = "Fluorescence in AncSR2 background") +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+bgfluorscatterbyRElowerAncSR2
+
+meanF_data_fxnal %>%
+  ungroup() %>%
+  mutate(padj = padjlowerAncSR2 < 0.2) %>%
+  count(RE, padj) %>%
+  complete(RE, padj, fill = list(n = 0)) %>%
+  group_by(RE) %>%
+  mutate(frac = n / sum(n)) %>%
+  filter(padj)
+
+# just take the ones whose 95% CI is below the y=x line
+lower_AncSR2 <- meanF_data_fxnal %>%
+  filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+  filter(avg_meanF_AncSR1 - sd_meanF_AncSR1 * 1.96 > 
+           avg_meanF_AncSR2 + sd_meanF_AncSR2 * 1.96)
+
+EREAncSR2logo <- list("Higher on AncSR2" = meanF_data_fxnal %>%
+                        filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+                        mutate(padj = padjhigherAncSR2binned) %>%
+                        filter(RE == "ERE (GT)", padj < 0.05) %>%
+                        pull(AA_var) %>% as.character(),
+                      "Not higher on AncSR2" = lower_AncSR2 %>%
+                        filter(RE == "ERE (GT)") %>%
+                        pull(AA_var) %>% as.character()) %>%
+  ggseqlogo(method = "probability") +
+  xlab("RH site") +
+  theme(legend.position = "none")
+EREAncSR2logo
+```
+
+Fitting models of nonspecific epistasis to by-background fluorescence data.
+
+Nonspecific epistasis is modeled using the function
+
+$$
+F_2^* = \frac{F_1^* \alpha^n}{1 + F_1^* \alpha^n - F_1^*}
+$$
+where $F_1^*$ and $F_2^*$ are normalized fluorescence in the AncSR1 and AncSR2 backgrounds, respectively, $\alpha$ represents the effect of the background substitutions on affinity and/or stability of the DBD, and $n$ is a factor adjusting for the effect of affinity/stability on fluorescence. Fluorescence is normalized as
+
+$$
+F^* = \frac{F-F_L}{F_U-F_L}
+$$
+
+where $F_L$ and $F_U$ represent upper and lower measurement bounds, respectively. This model is modified from Park et al. 2022.
+
+```{r bgnonspecificepistasis, purl = TRUE}
+# get lower and upper bounds for each background inferred from RFA models
+load(file.path(basedir, "results", "mutation_effects_model", "AncSR1_UL_fit.rda"))
+load(file.path(basedir, "results", "mutation_effects_model", "AncSR2_UL_fit.rda"))
+AncSR1_UL <- AncSR1_UL_fit$par[(length(AncSR1_UL_fit$par)-1):length(AncSR1_UL_fit$par)]
+AncSR2_UL <- AncSR2_UL_fit$par[(length(AncSR2_UL_fit$par)-1):length(AncSR2_UL_fit$par)]
+rm(AncSR1_UL_fit, AncSR2_UL_fit)
+
+# fit a model with the same epistasis parameter (alpha) for all REs
+bgepistasismodeldata <- meanF_data_fxnal %>%
+  filter(type_AncSR1 == "binned", type_AncSR2 == "binned") %>%
+  mutate(padj = padjhigherAncSR2binned,
+         meanF_AncSR1_norm = 
+           (avg_meanF_AncSR1 - AncSR1_UL[1]) / (AncSR1_UL[2] - AncSR1_UL[1]),
+         meanF_AncSR2_norm = 
+           (avg_meanF_AncSR2 - AncSR2_UL[1]) / (AncSR2_UL[2] - AncSR2_UL[1]),
+         ERE = RE == "ERE (GT)")
+
+bgepistasismodel <- onlsmod(meanF_AncSR2_norm ~ meanF_AncSR1_norm * I((alpha)^n) /
+                           (1 + meanF_AncSR1_norm * I((alpha)^n) - meanF_AncSR1_norm),
+                         bgepistasismodeldata, start = list(alpha = 1, n = 1),
+                         lower = c(1, 1), domain = c(0, 1))
+print(bgepistasismodel)
+plot(bgepistasismodel, segments = T, fitted.nls = F)
+check_o(bgepistasismodel)
+
+# get r^2 of model
+cor(bgepistasismodel$y0, bgepistasismodel$resp)^2
+
+# bootstrapping fits (1000 reps)
+if(!file.exists(file.path(results_dir, "nonspecificepistasisbsallREs.rda"))) {
+  # number of variants
+  n <- bgepistasismodeldata %>% nrow()
+  
+  # parallel processing
+  cores <- 20
+  cl <- parallel::makeCluster(cores, "FORK", outfile = "")
+  registerDoParallel(cl)
+  
+  nonspecificepistasisbsallREs <- foreach(i = 1:cores, .combine = 'rbind') %dopar% {
+    # data frame to store bootstrapped parameter estimates
+    bsdf <- data.frame(alpha = rep(0, 50), n = rep(0, 50))
+    
+    for(i in 1:50) {
+      # sample non-ERE binding variants
+      bs <- sample(n, n, replace = T)
+      bs_data <- bgepistasismodeldata %>% slice(bs)
+      # fit model
+      bsdf[i,1:2] <- coef(
+        onlsmod(meanF_AncSR2_norm ~ meanF_AncSR1_norm * I((alpha)^n) /
+                  (1 + meanF_AncSR1_norm * I((alpha)^n) - meanF_AncSR1_norm),
+                bs_data, start = list(alpha = 1, n = 1),
+                lower = c(1, 1), domain = c(0, 1), verbose = F))
+    }
+    
+    bsdf
+  }
+  stopCluster(cl)
+  save(nonspecificepistasisbsallREs, 
+       file = file.path(results_dir, "nonspecificepistasisbsallREs.rda"))
+} else load(file.path(results_dir, "nonspecificepistasisbsallREs.rda"))
+
+# get 95% confidence intervals
+bgepistasisbsciallREs <- nonspecificepistasisbsallREs[sort(nonspecificepistasisbsallREs[,1])[c(25, 976)],]
+
+# plot inferred model
+bgfluorscatterplotfit <- bgepistasismodeldata %>%
+  arrange(desc(padj)) %>%
+  ggplot(aes(x = meanF_AncSR1_norm)) +
+  geom_point(aes(y = meanF_AncSR2_norm, color = padj < 0.05), size = 2) +
+  # 95% confidence intervals
+  # geom_ribbon(data = data.frame(
+  #   x = seq(0, 1, 0.01), 
+  #   lower = bgepistasisfn(seq(0, 1, 0.01), bgepistasisbsciallREs[1,1], bgepistasisbsciallREs[1,2]),
+  #   upper = bgepistasisfn(seq(0, 1, 0.01), bgepistasisbsciallREs[2,1], bgepistasisbsciallREs[2,2])),
+  #   aes(x = x, ymin = lower, ymax = upper),
+  #   fill = "black", alpha = 0.3) +
+  scale_color_manual(values = c("FALSE" = "gray40", 
+                                "TRUE" = "red"),
+                     name = "Fluorescence\nhigher in AncSR2") +
+  geom_function(fun = bgepistasisfn,
+                args = list(alpha = coef(bgepistasismodel)[1],
+                            n = coef(bgepistasismodel)[2]),
+                color = "black", xlim = c(0, 1), linewidth = 1) +
+  geom_function(fun = function(x) x, color = "gray", 
+                linetype = "dashed", linewidth = 1, xlim = c(0,1)) +
+  # 95% prediction intervals
+  # geom_line(data = bgepistasisbspinonERE, aes(x = x, y = lower95PI),
+  #           color = "black", linetype = "dashed", linewidth = 1) +
+  # geom_line(data = bgepistasisbspinonERE, aes(x = x, y = upper95PI),
+  #           color = "black", linetype = "dashed", linewidth = 1) +
+  labs(x = "Fluorescence in AncSR1 background",
+       y = "Fluorescence in AncSR2 background") +
+  xlim(-0.1, 1.1) + ylim(-0.1, 1.1) +
+  # geom_abline(slope = 1, intercept = 0, color = "gray", 
+  #             linetype = "dashed", linewidth = 1, xlim = c(0,1)) +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+bgfluorscatterplotfit
+
+# fit a model for only non-ERE data
+bgepistasismodelnonERE <- onlsmod(meanF_AncSR2_norm ~ meanF_AncSR1_norm * I((alpha)^n) /
+                                    (1 + meanF_AncSR1_norm * I((alpha)^n) - meanF_AncSR1_norm),
+                                  filter(bgepistasismodeldata, !ERE), start = list(alpha = 1, n = 1),
+                                  lower = c(1, 1), domain = c(0, 1))
+print(bgepistasismodelnonERE)
+plot(bgepistasismodelnonERE, segments = F, fitted.nls = F)
+check_o(bgepistasismodelnonERE)
+cor(bgepistasismodelnonERE$y0, bgepistasismodelnonERE$resp)^2
+
+# fit a model for only ERE data
+bgepistasismodelERE <- onlsmod(meanF_AncSR2_norm ~ meanF_AncSR1_norm * I((alpha)^n) /
+                                    (1 + meanF_AncSR1_norm * I((alpha)^n) - meanF_AncSR1_norm),
+                                  filter(bgepistasismodeldata, ERE), start = list(alpha = 1, n = 1),
+                                  lower = c(1, 1), domain = c(0, 1))
+print(bgepistasismodelERE)
+plot(bgepistasismodelERE, segments = F, fitted.nls = F)
+check_o(bgepistasismodelERE)
+cor(bgepistasismodelERE$y0, bgepistasismodelERE$resp)^2
+
+# bootstrapping fits (1000 reps)
+if(!file.exists(file.path(results_dir, "nonspecificepistasisbs.rda"))) {
+  # number of ERE/non-ERE binding variants
+  n_nonERE <- bgepistasismodeldata %>% filter(!ERE) %>% nrow()
+  n_ERE <- bgepistasismodeldata %>% filter(ERE) %>% nrow()
+  
+  # parallel processing
+  cores <- 20
+  cl <- parallel::makeCluster(cores, "FORK", outfile = "")
+  registerDoParallel(cl)
+  
+  nonspecificepistasisbs <- foreach(i = 1:cores, .combine = 'rbind') %dopar% {
+    # data frame to store bootstrapped parameter estimates
+    bsdf <- data.frame(nonEREalpha = rep(0, 50), nonEREn = rep(0, 50),
+                       EREalpha = rep(0, 50), EREn = rep(0, 50))
+    
+    for(i in 1:50) {
+      # sample non-ERE binding variants
+      bs_nonERE <- sample(n_nonERE, n_nonERE, replace = T)
+      bs_nonERE_data <- bgepistasismodeldata %>% filter(!ERE) %>% slice(bs_nonERE)
+      # fit model
+      bsdf[i,1:2] <- coef(
+        onlsmod(meanF_AncSR2_norm ~ meanF_AncSR1_norm * I((alpha)^n) /
+                  (1 + meanF_AncSR1_norm * I((alpha)^n) - meanF_AncSR1_norm),
+                bs_nonERE_data, start = list(alpha = 1, n = 1),
+                lower = c(1, 1), domain = c(0, 1), verbose = F))
+      
+      # sample ERE-binding variants
+      bs_ERE <- sample(n_ERE, n_ERE, replace = T)
+      bs_ERE_data <- bgepistasismodeldata %>% filter(ERE) %>% slice(bs_ERE)
+      # fit model
+      bsdf[i,3:4] <- coef(
+        onlsmod(meanF_AncSR2_norm ~ meanF_AncSR1_norm * I((alpha)^n) /
+                  (1 + meanF_AncSR1_norm * I((alpha)^n) - meanF_AncSR1_norm),
+                bs_ERE_data, start = list(alpha = 1, n = 1),
+                lower = c(1, 1), domain = c(0, 1), verbose = F))
+    }
+    
+    bsdf
+  }
+  stopCluster(cl)
+  save(nonspecificepistasisbs, file = file.path(results_dir, "nonspecificepistasisbs.rda"))
+} else load(file.path(results_dir, "nonspecificepistasisbs.rda"))
+
+# bootstrap prediction intervals
+bgepistasisfn <- function(AncSR1_norm, alpha, n) {
+  AncSR1_norm * alpha^n / (1 + AncSR1_norm * alpha^n - AncSR1_norm)
+}
+
+# get predicted AncSR2 fluorescence for bootstrapped models
+bgepistasisbsprednonERE <- t(apply(nonspecificepistasisbs, 1, 
+                                 function(x) bgepistasisfn(seq(0, 1, 0.01), x[1], x[2])))
+bgepistasisbspredERE <- t(apply(nonspecificepistasisbs, 1, 
+                                function(x) bgepistasisfn(seq(0, 1, 0.01), x[3], x[4])))
+
+# get 95% confidence intervals
+bgepistasisbscinonERE <- nonspecificepistasisbs[sort(nonspecificepistasisbs[,1])[c(25, 976)], 1:2]
+bgepistasisbsciERE <- nonspecificepistasisbs[sort(nonspecificepistasisbs[,3])[c(25, 976)], 3:4]
+
+# get 95% prediction intervals
+bgepistasisbspinonERE <- apply(bgepistasisbsprednonERE, 2, function(x) sort(x)[c(25, 976)])
+bgepistasisbspiERE <- apply(bgepistasisbspredERE, 2, function(x) sort(x)[c(25, 976)])
+
+# reformat for plotting
+bgepistasisbspinonERE <- data.frame(x = seq(0, 1, 0.01),
+                                    lower95PI = bgepistasisbspinonERE[1,],
+                                    upper95PI = bgepistasisbspinonERE[2,])
+bgepistasisbspiERE <- data.frame(x = seq(0, 1, 0.01),
+                                 lower95PI = bgepistasisbspiERE[1,],
+                                 upper95PI = bgepistasisbspiERE[2,])
+
+
+# which variants are significantly outside of the 95% prediction interval?
+# look for variants for which the SD of fluorescence in both backgrounds is outside of the lower
+# bounds of the prediction interval.
+
+# get bootstrap models for the lower bound of the 95% prediction interval
+
+# inverse bg epistasis function
+bgepistasisfninv <- function(AncSR2_norm, alpha, n) {
+  AncSR2_norm / (alpha^n + AncSR2_norm * (1 - alpha ^n))
+}
+
+# ERE binders
+lowerPIERE <- which(apply(bgepistasisbspredERE, 1, function(x) 
+  sum(x == bgepistasisbspiERE$lower95PI)) >= 100)
+bgepistasismodeldataERE <- bgepistasismodeldata %>%
+  filter(ERE) %>%
+  mutate(lower95PIEREAncSR2 = bgepistasisfn(meanF_AncSR1_norm, 
+                                            nonspecificepistasisbs[lowerPIERE, 3], 
+                                            nonspecificepistasisbs[lowerPIERE, 4]),
+         lower95PIEREAncSR1 = bgepistasisfninv(meanF_AncSR2_norm, 
+                                            nonspecificepistasisbs[lowerPIERE, 3], 
+                                            nonspecificepistasisbs[lowerPIERE, 4]),
+         lower95PIEREAncSR2_unnorm = lower95PIEREAncSR2 * (AncSR2_UL[2] - AncSR2_UL[1]) + AncSR2_UL[1],
+         lower95PIEREAncSR1_unnorm = lower95PIEREAncSR1 * (AncSR1_UL[2] - AncSR1_UL[1]) + AncSR1_UL[1],
+         negativespecificepistasis = avg_meanF_AncSR1 - 1.96 * sd_meanF_AncSR1 > lower95PIEREAncSR1_unnorm & 
+           avg_meanF_AncSR2 + 1.96 * sd_meanF_AncSR2 < lower95PIEREAncSR2_unnorm)
+
+# logo plots of ERE-binding variants with significant specific negative epistasis
+EREepistasislogo <- list("All ERE binders" = bgepistasismodeldataERE %>%
+                        pull(AA_var) %>% as.character(),
+                        "ERE binders with specific\nnegative interactions\nwith background substitutions" = 
+                          bgepistasismodeldataERE %>%
+                          filter(negativespecificepistasis) %>%
+                          pull(AA_var) %>% as.character()) %>%
+  ggseqlogo(method = "probability") +
+  xlab("RH site") +
+  theme(legend.position = "none",text = element_text(size = fontsize))
+EREepistasislogo
+
+# Other RE binders
+lowerPInonERE <- which(apply(bgepistasisbsprednonERE, 1, function(x) 
+  sum(x == bgepistasisbspinonERE$lower95PI)) >= 100)
+bgepistasismodeldatanonERE <- bgepistasismodeldata %>%
+  filter(!ERE) %>%
+  mutate(lower95PInonEREAncSR2 = bgepistasisfn(meanF_AncSR1_norm, 
+                                            nonspecificepistasisbs[lowerPInonERE, 1], 
+                                            nonspecificepistasisbs[lowerPInonERE, 2]),
+         lower95PInonEREAncSR1 = bgepistasisfninv(meanF_AncSR2_norm, 
+                                            nonspecificepistasisbs[lowerPInonERE, 1], 
+                                            nonspecificepistasisbs[lowerPInonERE, 2]),
+         lower95PInonEREAncSR2_unnorm = lower95PInonEREAncSR2 * (AncSR2_UL[2] - AncSR2_UL[1]) + AncSR2_UL[1],
+         lower95PInonEREAncSR1_unnorm = lower95PInonEREAncSR1 * (AncSR1_UL[2] - AncSR1_UL[1]) + AncSR1_UL[1],
+         negativespecificepistasis = avg_meanF_AncSR1 - 1.96 * sd_meanF_AncSR1 > lower95PInonEREAncSR1_unnorm & 
+           avg_meanF_AncSR2 + 1.96 * sd_meanF_AncSR2 < lower95PInonEREAncSR2_unnorm)
+
+# logo plots of non-ERE-binding variants with significant specific negative epistasis
+nonEREepistasislogo <- list("All variants" = bgepistasismodeldatanonERE %>%
+                        pull(AA_var) %>% as.character(),
+                        "Specific negative epistasis with background substitutions" = 
+                          bgepistasismodeldatanonERE %>%
+                          filter(negativespecificepistasis) %>%
+                          pull(AA_var) %>% as.character()) %>%
+  ggseqlogo(method = "probability") +
+  xlab("RH site") +
+  theme(legend.position = "none")
+nonEREepistasislogo
+
+bgepistasismodeldatanonERE %>%
+  ggplot(aes(x = avg_meanF_AncSR1, y = avg_meanF_AncSR2, color = negativespecificepistasis)) +
+  geom_point(alpha = 0.5) +
+  geom_linerange(aes(xmin = avg_meanF_AncSR1 - sd_meanF_AncSR1 * 1.96,
+                     xmax = avg_meanF_AncSR1 + sd_meanF_AncSR1 * 1.96)) +
+  geom_linerange(aes(ymin = avg_meanF_AncSR2 - sd_meanF_AncSR2 * 1.96,
+                     ymax = avg_meanF_AncSR2 + sd_meanF_AncSR2 * 1.96)) +
+  # geom_function(fun = bgepistasisfn,
+  #               args = list(alpha = coef(bgepistasismodelnonERE)[1],
+  #                           n = coef(bgepistasismodelnonERE)[2]),
+  #               color = "black", xlim = c(0, 1), linewidth = 1) +
+  # 95% prediction intervals
+  geom_line(aes(y = lower95PInonEREAncSR2_unnorm),
+            color = "black", linetype = "dashed", linewidth = 1) +
+  labs(x = "Fluorescence in AncSR1 background",
+       y = "Fluorescence in AncSR2 background") +
+  # xlim(-0.1, 1.1) + ylim(-0.1, 1.1) +
+  ylim(min(bgepistasismodeldatanonERE$avg_meanF_AncSR2), max(bgepistasismodeldatanonERE$avg_meanF_AncSR2)) +
+  # geom_abline(slope = 1, intercept = 0, color = "red") +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+
+
+
+# plot inferred models for ERE and non-ERE variants
+bgfluorscatterplotfit <- bgepistasismodeldata %>%
+  left_join(select(bgepistasismodeldataERE, AA_var, RE, negativespecificepistasis)) %>%
+  replace_na(list(negativespecificepistasis = FALSE)) %>%
+  arrange(ERE) %>%
+  ggplot(aes(x = meanF_AncSR1_norm)) +
+  geom_point(aes(y = meanF_AncSR2_norm, color = ERE,
+                 shape = negativespecificepistasis), size = 2) +
+  # 95% confidence intervals
+  geom_ribbon(data = data.frame(
+    x = seq(0, 1, 0.01), 
+    lower = bgepistasisfn(seq(0, 1, 0.01), bgepistasisbscinonERE[1,1], bgepistasisbscinonERE[1,2]),
+    upper = bgepistasisfn(seq(0, 1, 0.01), bgepistasisbscinonERE[2,1], bgepistasisbscinonERE[2,2])),
+    aes(x = x, ymin = lower, ymax = upper),
+    fill = "black", alpha = 0.3) +
+  geom_ribbon(data = data.frame(
+    x = seq(0, 1, 0.01), 
+    lower = bgepistasisfn(seq(0, 1, 0.01), bgepistasisbsciERE[1,1], bgepistasisbsciERE[1,2]),
+    upper = bgepistasisfn(seq(0, 1, 0.01), bgepistasisbsciERE[2,1], bgepistasisbsciERE[2,2])),
+    aes(x = x, ymin = lower, ymax = upper),
+    fill = "purple2", alpha = 0.3) +
+  
+  scale_color_manual(labels = c("FALSE" = "No", "TRUE" = "Yes"), 
+                     values = c("gray", "purple2"), name = "ERE") +
+  scale_shape_discrete(labels = c("FALSE" = "No",
+                                  "TRUE" = "Yes"),
+                       name = "Specific negative\nepistasis") +
+  geom_function(fun = bgepistasisfn,
+                args = list(alpha = coef(bgepistasismodelnonERE)[1],
+                            n = coef(bgepistasismodelnonERE)[2]),
+                color = "black", xlim = c(0, 1), linewidth = 1) +
+  # 95% prediction intervals
+  # geom_line(data = bgepistasisbspinonERE, aes(x = x, y = lower95PI),
+  #           color = "black", linetype = "dashed", linewidth = 1) +
+  # geom_line(data = bgepistasisbspinonERE, aes(x = x, y = upper95PI),
+  #           color = "black", linetype = "dashed", linewidth = 1) +
+  geom_function(fun = bgepistasisfn,
+                args = list(alpha = coef(bgepistasismodelERE)[1],
+                            n = coef(bgepistasismodelnonERE)[2]),
+                color = "purple2", xlim = c(0, 1), linewidth = 1) +
+  # 95% prediction intervals
+  # geom_line(data = bgepistasisbspiERE, aes(x = x, y = lower95PI),
+  #           color = "purple2", linetype = "dashed", linewidth = 1) +
+  # geom_line(data = bgepistasisbspiERE, aes(x = x, y = upper95PI),
+  #           color = "purple2", linetype = "dashed", linewidth = 1) +
+  labs(x = "Fluorescence in AncSR1 background",
+       y = "Fluorescence in AncSR2 background") +
+  xlim(-0.1, 1.1) + ylim(-0.1, 1.1) +
+  # geom_abline(slope = 1, intercept = 0, color = "red") +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+bgfluorscatterplotfit
+```
+
+
+What is the relationship between the number of variants bound per RE in the AncSR1 vs. AncSR2 background?
+
+```{r nvarbg, purl = FALSE}
+# scatter plot
+fxnalREscatterplot <- nboundRE %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
+  ggplot(aes(x = AncSR1, y = AncSR2)) +
+  geom_smooth(method = "lm", color = "red") +
+  geom_point() +
+  geom_text_repel(aes(label = RE), box.padding = 0.15) +
+  labs(x = "Number of protein variants bound in AncSR1 background",
+       y = "Number of protein variants bound in AncSR2 background") +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+fxnalREscatterplot
+
+# fitting linear model to number of protein variants bound per RE in each bg
+nfxnalbglm <- nboundRE %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
+  column_to_rownames("RE") %>%
+  lm(formula = AncSR2 ~ AncSR1, data = .)
+summary(nfxnalbglm)
+# outlier detection
+par(mfrow = c(2,2))
+plot(nfxnalbglm)  # ERE is likely an extreme outlier, and SRE a moderate outlier
+cooksD <- cooks.distance(nfxnalbglm)
+print(cooksD)
+outliers <- cooksD[cooksD > (3 * mean(cooksD, na.rm = TRUE))]
+print(outliers)
+# refit model with outlier removed
+nfxnalbglmnooutliers <- nboundRE %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
+  filter(!RE %in% names(outliers)) %>%
+  column_to_rownames("RE") %>%
+  lm(formula = AncSR2 ~ AncSR1, data = .)
+summary(nfxnalbglmnooutliers)
+# prediction interval
+nfxnalbgprednooutliers <- predict(nfxnalbglmnooutliers,
+                                  pivot_wider(nboundRE, names_from = bg, values_from = n),
+                                  interval = "prediction")
+nfxnalbgprednooutliers <- cbind(nfxnalbgprednooutliers, 
+                                AncSR1 = nboundRE %>% filter(bg == "AncSR1") %>% pull(n))
+
+# replot, show linear fit with outlier removed
+fxnalREscatterplotnooutlier <- nboundRE %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
+  ggplot(aes(x = AncSR1)) +
+  # 95% prediction interval
+  geom_ribbon(data = as.data.frame(nfxnalbgprednooutliers),
+              aes(x = AncSR1, ymin = lwr, ymax = upr), color = "gray",
+              alpha = 0.3) +
+  geom_smooth(data = . %>% filter(!RE %in% names(outliers)),
+              aes(y = AncSR2),
+              method = "lm", color = "red", fullrange = TRUE, se = FALSE) +
+  geom_point(aes(y = AncSR2)) +
+  geom_text_repel(aes(y = AncSR2, label = RE), box.padding = 0.15) +
+  # annotate(geom = "text", x = 0, y = 2500, label = "R^2==x", parse = TRUE) +
+  annotate(geom = "text", x = 0, y = 2500, label = paste(
+    "adj.~R ^ 2 ==", round(summary(nfxnalbglmnooutliers)$adj.r.squared, 2),
+    "~(without~ERE)"),
+    parse = TRUE, hjust = 0) +
+  annotate(geom = "text", x = 0, y = 2350, label = paste(
+    "adj.~R ^ 2 ==", round(summary(nfxnalbglm)$adj.r.squared, 2),
+    "~(with~ERE)"),
+    parse = TRUE, hjust = 0) +
+  labs(x = "Number of protein variants bound\nin AncSR1 background",
+       y = "Number of protein variants bound\nin AncSR2 background") +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+fxnalREscatterplotnooutlier
+
+nfxnalbgnoERESRE1lm <- nboundRE %>%
+  filter(!RE %in% c("ERE (GT)", "SRE1 (AA)")) %>%
+  pivot_wider(names_from = bg, values_from = n) %>%
+  lm(formula = AncSR2 ~ AncSR1, data = .)
+summary(nfxnalbgnoERESRE1lm)
+```
+
+
+
+## Other stuff
 
 How do protein variants switch between specific and promiscuous categories between the AncSR1 and AncSR2 backgrounds? Do they switch specificity?
 
@@ -2426,388 +2480,8 @@ promiscuouspairslogoplot
 ```
 
 
-``` {r, purl = FALSE, eval = FALSE}
-# plot the number of REs each RH variant is active on
-a1 <- multiple_REs_variants %>%
-  mutate(specific = factor(ifelse(nREs == 1, "specific", "promiscuous"),
-                           levels = c("specific", "promiscuous"))) %>%
-  group_by(bg, specific) %>%
-  count(name = "nvars") %>%
-  ggplot(aes(x = as.factor(specific), y = nvars, fill = bg)) +
-  geom_col(width=0.9) +
-  geom_text(aes(label=nvars), vjust=-0.5, color="black", size=4) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-  facet_grid(rows = vars(bg), scales = "free") +
-  scale_fill_manual(values=bg_color()) +
-  labs(title = "", x = "", 
-       y = "Number of protein variants",
-       fill = "Ancestral\nbackground") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.position = "none",
-        strip.background = element_blank(),
-        strip.text.y = element_blank()) +
-  guides(x = guide_axis(angle = 45))
-
-a2 <- multiple_REs_variants %>%
-  group_by(bg, nREs) %>% 
-  count(name = "nvars") %>%
-  ggplot(aes(x = as.factor(nREs), y = nvars, fill = bg)) +
-  geom_col(width=0.9) +
-  geom_text(aes(label=nvars), vjust=-0.5, color="black", size=4) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-  facet_grid(rows = vars(bg), scales = "free") +
-  scale_fill_manual(values=bg_color()) +
-  labs(title = "",
-       x = "Number of response elements bound", 
-       y = "",
-       fill = "Ancestral\nbackground") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        legend.position = c(0.9, 0.9),
-        strip.background = element_blank(),
-        strip.text.y = element_blank())
-
-a1 + a2 + plot_layout(widths = c(1, 5))
-
-# plot as proportion promiscuous vs. specific
-totals <- multiple_REs_variants %>%
-  mutate(specific = factor(ifelse(nREs == 1, "specific", "promiscuous"),
-                           levels = c("specific", "promiscuous"))) %>%
-  group_by(bg, specific) %>%
-  count(name = "nvars") %>%
-  group_by(bg) %>%
-  summarize(total = sum(nvars))
-a3 <- multiple_REs_variants %>%
-  mutate(specific = factor(ifelse(nREs == 1, "specific", "promiscuous"),
-                           levels = c("specific", "promiscuous"))) %>%
-  group_by(bg, specific) %>%
-  count(name = "nvars") %>%
-  ggplot(aes(x = bg, y = nvars, fill = bg, alpha = fct_rev(specific))) +
-  geom_bar(stat = "identity", width=0.9, position = "fill") +
-  geom_text(aes(label=nvars), position = position_fill(vjust = 0.5),
-            color="black", size=4, alpha = 1) +
-  # geom_text(data = totals, 
-  #           aes(x = bg, label = total, y = 1, fill = NULL, alpha = NULL), 
-  #           vjust = -0.5, size = 4) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-  scale_fill_manual(values=bg_color()) +
-  scale_alpha_manual(values = c(0.5, 1)) +
-  labs(title = "", x = "Ancestral\nbackground", 
-       y = "Proportion of protein variants",
-       fill = "Ancestral\nbackground",
-       alpha = "Specificity") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.position = "none",
-        strip.background = element_blank(),
-        strip.text.y = element_blank()) +
-  guides(x = guide_axis(angle = 45))
-
-# plot as proportion promiscuous
-a4 <- multiple_REs_variants %>%
-  mutate(specific = factor(ifelse(nREs == 1, "specific", "promiscuous"),
-                           levels = c("specific", "promiscuous"))) %>%
-  group_by(bg) %>%
-  summarize(prop = sum(specific == "promiscuous") / n()) %>%
-  ggplot(aes(x = bg, y = prop, fill = bg)) +
-  geom_col(width=0.9) +
-  scale_fill_manual(values=bg_color()) +
-  labs(title = "", x = "Ancestral\nbackground", 
-       y = "Fraction of promiscuous protein variants",
-       fill = "Ancestral\nbackground",
-       alpha = "Specificity") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.position = "none",
-        strip.background = element_blank(),
-        strip.text.y = element_blank()) +
-  guides(x = guide_axis(angle = 45))
 
 
-# plot which REs each RH variant is active on by number of genotypes that it 
-# binds to
-
-# Find the RE variant(s) that is (are) bound by each protein variant. If a
-# a protein variant binds to multiple sets of REs significantly but the union
-# of those REs are not significantly bound, take the set with the highest
-# p-value
-multiple_REs_bound_data <- lapply(multiple_REs_bound_data, function(x)
-  x %>% group_by(bg, AA_var) %>% arrange(desc(padj), .by_group = TRUE))
-multiple_REs_variants$RE <- NA
-for(i in 1:nrow(multiple_REs_variants)) {
-  row <- multiple_REs_variants[i,]
-  revars <- multiple_REs_bound_data[[as.numeric(row[3])]] %>% 
-    ungroup() %>%
-    semi_join(row, by = c("AA_var", "bg")) %>%
-    slice(1) %>% 
-    select(2:(as.numeric(row[3])+1)) %>% 
-    t() %>% 
-    str_c(collapse = ", ")
-  multiple_REs_variants[i, "RE"] <- revars
-}
-
-# plot
-b <- multiple_REs_variants %>%
-  group_by(bg, nREs) %>%
-  count(RE) %>%
-  arrange(n) %>%
-  ggplot(aes(x = factor(nREs), y = n, color = RE, fill = bg, label = RE)) +
-  geom_col(width = 0.9, color = "black", position = "fill") +
-  facet_grid(rows = vars(bg)) +
-  geom_text(aes(color = bg), 
-            position = position_fill(vjust = 0.5), size = 2.5) +
-  geom_text(data = multiple_REs_variants %>% 
-              group_by(bg, nREs) %>% count(name = "nvars"),
-            aes(x = factor(nREs), label=nvars), y = 1, vjust=-0.5, color="black", size=4) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-  scale_fill_manual(values=bg_color()) +
-  scale_color_manual(values = c("white", "black"), guide = "none") +
-  labs(title = "",
-       x = "Number of REs bound", 
-       y = "Fraction of protein variants binding\neach RE combination",
-       fill = "Ancestral\nbackground") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        legend.position = c(0.9, 0.9),
-        strip.background = element_blank(),
-        strip.text.y = element_blank())
-b
-
-
-# for each RE, how many protein variants bind it specifically vs. promiscuously?
-RE_frac_specific <- data.frame(bg = rep(NA, 32), RE = NA, 
-                               specific = NA, promiscuous = NA)
-i <- 1
-for(revar in REs[[1]]) {
-  for(background in c("AncSR1", "AncSR2")) {
-    specific <- multiple_REs_variants %>%
-      filter(bg == background, nREs == 1, RE == revar) %>%
-      nrow()
-    promiscuous <- multiple_REs_variants %>%
-      filter(bg == background, nREs > 1, 
-             grepl(sub("\\(..\\)", "", revar), RE)) %>%
-      nrow()
-    RE_frac_specific[i,] <- c(background, revar, specific, promiscuous)
-    i <- i + 1
-  }
-}
-
-c <- RE_frac_specific %>%
-  pivot_longer(3:4, names_to = "specific", values_to = "n") %>%
-  ggplot(aes(x = factor(RE, levels = levels(REs[[1]])), 
-             y = as.numeric(n), 
-             fill = bg, 
-             alpha = factor(specific, levels = c("specific", "promiscuous")))) +
-  geom_col(width = 0.9, position = "dodge") +
-  facet_grid(rows = vars(bg), scales = "free") +
-  scale_alpha_manual(values = c(1, 0.5)) +
-  labs(x = "Response element", y = "Number of protein variants",
-       fill = "Ancestral\nbackground", alpha = "Specificity") +
-  scale_fill_manual(values=bg_color()) +
-  theme_classic() +
-  guides(x = guide_axis(angle = 45)) +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        strip.background = element_blank(),
-        strip.text.y = element_blank())
-c
-
-# plot as proportion promiscuous vs. specific
-totals <- RE_frac_specific %>%
-  pivot_longer(3:4, names_to = "specific", values_to = "n") %>%
-  mutate(n = as.numeric(n)) %>%
-  group_by(bg, RE) %>%
-  summarize(total = sum(n))
-c2 <- RE_frac_specific %>%
-  pivot_longer(3:4, names_to = "specific", values_to = "n") %>%
-  mutate(n = as.numeric(n)) %>%
-  ggplot(aes(x = factor(RE, levels = levels(REs[[1]])), 
-             y = n, 
-             fill = bg, 
-             alpha = factor(specific, levels = c("promiscuous", "specific")))) +
-  geom_bar(stat = "identity", width = 0.9, position = "fill") +
-  # scale_y_continuous(expand = c(0, 0.1)) +
-  facet_grid(rows = vars(bg), scales = "free") +
-  scale_alpha_manual(values = c(0.5, 1)) +
-  # geom_text(data = totals, 
-  #           aes(x = RE, label = total, y = 1, fill = NULL, alpha = NULL), 
-  #           vjust = -0.5) +
-  labs(x = "Response element", y = "",
-       fill = "Ancestral\nbackground", alpha = "Specificity") +
-  scale_fill_manual(values=bg_color()) +
-  theme_classic() +
-  guides(x = guide_axis(angle = 45)) +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        strip.background = element_blank(),
-        strip.text.y = element_blank())
-
-# plot as proportion promiscuous
-c3 <- RE_frac_specific %>%
-  mutate(specific = as.numeric(specific),
-         promiscuous = as.numeric(promiscuous),
-         prop = promiscuous / (specific + promiscuous)) %>%
-  ggplot(aes(x = factor(RE, levels = levels(REs[[1]])), y = prop, fill = bg)) +
-  geom_col(width=0.9, position = "dodge") +
-  scale_fill_manual(values=bg_color()) +
-  labs(title = "", x = "Ancestral\nbackground", 
-       y = "Fraction of promiscuous protein variants",
-       fill = "Ancestral\nbackground",
-       alpha = "Specificity") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.position = "none",
-        strip.background = element_blank(),
-        strip.text.y = element_blank()) +
-  guides(x = guide_axis(angle = 45))
-
-a3 + plot_spacer() + c2 + plot_layout(widths = c(1.5, 0.5, 6))
-
-# plot as number promiscuous vs. specific
-c4 <- RE_frac_specific %>%
-  pivot_longer(3:4, names_to = "specific", values_to = "n") %>%
-  mutate(n = as.numeric(n)) %>%
-  ggplot(aes(x = factor(RE, levels = levels(REs[[1]])), 
-             y = n, 
-             fill = bg, 
-             alpha = factor(specific, levels = c("promiscuous", "specific")))) +
-  geom_bar(stat = "identity", width = 0.9, position = "stack") +
-  # scale_y_continuous(expand = c(0, 0.1)) +
-  facet_grid(rows = vars(bg), scales = "free") +
-  scale_alpha_manual(values = c(0.5, 1)) +
-  # geom_text(data = totals, 
-  #           aes(x = RE, label = total, y = 1, fill = NULL, alpha = NULL), 
-  #           vjust = -0.5) +
-  labs(x = "Response element", y = "Number of functional protein variants",
-       fill = "Ancestral\nbackground", alpha = "Specificity") +
-  scale_fill_manual(values=bg_color()) +
-  theme_classic() +
-  guides(x = guide_axis(angle = 45)) +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        strip.background = element_blank(),
-        strip.text.y = element_blank())
-c4
-
-# plot as number promiscuous vs. specific side by side
-c5 <- RE_frac_specific %>%
-  pivot_longer(3:4, names_to = "specific", values_to = "n") %>%
-  mutate(n = as.numeric(n)) %>%
-  ggplot(aes(x = bg, 
-             y = n, 
-             fill = bg, 
-             alpha = factor(specific, levels = c("promiscuous", "specific")))) +
-  geom_bar(stat = "identity", width = 0.9, position = "stack") +
-  facet_grid(cols = vars(factor(RE, levels = levels(REs[[1]])))) +
-  # scale_y_continuous(expand = c(0, 0.1)) +
-  scale_alpha_manual(values = c(0.5, 1)) +
-  # geom_text(data = totals, 
-  #           aes(x = RE, label = total, y = 1, fill = NULL, alpha = NULL), 
-  #           vjust = -0.5) +
-  labs(x = "Response element", y = "Number of functional protein variants",
-       fill = "Ancestral\nbackground", alpha = "Specificity") +
-  scale_fill_manual(values=bg_color()) +
-  theme_classic() +
-  guides(x = guide_axis(angle = 45)) +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        strip.background = element_blank(),
-        strip.text.x = element_blank())
-c5
-```
-
-
-## What is the distribution of fluorescence for protein variants that bind specifically vs. promiscously?
-
-```{r, purl = FALSE, eval = F}
-meanF_data_functional <- meanF_data_functional %>%
-  left_join(multiple_REs_variants %>% select(-RE)) %>%
-  mutate(nREs = ifelse(nREs == 1, "specific", "promiscuous")) %>% 
-  rename(specific = nREs)
-a <- meanF_data_functional %>%
-  drop_na(specific) %>%
-  mutate(specific = factor(specific, levels = c("specific", "promiscuous"))) %>%
-  ggplot(aes(x = specific, 
-             y = avg_meanF, fill = bg, alpha = specific)) +
-  geom_boxplot() +
-  scale_alpha_manual(values = c(1, 0.5), guide = "none") +
-  labs(y = "Fluorescence", fill = "Ancestral\nbackground", x = "") +
-  scale_fill_manual(values=bg_color()) +
-  geom_signif(aes(group = specific),
-              comparisons = list(c("specific", "promiscuous")), 
-              test = "wilcox.test",
-              map_signif_level = TRUE) +
-  facet_grid(cols = vars(bg)) +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        strip.background = element_blank(),
-        strip.text.x = element_blank())
-a
-```
-
-
-```{r, purl = FALSE, eval = F}
-a2 <- multiple_REs_variants %>%
-  group_by(bg, nREs) %>% 
-  count(name = "nvars") %>%
-  ggplot(aes(x = as.factor(nREs), y = nvars, fill = bg)) +
-  geom_col(width=0.9) +
-  geom_text(aes(label=nvars), vjust=-0.5, color="black", size=4) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-  facet_grid(rows = vars(bg), scales = "free") +
-  scale_fill_manual(values=bg_color()) +
-  labs(title = "",
-       x = "Number of response elements bound", 
-       y = "Number of protein variants",
-       fill = "Ancestral\nbackground") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        legend.position = c(0.9, 0.9),
-        strip.background = element_blank(),
-        strip.text.y = element_blank())
-a2
-
-c <- fluorescence_both_backgrounds %>%
-  pivot_longer(3:4, names_to = "background") %>%
-  ggplot(aes(x = background, y = value, fill = background)) +
-  geom_boxplot() +
-  scale_fill_manual(values = c(bg_color()), drop = FALSE) +
-  labs(title = "Protein:RE variant combos\nfunctional in both backgrounds", 
-       x = "Ancestral background", y = "Fluorescence", 
-       fill = "Ancestral\nbackground") +
-  theme_classic() +
-  theme(text = element_text(size = fontsize),
-        plot.title = element_text(size = 14),
-        legend.text = element_text(size = 14),
-        axis.line.x = element_line(color = "black",),
-        legend.position = "none",
-        plot.caption = element_text(hjust = 0)) +
-  guides(x = guide_axis(angle = 45)) +
-  geom_signif(comparisons = list(c("AncSR1", "AncSR2")), 
-              test = "wilcox.test",
-              test.args = list(alternative = "less"),
-              map_signif_level = function(p) sprintf("p = %.2g", p))
-c
-
-c + a2 + plot_layout(widths = c(1.5, 3))
-```
 
 
 ## What is the genetic basis of specificity vs. promiscuity?
@@ -2970,7 +2644,6 @@ b + c + plot_layout(widths = c(3, 3))
 ```
 
 
-
 # Network analysis
 
 Let's create the genotype networks, where each node is a protein variant and their associated traits are the REs that they bind to.
@@ -3060,6 +2733,12 @@ AncSR1_RHRE_graph <- graph_from_data_frame(AncSR1_RHRE_connected, directed=FALSE
 write_graph(AncSR1_RHRE_graph, 
             file.path(results_dir, "AncSR1_RHRE_network.graphml"),
             format="graphml")
+
+# RH network with only connections permitted by RH-RE coevolution
+AncSR1_RH_RHRE_connected <- AncSR1_RHRE_connected %>%
+  as.data.frame() %>% mutate(weight = as.numeric(str_sub(V1, 1, 4) != str_sub(V2, 1, 4)))
+AncSR1_RH_RHRE_graph <- graph_from_data_frame(AncSR1_RH_RHRE_connected, directed=FALSE, 
+                                              vertices = AncSR1_RHRE_vertices)
 ```
 
 ```{r, purl = FALSE, eval = F}
@@ -3092,5 +2771,190 @@ AncSR2_RHRE_graph <- graph_from_data_frame(AncSR2_RHRE_connected, directed=FALSE
 write_graph(AncSR2_RHRE_graph, 
             file.path(results_dir, "AncSR2_RHRE_network.graphml"),
             format="graphml")
+
+# RH network with only connections permitted by RH-RE coevolution
+AncSR2_RH_RHRE_connected <- AncSR2_RHRE_connected %>%
+  as.data.frame() %>% mutate(weight = as.numeric(str_sub(V1, 1, 4) != str_sub(V2, 1, 4)))
+AncSR2_RH_RHRE_graph <- graph_from_data_frame(AncSR2_RH_RHRE_connected, directed=FALSE, 
+                                              vertices = AncSR2_RHRE_vertices)
+```
+
+
+### Clustering coefficient
+
+```{r clustering}
+# local clustering coefficient distribution
+hist(transitivity(AncSR1_graph, type = "local"), main = "AncSR1", ylim = c(0, 60))
+hist(transitivity(AncSR1_RHRE_graph, type = "local"), col = rgb(1,0,0,0.5), add = T)
+hist(transitivity(AncSR2_graph, type = "local"), main = "AncSR2", ylim = c(0, 3000))
+hist(transitivity(AncSR2_RHRE_graph, type = "local"), col = rgb(1,0,0,0.5), add = T)
+
+# global clustering coefficient
+transitivity(AncSR1_graph)
+transitivity(AncSR1_RHRE_graph)
+transitivity(AncSR2_graph)
+transitivity(AncSR2_RHRE_graph)
+
+# distances
+AncSR1_distances <- distances(AncSR1_graph) %>%
+  as.data.frame() %>%
+  filter(AACQ != Inf) %>%
+  select(which(colnames(.) %in% rownames(.)))
+AncSR1_RHRE_distances <- distances(AncSR1_RHRE_graph) %>%
+  as.data.frame() %>%
+  filter(AARMAA != Inf) %>%
+  select(which(colnames(.) %in% rownames(.)))
+AncSR1_RH_RHRE_distances <- distances(AncSR1_RH_RHRE_graph) %>%  # only RH mutations and RH nodes counted
+  as.data.frame() %>%
+  filter(AARMAA != Inf) %>%
+  distinct() %>%
+  select(which(colnames(.) %in% rownames(.)))
+hist(AncSR1_distances[upper.tri(AncSR1_distances)], xlim = c(1, 14))
+hist(AncSR1_RH_RHRE_distances[upper.tri(AncSR1_RH_RHRE_distances)], col = rgb(1,0,0,0.5), add = T)
+
+AncSR2_distances <- distances(AncSR2_graph) %>%
+  as.data.frame() %>%
+  filter(AAAI != Inf) %>%
+  select(which(colnames(.) %in% rownames(.)))
+AncSR2_RHRE_distances <- distances(AncSR2_RHRE_graph) %>%
+  as.data.frame() %>%
+  filter(AAAIAA != Inf) %>%
+  select(which(colnames(.) %in% rownames(.)))
+AncSR2_RH_RHRE_distances <- distances(AncSR2_RH_RHRE_graph) %>%  # only RH mutations and RH nodes counted
+  as.data.frame() %>%
+  filter(AAAIAA != Inf) %>%
+  distinct() %>%
+  select(which(colnames(.) %in% rownames(.)))
+hist(AncSR2_distances[upper.tri(AncSR2_distances)], xlim = c(1, 14))
+hist(AncSR2_RH_RHRE_distances[upper.tri(AncSR2_RH_RHRE_distances)], col = rgb(1,0,0,0.5), add = T)
+
+t.test(as.numeric(AncSR1_distances[upper.tri(AncSR1_distances)]), 
+       as.numeric(AncSR1_RH_RHRE_distances[upper.tri(AncSR1_RH_RHRE_distances)]))
+t.test(as.numeric(AncSR2_distances[upper.tri(AncSR2_distances)]), 
+       as.numeric(AncSR2_RH_RHRE_distances[upper.tri(AncSR2_RH_RHRE_distances)]))
+
+
+# degree distribution
+AncSR1_degrees <- rowSums(AncSR1_distances == 1)
+AncSR1_RHRE_degrees <- rowSums(AncSR1_RHRE_distances == 1)
+AncSR1_RH_RHRE_degrees <- rowSums(AncSR1_RH_RHRE_distances == 1)  # only RH mutations and RH nodes counted
+hist(AncSR1_degrees, breaks = 0:(max(AncSR1_degrees)+1), 
+     right = F, main = "AncSR1 degrees", ylim = c(0,25))
+hist(AncSR1_RH_RHRE_degrees, breaks = 0:(max(AncSR1_RH_RHRE_degrees)+1), 
+     right = F, col = rgb(1,0,0,0.5), add = T)
+
+AncSR2_degrees <- rowSums(AncSR2_distances == 1)
+AncSR2_RHRE_degrees <- rowSums(AncSR2_RHRE_distances == 1)
+AncSR2_RH_RHRE_degrees <- rowSums(AncSR2_RH_RHRE_distances == 1)  # only RH mutations and RH nodes counted
+hist(AncSR2_degrees, breaks = 0:(max(AncSR2_degrees)+1), 
+     right = F, main = "AncSR2 degrees", ylim = c(0, 250))
+hist(AncSR2_RH_RHRE_degrees, breaks = 0:(max(AncSR2_RH_RHRE_degrees)+1), 
+     right = F, col = rgb(1,0,0,0.5), add = T)
+
+mean(AncSR1_degrees)
+mean(AncSR1_RHRE_degrees)
+mean(AncSR1_RH_RHRE_degrees)
+
+mean(AncSR2_degrees)
+mean(AncSR2_RHRE_degrees)
+mean(AncSR2_RH_RHRE_degrees)
+
+t.test(AncSR1_degrees, AncSR1_RHRE_degrees)
+t.test(AncSR1_degrees, AncSR1_RH_RHRE_degrees)
+t.test(AncSR2_degrees, AncSR2_RHRE_degrees)
+t.test(AncSR2_degrees, AncSR2_RH_RHRE_degrees)
+
+ks.test(AncSR1_degrees, AncSR1_RHRE_degrees, B = 10000)
+ks.test(AncSR2_degrees, AncSR2_RHRE_degrees)
+
+# betweenness distribution
+hist(betweenness(AncSR1_graph), freq = FALSE, breaks = seq(0, 3500, 250), 
+     main = "AncSR1 bewteenness")
+hist(betweenness(AncSR1_RHRE_graph), freq = FALSE, breaks = seq(0, 3500, 250), 
+     col = rgb(1,0,0,0.5), add = T)
+
+hist(betweenness(AncSR2_graph), freq = FALSE, breaks = seq(0, 250000, 25000),
+     main = "AncSR2 bewteenness")
+hist(betweenness(AncSR2_RHRE_graph), freq = FALSE, breaks = seq(0, 250000, 25000),
+     col = rgb(1,0,0,0.5), add = T)
+
+mean(betweenness(AncSR1_graph))
+mean(betweenness(AncSR1_RHRE_graph))
+
+mean(betweenness(AncSR2_graph))
+mean(betweenness(AncSR2_RHRE_graph))
+```
+
+
+How many edges between nodes of the same phenotype vs. different phenotypes?
+
+```{r}
+AncSR1_phenotypes <- meanF_data_fxnal %>%
+  filter(functional_AncSR1 == T) %>%
+  select(AA_var, RE) %>%
+  mutate(AA_var = as.character(AA_var), RE = as.character(RE)) %>%
+  group_by(AA_var) %>%
+  mutate(nfxnal = n(), specificity = replace(RE, nfxnal > 1, "promiscuous")) %>%
+  distinct(AA_var, specificity)
+
+AncSR1_network_edges_samediff <- AncSR1_connected %>%
+  as.data.frame() %>%
+  left_join(AncSR1_phenotypes, by = c("V1" = "AA_var")) %>%
+  left_join(AncSR1_phenotypes, by = c("V2" = "AA_var")) %>%
+  group_by(specificity.x) %>%
+  summarize(nedges_same_phenotype = sum(specificity.x == specificity.y),
+            nedges_diff_phenotype = sum(specificity.x != specificity.y)) %>%
+  mutate(edges_same_to_diff_ratio = nedges_same_phenotype/nedges_diff_phenotype)
+AncSR1_network_edges_samediff
+AncSR1_network_edges_samediff %>% 
+  filter(nedges_diff_phenotype > 1,
+         specificity.x != "promiscuous") %>% 
+  summarize(mean = mean(edges_same_to_diff_ratio))
+
+AncSR1_RHRE_network_edges_samediff <- AncSR1_RHRE_connected %>%
+  as.data.frame() %>%
+  separate_wider_position(V1:V2, names_sep = "_", widths = c("RH" = 4, "RE" = 2)) %>%
+  group_by(V1_RE) %>%
+  summarize(nedges_same_phenotype = sum(V1_RE == V2_RE),
+            nedges_diff_phenotype = sum(V1_RE != V2_RE)) %>%
+  mutate(edges_same_to_diff_ratio = nedges_same_phenotype/nedges_diff_phenotype)
+AncSR1_RHRE_network_edges_samediff
+AncSR1_RHRE_network_edges_samediff %>% 
+  semi_join(mutate(AncSR1_network_edges_samediff, specificity.x = str_match(specificity.x, "[ACGT][ACGT]")), 
+            by = c("V1_RE" = "specificity.x")) %>%
+  filter(nedges_diff_phenotype > 1) %>%
+  summarize(mean = mean(edges_same_to_diff_ratio))
+
+
+
+AncSR2_phenotypes <- meanF_data_fxnal %>%
+  filter(functional_AncSR2 == T) %>%
+  select(AA_var, RE) %>%
+  mutate(AA_var = as.character(AA_var), RE = as.character(RE)) %>%
+  group_by(AA_var) %>%
+  mutate(nfxnal = n(), specificity = replace(RE, nfxnal > 1, "promiscuous")) %>%
+  distinct(AA_var, specificity)
+
+AncSR2_network_edges_samediff <- AncSR2_connected %>%
+  as.data.frame() %>%
+  left_join(AncSR2_phenotypes, by = c("V1" = "AA_var")) %>%
+  left_join(AncSR2_phenotypes, by = c("V2" = "AA_var")) %>%
+  group_by(specificity.x) %>%
+  summarize(nedges_same_phenotype = sum(specificity.x == specificity.y),
+            nedges_diff_phenotype = sum(specificity.x != specificity.y)) %>%
+  mutate(edges_diff_to_same_ratio = nedges_diff_phenotype/nedges_same_phenotype)
+AncSR2_network_edges_samediff
+AncSR2_network_edges_samediff %>% 
+  filter(specificity.x != "promiscuous") %>% 
+  summarize(mean = mean(edges_diff_to_same_ratio))
+```
+
+
+## Why EGKA and GSKV?
+
+How many protein variants that are a single mutation away from EGKA in the AncSR1 network and GSKV in the AncSR2 network maintain function?
+
+```{r}
+
 ```
 

@@ -3,6 +3,8 @@ title: "Data cleaning"
 author: "Jaeda Patton and Santiago Herrera"
 date: "2023-03-14"
 output: github_document
+editor_options:
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE, message=FALSE}
@@ -13,7 +15,7 @@ basedir <- file.path("..", "..")
 
 # check for packages and install any that are missing
 packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble", 
-              "patchwork", "foreach", "doParallel", "ggpubr", 
+              "patchwork", "foreach", "doParallel", "ggpubr", "viridis",
               "splines2", "matrixStats", "forcats", "dplyr", "scales")
 installed_packages <- packages %in% rownames(installed.packages())
 
@@ -27,6 +29,9 @@ invisible(lapply(packages, library, character.only=TRUE))
 # make output directories
 results_dir <- file.path(basedir, "results", "cleaned_data")
 if(!dir.exists(results_dir)) dir.create(results_dir)
+
+# set fontsize for plotting
+fontsize <- 16
 ```
 
 
@@ -351,24 +356,14 @@ spline_r12 <- lm(r12$meanF_REP2 ~ basis_mat12)
 # Correct rep1 values using I-Spline models: Predict the values of the rep1 using the fitted model and the basis matrix.
 # The 'predict' function generates a new basis matrix based on the fitted basis matrix and the new data. 
 # The new basis matrix is multiplied by the spline coefficients to get the new X's (and then add the intercept)
-r12$meanF_REP1_c <- (predict(basis_mat12, newx = r12$meanF_REP1) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1]
-
-print("REPS: 1 and 2")
-print(paste("Correlation before correction:", cor(r12$meanF_REP1,r12$meanF_REP2)))
-print(paste("R^2 before correction:", cor(r12$meanF_REP1,r12$meanF_REP2)^2))
-print(paste("Correlation of the 'active' region before correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1,r12[r12$avg_meanF>=-4,]$meanF_REP2)))
-print(paste("R^2 of the 'active' region before correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1,r12[r12$avg_meanF>=-4,]$meanF_REP2)^2))
-print(paste("Correlation after correction:", cor(r12$meanF_REP1_c,r12$meanF_REP2)))
-print(paste("R^2 after correction:", cor(r12$meanF_REP1_c,r12$meanF_REP2)^2))
-print(paste("Correlation of the 'active' region after correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1_c,r12[r12$avg_meanF>=-4,]$meanF_REP2))) 
-print(paste("R^2 of the 'active' region after correction:", cor(r12[r12$avg_meanF>=-4,]$meanF_REP1_c,r12[r12$avg_meanF>=-4,]$meanF_REP2)^2)) 
+r12$meanF_REP1_c <- (predict(basis_mat12, newx = r12$meanF_REP1) %*% coef(spline_r12)[-1])[,1] + coef(spline_r12)[1]
 
 # plot results:
 r12_before <- r12 %>% ggplot(aes(x=meanF_REP1,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep1") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
   geom_line(data=data.frame(meanF_REP1 = r12$meanF_REP1, meanF_REP2 = spline_r12$fitted.values), size=1.3,col="red") + ggtitle("Reps 1 and 2")
 
-r12_after <- r12 %>% ggplot(aes(x=meanF_REP1_c,meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
+r12_after <- r12 %>% ggplot(aes(x=meanF_REP1_c,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
   xlab("meanF, rep1") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
 
 
@@ -380,17 +375,7 @@ degree <- 2 # degree of piecewise polynomials
 
 basis_mat23 <- iSpline(r23$meanF_REP3, knots = knots_r23, Boundary.knots = bound_knots_r23, degree = degree)
 spline_r23 <- lm(r23$meanF_REP2 ~ basis_mat23)
-r23$meanF_REP3_c <- (predict(basis_mat23, newx = r23$meanF_REP3) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1]
-
-print("REPS: 2 and 3")
-print(paste("Correlation before correction:", cor(r23$meanF_REP2,r23$meanF_REP3)))
-print(paste("Correlation of the 'active' region before correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3))) 
-print(paste("Correlation after correction:", cor(r23$meanF_REP2,r23$meanF_REP3_c)))
-print(paste("Correlation of the 'active' region after correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3_c))) 
-print(paste("R^2 before correction:", cor(r23$meanF_REP2,r23$meanF_REP3)^2))
-print(paste("R^2 of the 'active' region before correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3)^2)) 
-print(paste("R^2 after correction:", cor(r23$meanF_REP2,r23$meanF_REP3_c)^2))
-print(paste("R^2 of the 'active' region after correction:", cor(r23[r23$avg_meanF>=-4,]$meanF_REP2,r23[r23$avg_meanF>=-4,]$meanF_REP3_c)^2)) 
+r23$meanF_REP3_c <- (predict(basis_mat23, newx = r23$meanF_REP3) %*% coef(spline_r23)[-1])[,1] + coef(spline_r23)[1]
 
 # plot results:
 r23_before <- r23 %>% ggplot(aes(x=meanF_REP3,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
@@ -409,17 +394,7 @@ degree <- 2 # degree of piecewise polynomials
 
 basis_mat24 <- iSpline(r24$meanF_REP4, knots = knots_r24, Boundary.knots = bound_knots_r24, degree = degree)
 spline_r24 <- lm(r24$meanF_REP2 ~ basis_mat24)
-r24$meanF_REP4_c <- (predict(basis_mat24, newx = r24$meanF_REP4) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1]
-
-print("REPS: 2 and 4")
-print(paste("Correlation before correction:", cor(r24$meanF_REP2,r24$meanF_REP4)))
-print(paste("Correlation of the 'active' region before correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4)))
-print(paste("Correlation after correction:", cor(r24$meanF_REP2,r24$meanF_REP4_c)))
-print(paste("Correlation of the 'active' region after correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4_c)))
-print(paste("R^2 before correction:", cor(r24$meanF_REP2,r24$meanF_REP4)^2))
-print(paste("R^2 of the 'active' region before correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4)^2))
-print(paste("R^2 after correction:", cor(r24$meanF_REP2,r24$meanF_REP4_c)^2))
-print(paste("R^2 of the 'active' region after correction:", cor(r24[r24$avg_meanF>=-4,]$meanF_REP2,r24[r24$avg_meanF>=-4,]$meanF_REP4_c)^2))
+r24$meanF_REP4_c <- (predict(basis_mat24, newx = r24$meanF_REP4) %*% coef(spline_r24)[-1])[,1] + coef(spline_r24)[1]
 
 # plot results:
 r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
@@ -432,6 +407,7 @@ r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 
 ## *Note: Spline for rep2-4 seems to overshoot the fit. It does reduce the SE(meanF) for isogenic controls but predicts some functional controls as null (see below)
 
 ```
+
 
 Plot the spline fits. The plots on the left column show the fitted I-spline, and the plots in the right column show the corrected values for replicates 1, 3, and 4.
 
@@ -500,10 +476,158 @@ meanF_data_corrected %>% filter(n_reps != 1) %>% mutate(included = ifelse(se_mea
 
 # plot histogram of SE(meanF) 
 meanF_data_corrected %>% filter(n_reps != 1) %>% 
-  ggplot(aes(x=se_meanF)) + geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
-  theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") + 
+  ggplot(aes(x=se_meanF)) + geom_histogram(aes(y=..count../sum(..count..)),binwidth = 0.01,color="black",fill="gray") +
+  theme_classic() + xlab("SE(fluorescence)") + ylab("% variants") + 
   geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
-  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 2.17%") # histogram of SE(meanF)
+  annotate(geom = "text", x = 0.15, y = 0.04, size = 6, hjust = 0,
+           label = as.expression(bquote(
+             Removed~variants~":"~.(round(sum(meanF_data_corrected$n_reps != 1 & 
+                                                meanF_data_corrected$se_meanF > 0.1) / 
+                                            sum(meanF_data_corrected$n_reps != 1)*100, 2))~"%")
+           ), parse = TRUE) + # histogram of SE(meanF)
+  theme(text = element_text(size = fontsize))
+
+# compute pairwise correlations between replicates before/after correction
+# Pairwise Pearson correlation between all replicates before spline correction
+beforesplinecormat <- meanF_data_filter %>%
+  filter(RE %in% REs[[1]]) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("Before correction Pearson's R")
+print(beforesplinecormat)
+paste("Mean pairwise R^2:",
+      round(mean(beforesplinecormat[upper.tri(beforesplinecormat)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(beforesplinecormat[1:3, 1:3][upper.tri(beforesplinecormat[1:3,1:3])]^2), 2))
+
+# Excluding inactive variants
+beforesplinecormatactive <- meanF_data_filter %>%
+  filter(RE %in% REs[[1]]) %>%
+  filter(avg_meanF >= -4) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("Before correction Pearson's R (active variants)")
+print(beforesplinecormatactive)
+paste("Mean pairwise R^2:",
+      round(mean(beforesplinecormatactive[upper.tri(beforesplinecormatactive)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(beforesplinecormatactive[1:3, 1:3][upper.tri(beforesplinecormatactive[1:3,1:3])]^2), 2))
+
+# Pairwise Pearson correlation between all replicates after spline correction
+aftersplinecormat <- meanF_data_corrected %>%
+  filter(RE %in% REs[[1]], n_reps > 1) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("After correction Pearson's R")
+print(aftersplinecormat)
+paste("Mean pairwise R^2:",
+      round(mean(aftersplinecormat[upper.tri(aftersplinecormat)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(aftersplinecormat[1:3, 1:3][upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
+
+# Excluding inactive variants
+aftersplinecormatactive <- meanF_data_corrected %>%
+  filter(RE %in% REs[[1]], n_reps > 1) %>%
+  filter(avg_meanF >= -4) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("After correction Pearson's R (active variants)")
+print(aftersplinecormatactive)
+paste("Mean pairwise R^2:",
+      round(mean(aftersplinecormatactive[upper.tri(aftersplinecormatactive)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(aftersplinecormatactive[1:3, 1:3][upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
+
+# Plot uncorrected vs. corrected fluorescence between replicates with spline 
+# fits for all variants (not just those used in fitting).
+r12_before_all <- meanF_data_filter %>%
+  ggplot(aes(x = meanF_REP1, y = meanF_REP2)) +
+  geom_bin2d(bins = 100) +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Number of\nvariants", limits = c(1, 45000)) +
+  geom_abline(intercept = 0, slope = 1,col="gray") +
+  geom_hline(yintercept = -4, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = -4, color = "gray", linetype = "dashed") +
+  geom_line(data=data.frame(meanF_REP1 = r12$meanF_REP1, 
+                            meanF_REP2 = spline_r12$fitted.values), 
+            size=1.3,col="red") +
+  labs(x = "Replicate 1 fluorescence", y = "Replicate 2 fluorescence",
+       title = "Uncorrected") +
+  annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
+           parse = T,
+           label = as.expression(bquote(
+             {italic(r)^2==.(format(round(beforesplinecormat[1,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(beforesplinecormatactive[1,2]^2, 2), nsmall = 2))}
+           )),
+           vjust = 1, hjust = 0) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize/1.5))
+
+r12_after_all <- meanF_data_corrected %>%
+  ggplot(aes(x = meanF_REP1, y = meanF_REP2)) +
+  geom_bin2d(bins = 100) +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Number of\nvariants", limits = c(1, 45000)) +
+  geom_abline(intercept = 0, slope = 1,col="gray") +
+  geom_hline(yintercept = -4, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = -4, color = "gray", linetype = "dashed") +
+  labs(x = "Replicate 1 fluorescence", y = "Replicate 2 fluorescence",
+       title = "Corrected") +
+  annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
+           parse = T,
+           label = as.expression(bquote(
+             {italic(r)^2==.(format(round(aftersplinecormat[1,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(aftersplinecormatactive[1,2]^2, 2), nsmall = 2))}
+           )),
+           vjust = 1, hjust = 0) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize/1.5))
+
+r23_before_all <- meanF_data_filter %>%
+  ggplot(aes(x = meanF_REP3, y = meanF_REP2)) +
+  geom_bin2d(bins = 100) +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Number of\nvariants", limits = c(1, 45000)) +
+  geom_abline(intercept = 0, slope = 1,col="gray") +
+  geom_hline(yintercept = -4, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = -4, color = "gray", linetype = "dashed") +
+  geom_line(data=data.frame(meanF_REP3 = r23$meanF_REP3, 
+                            meanF_REP2 = spline_r23$fitted.values), 
+            size=1.3,col="red") +
+  labs(x = "Replicate 3 fluorescence", y = "Replicate 2 fluorescence",
+       title = "Uncorrected") +
+  annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
+           parse = T,
+           label = as.expression(bquote(
+             {italic(r)^2==.(format(round(beforesplinecormat[3,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(beforesplinecormatactive[3,2]^2, 2), nsmall = 2))}
+           )),
+           vjust = 1, hjust = 0) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize/1.5))
+
+r23_after_all <- meanF_data_corrected %>%
+  ggplot(aes(x = meanF_REP3, y = meanF_REP2)) +
+  geom_bin2d(bins = 100) +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Number of\nvariants", limits = c(1, 45000)) +
+  geom_abline(intercept = 0, slope = 1,col="gray") +
+  geom_hline(yintercept = -4, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = -4, color = "gray", linetype = "dashed") +
+  labs(x = "Replicate 3 fluorescence", y = "Replicate 2 fluorescence",
+       title = "Corrected") +
+  annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
+           parse = T,
+           label = as.expression(bquote(
+             {italic(r)^2==.(format(round(aftersplinecormat[3,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(aftersplinecormatactive[3,2]^2, 2), nsmall = 2))}
+           )),
+           vjust = 1, hjust = 0) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize/1.5))
+
+(r12_before_all + r12_after_all) / (r23_before_all + r23_after_all) + 
+  plot_layout(guides = "collect")
 
 # New corrected dataset
 ctls <- meanF_data_corrected %>% filter(type=="control") %>% 
@@ -511,7 +635,32 @@ ctls <- meanF_data_corrected %>% filter(type=="control") %>%
 meanF_data_corrected <- meanF_data_corrected %>% filter(se_meanF <= 0.1) 
 meanF_data_corrected <- unique(rbind(meanF_data_corrected,ctls)) # Manually add controls to new dataset
 
+# Pairwise Pearson correlation between all replicates after spline correction
+aftersplinecormat <- meanF_data_corrected %>%
+  filter(RE %in% REs[[1]]) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("After correction and filtering Pearson's R")
+print(aftersplinecormat)
+paste("Mean pairwise R^2:",
+      round(mean(aftersplinecormat[upper.tri(aftersplinecormat)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(aftersplinecormat[1:3, 1:3][upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
+
+# Excluding inactive variants
+aftersplinecormatactive <- meanF_data_corrected %>%
+  filter(RE %in% REs[[1]]) %>%
+  filter(avg_meanF >= -4) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("After correction and filtering Pearson's R (active variants)")
+print(aftersplinecormatactive)
+paste("Mean pairwise R^2:",
+      round(mean(aftersplinecormatactive[upper.tri(aftersplinecormatactive)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(aftersplinecormatactive[1:3, 1:3][upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
 ```
+
 
 ## Checking correlations with isogenic and REBC controls
 
@@ -526,6 +675,16 @@ ctl_rep1 <- ctls %>% filter(!is.na(meanF_REP1)) %>% select(AA_var,REBC,meanF_REP
 ctl_rep2 <- ctls %>% filter(!is.na(meanF_REP2)) %>% select(AA_var,REBC,meanF_REP2) %>% mutate(REP = "REP2") %>% rename(meanF = meanF_REP2)
 ctl_rep3 <- ctls %>% filter(!is.na(meanF_REP3)) %>% select(AA_var,REBC,meanF_REP3) %>% mutate(REP = "REP3") %>% rename(meanF = meanF_REP3)
 ctl_rep4 <- ctls %>% filter(!is.na(meanF_REP4)) %>% select(AA_var,REBC,meanF_REP4) %>% mutate(REP = "REP4") %>% rename(meanF = meanF_REP4)
+
+# test whether REBC has fluorescence effect (one-way ANOVA)
+# AncSR1
+summary(aov(meanF ~ REBC, 
+            filter(rbind(ctl_rep1,ctl_rep2,ctl_rep3,ctl_rep4), 
+                   AA_var == "EGKA", grepl("minilib", REBC))))
+# AncSR2
+summary(aov(meanF ~ REBC, 
+            filter(rbind(ctl_rep1,ctl_rep2,ctl_rep3,ctl_rep4), 
+                   AA_var == "GSKV", grepl("minilib", REBC))))
 
 # Extract genotypes of isogenic controls from the DMS library mutants.
 ctls_in_lib <- meanF_data_corrected %>% mutate(v = paste(AA_var,REBC,sep = "_")) %>% 
@@ -564,17 +723,35 @@ iso_file = file.path(basedir, "data", "meanF", "rep4_isogenic_controls_FlowJo_bi
 isogenics <- read.csv(iso_file,header=T) %>% rowwise() %>%
   mutate(meanF_iso = sum(c(fbin1*cell_countb1,fbin2*cell_countb2,fbin3*cell_countb3,fbin4*cell_countb4))/sum(c(cell_countb1,cell_countb2,cell_countb3,cell_countb4)))
   
-c2 <- inner_join(isogenics,ctl_rep4,by="REBC") %>% ggplot(aes(x=meanF_iso,y=meanF)) +
-  geom_point() + theme_bw() + xlim(-4.5,-2.1) + ylim(-4.5,-2.1) +
-  theme(axis.title.x = element_text(size=12,face="bold"), 
-        axis.text.x = element_text(size=10),
-        axis.text.y = element_text(size = 10),
-        axis.title=element_text(size=12,face="bold")) +
+ctls_in_lib <- pivot_wider(ctls_in_lib, names_from = REP, values_from = meanF) %>%
+  mutate(avg_meanF = rowMeans(select(., REP1:REP3)))
+
+c2 <- inner_join(select(isogenics, c(REBC, meanF_iso)), select(ctls, c(REBC, avg_meanF)),by="REBC") %>% 
+  left_join(ctls_in_lib, by = "REBC", suffix = c("_spikein", "_lib")) %>%
+  ggplot(aes(x=meanF_iso)) +
   geom_abline(slope = 1,intercept = 0,color="gray") +
-  geom_smooth(method="lm",se=F) +
-  ylab("meanF isogenic (spiked-in)") + xlab("meanF isogenic (flow cytometry)") +
-  annotate(geom = "text",label="r = 0.84", x= -4,y=-3,size=6)
+  geom_smooth(aes(y = avg_meanF_spikein), color = "black", method="lm", se=F, fullrange = TRUE) +
+  geom_smooth(aes(y = avg_meanF_lib), color = "red", method="lm", se=F, fullrange = TRUE) +
+  geom_point(aes(y = avg_meanF_spikein), color = "black", size = 2) +
+  geom_point(aes(y = avg_meanF_lib), color = "red", size = 2) +
+  theme_classic() + 
+  xlim(-4.5,-2.1) + ylim(-4.5,-2.1) +
+  scale_y_continuous(name = "Spike-in fluorescence",
+                     sec.axis = sec_axis(~., name = "Library fluorescence")) +
+  # ylab("Fluorescence, spike-in") + 
+  xlab("Flow cytometry fluorescence") +
+  annotate(geom = "text", x = -4.5, y = -2.1, hjust = 0, vjust = 1, size = 6, parse = TRUE,
+           label=as.expression(bquote(italic(r)^2==.(
+             round(cor(isogenics$meanF_iso, ctls[match(isogenics$REBC, ctls$REBC), "avg_meanF"])^2, 2))))) +
+  annotate(geom = "text", x = -4.5, y = -2.4, hjust = 0, vjust = 1, size = 6, parse = TRUE, color = "red",
+           label=as.expression(bquote(italic(r)^2==.(
+             round(cor(isogenics$meanF_iso, ctls_in_lib[match(isogenics$REBC, ctls_in_lib$REBC), "avg_meanF"], 
+                       use = "complete.obs")^2, 2))))) +
+  theme(text = element_text(size = fontsize),
+        plot.margin = unit(c(10,15,10,10), "pt"),
+        axis.title.y.right = element_text(color = "red"))
 ```
+
 ```{r plotcontrols, echo=FALSE, fig.width=12, fig.height=6}
 c1 + c2
 ```
@@ -692,16 +869,19 @@ meanF_p %>%
 # same plot but split by protein background and mean read count bin
 meanF_p %>%
   left_join(meanF_cutoffs) %>%
-  mutate(stop = ifelse(stop, "nonsense", "not nonsense"),
-         stop = factor(stop, levels = c("not nonsense", "nonsense"))) %>%
+  mutate(stop = ifelse(stop, "Nonsense", "Not nonsense"),
+         stop = factor(stop, levels = c("Not nonsense", "Nonsense"))) %>%
   ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(bins = 30, position = "stack", color = "black") +
-  facet_grid(rows = vars(bg), cols = vars(rcbin)) +
+  geom_histogram(binwidth = 0.05, position = "stack", color = "black") +
+  facet_grid(bg ~ rcbin, labeller = label_bquote(cols = .(as.character(rcbin))~reads)) +
   scale_fill_manual(values = c("white", "gray30")) +
-  scale_y_continuous(trans = log10plus1, name = "Count + 1") +
+  scale_y_continuous(trans = log10plus1, name = "Number of variants + 1", labels = label_log()) +
+  geom_vline(aes(xintercept = minF + 0.05), color = "red", linetype = "dashed") +
+  geom_vline(aes(xintercept = minF - 0.05), color = "red", linetype = "dashed") +
   geom_vline(aes(xintercept = minF), color = "red") +
   theme_classic() +
-  labs(x = "meanF", fill = "")
+  labs(x = "Fluorescence", fill = "") +
+  theme(text = element_text(size = fontsize))
 
 # Save dataset of corrected mean fluorescence values with fluorescence p-values
 meanF_data_corrected <- meanF_data_corrected %>%
@@ -710,35 +890,6 @@ meanF_data_corrected <- meanF_data_corrected %>%
 write.csv(meanF_data_corrected,
           file = gzfile(file.path(results_dir, 
                                   "meanF_data_corrected_NovaSeq.csv.gz"))) 
-```
-
-
-## Correlation between replicates for corrected data
-
-Let's calculate the mean correlation between all replicates for all data, as well as for only those variants that are significantly different from null.
-
-```{r correlations}
-# Pearson correlation between all replicates
-cormat <- meanF_data_corrected %>%
-  filter(type == "exp") %>%
-  select(meanF_REP1:meanF_REP4) %>%
-  cor(use = "pairwise.complete.obs")
-# mean r^2 between all pairs of replicates
-print(paste("Mean Pearson's r^2 between replicates:", 
-            round(mean(cormat[upper.tri(cormat)]^2), 2)))
-# mean r^2 between all pairs of replicates, excluding rep 4
-cormat.no4 <- cormat[1:3,1:3]
-print(paste("Mean Pearson's r^2 no rep 4:",
-            round(mean(cormat.no4[upper.tri(cormat.no4)]^2), 2)))
-
-# Pearson correlation between all replicates, active variants only
-cormat.active <- meanF_data_corrected %>%
-  filter(type == "exp", sig == "significant") %>%
-  select(meanF_REP1:meanF_REP4) %>%
-  cor(use = "pairwise.complete.obs")
-# mean r^2 between all pairs of replicates, active variants only
-print(paste("Mean Pearson's r^2 between replicates:", 
-            round(mean(cormat.active[upper.tri(cormat.active)]^2), 2)))
 ```
 
 
@@ -875,8 +1026,8 @@ estGFPposave %>%
   stat_summary_bin(geom = "line", linetype = "dashed", fun = function(x) quantile(x, 0.975)) +
   facet_grid(rows = vars(bg), cols = vars(rcbin)) +
   geom_vline(aes(xintercept = minF), color = "red") +
-  # geom_vline(aes(xintercept = minF + 2*mean_meanF_se), color = "red", linetype = "dashed") +
-  # geom_vline(aes(xintercept = minF - 2*mean_meanF_se), color = "red", linetype = "dashed") +
+  geom_vline(aes(xintercept = minF + 2*mean_meanF_se), color = "red", linetype = "dashed") +
+  geom_vline(aes(xintercept = minF - 2*mean_meanF_se), color = "red", linetype = "dashed") +
   scale_y_log10() +
   theme_classic() +
   labs(x = "meanF", y = "estimated debulk GFP+ cells sorted")
@@ -1007,72 +1158,34 @@ debulk.fdrthresh <- 0.1
 debulk_data %>%
   mutate(sig = padj <= debulk.fdrthresh) %>%
   ggplot(aes(x = Count, fill = sig)) +
-  geom_histogram(bins = 100, position = "stack") +
+  geom_histogram(bins = 50, position = "stack", color = "black") +
   scale_x_continuous(trans = log10plus1, name = "Reads per variant + 1") +
-  labs(title = "Debulk GFP- data") +
-  theme_classic()
+  scale_y_continuous(label = label_number(big.mark = "")) +
+  scale_fill_manual(values = c("white", "gray30"), labels = c("Undetermined", "Null")) +
+  labs(title = "Debulk GFP- variants", y = "Number of variants", fill = "") +
+  theme_classic() +
+  theme(text = element_text(size = fontsize))
 
 debulk_data_filter <- debulk_data %>%
   filter(padj <= debulk.fdrthresh)
 
-# fraction of variants in binned sort data out of all possible variants
-meanF_data_corrected %>% filter(type == "exp") %>% summarize(n_distinct(AA_var, REBC)) / (21^4*32)
-
-# fraction of variants in library out of all possible variants before filtering
-# (including variants in the debulk GFP- dataset and the filtered binned sort dataset)
-debulk_data %>%
-  select(AA_var, REBC) %>%
-  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
-  summarize(n_distinct(AA_var, REBC) / (21^4*32)) %>%
-  pull() %>%
-  round(3) %>%
-  paste("fraction of all possible variants before filtering:", .)
-
-# fraction of variants in the debulk GFP- data remaining after filtering
-debulk_data_filter %>% summarize(n_distinct(AA_var, REBC) /
-  debulk_data %>% summarize(n_distinct(AA_var, REBC))) %>%
-  pull() %>% round(3) %>%
-  paste("fraction of debulk GFP- variants retained:", .)
-
-# number of variants in the debulk GFP- data remaining after filtering
-debulk_data_filter %>% summarize(n_distinct(AA_var, REBC)) %>%
-  pull() %>% 
-  paste("number of debulk GFP- variants retained:", .)
-
-# fraction of variants in debulk GFP- and binned sort datasets after filtering,
-# out of all possible variants
-debulk_data_filter %>% 
-  select(AA_var, REBC) %>%
-  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
-  summarize(n_distinct(AA_var, REBC) / (21^4*32)) %>%
-  pull() %>% round(3) %>%
-  paste("fraction of all possible variants after filtering:", .)
-
-# number of variants in debulk GFP- and binned sort datasets after filtering
-debulk_data_filter %>% 
-  select(AA_var, REBC) %>%
-  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
-  summarize(n_distinct(AA_var, REBC)) %>%
-  pull() %>% 
-  paste("number of variants after filtering:", .)
-
-# number of non-nonsense variants retained after filtering
-debulk_data_filter %>% 
-  select(AA_var, REBC) %>%
-  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
+# number of total (non-nonsense) variants classified as null from the debulk GFP- data
+debulk_data_filter %>%
   filter(!grepl("\\*", AA_var)) %>%
-  summarize(n_distinct(AA_var, REBC)) %>%
-  pull() %>% 
-  paste("number of variants after filtering:", .)
+  distinct(AA_var, REBC) %>%
+  anti_join(filter(meanF_data_corrected, type == "exp"), by = c("AA_var", "REBC")) %>%
+  mutate(bg = sub("_REBC.+", "", REBC)) %>%
+  count(bg) %>%
+  mutate(frac = n / 2560000)
 
-# fraction of non-nonsense variants retained after filtering out of all possible
-debulk_data_filter %>% 
-  select(AA_var, REBC) %>%
-  full_join(meanF_data_corrected %>% filter(type == "exp") %>% select(AA_var, REBC)) %>%
+# total number of phenotyped variants
+debulk_data_filter %>%
+  distinct(AA_var, REBC) %>%
+  mutate(bg = sub("_REBC.+", "", REBC)) %>%
+  full_join(filter(meanF_data_corrected, type == "exp"), by = c("AA_var", "REBC", "bg")) %>%
   filter(!grepl("\\*", AA_var)) %>%
-  summarize(n_distinct(AA_var, REBC) / (20^4*32)) %>%
-  pull() %>% 
-  paste("number of variants after filtering:", .)
+  count(bg) %>%
+  mutate(frac = n / 2560000)
 
 
 # export filtered data

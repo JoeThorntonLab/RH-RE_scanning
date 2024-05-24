@@ -18,7 +18,7 @@ basedir <- file.path("..", "..")
 packages <- c("rstudioapi", "tidyr", "MASS", "ggplot2", "Matrix", "stringr",
               "MatrixModels", "tibble", "glmnet", "patchwork", "gridExtra", 
               "doParallel", "viridis", "Biostrings", "scales", "pROC", "purrr", 
-              "dplyr")
+              "flowCore", "dplyr")
 bioconductor_packages <- c("sparseMatrixStats")
 installed_packages <- packages %in% rownames(installed.packages())
 installed_bioc_packages <- bioconductor_packages %in% rownames(installed.packages())
@@ -48,6 +48,9 @@ library(glmnet, lib.loc = file.path(basedir, "R_packages", "glmnet_4.1-6"))
 # make output directories
 results_dir <- file.path(basedir, "results", "mutation_effects_model")
 if(!dir.exists(results_dir)) dir.create(results_dir)
+
+# fontsize for plotting
+fontsize <- 16
 ```
 
 
@@ -76,8 +79,10 @@ In this notebook, code chunks with option `purl = TRUE` were run on the Universi
 ```{r load, purl = TRUE}
 # load general functions
 source(file.path(basedir, "scripts", "general_functions.R"))
-# load model fitting functins
+# load model fitting functions
 source(file.path(basedir, "scripts", "mut_effects_model_fitting_functions.R"))
+# load functions for parsing flow cytometry data
+source(file.path(basedir, "scripts", "FACS_functions.R"))
 
 # reading in cleaned data from binned sort and debulk sort experiments
 if(!file.exists(file.path(results_dir, "meanF_data.rda"))) {
@@ -166,8 +171,6 @@ cov_table <- data.frame(effect = c("AA", "RE", "AA:AA", "RE:RE", "AA:RE",
 knitr::kable(rbind(cov_table, c("total", sum(cov_table$nterms))))
 ```
 
-Note that some of the above effect terms are redundant. For example, there are 8 terms for the first-order RE effects and 16 terms for the second-order RE effects, meaning that there are 24 total terms encoding the effect of the RE sequence, more than the number of RE sequences. These extra degrees of freedom will be dealt with by constraining the effects to sum to zero over each site; see later section "Zero-mean enforcement."
-
 ```{r makecovmats, purl = TRUE}
 # specify orders of intermolecular interactions to include in the model;
 # first column represents RH interaction order and second column represents
@@ -222,7 +225,7 @@ mutfreq %>%
              color = "red") +
   scale_y_continuous(trans = log10plus1, labels = label_comma()) +
   labs(title = "Mutant state frequencies", x = "State combination", 
-       y = "Number of variants + 1") +
+       y = "Number of variants") +
   theme_light() +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
         text = element_text(size = 14))
@@ -269,7 +272,7 @@ mutfreqactive %>%
              color = "red") +
   scale_y_continuous(trans = log10plus1, labels = label_comma()) +
   labs(title = "Mutant state frequencies, active variants", x = "State combination", 
-       y = "Number of variants + 1") +
+       y = "Number of variants") +
   theme_light() +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
         text = element_text(size = 14))
@@ -361,7 +364,7 @@ a <- data.frame(geneticscore = AncSR1_UL_fit_gs,
                 fluorescence = y.AncSR1) %>%
   ggplot(aes(x = geneticscore, y = fluorescence)) +
   geom_bin2d(bins = 50) +
-  scale_fill_viridis(trans = log10plus1, name = "Variants + 1",
+  scale_fill_viridis(trans = log10plus1, name = "Number of\nvariants",
                      labels = label_comma()) +
   geom_function(fun = logistic, args = list(L = AncSR1.L, U = AncSR1.U), 
                 color = "red") +
@@ -376,7 +379,7 @@ b <- data.frame(geneticscore = AncSR2_UL_fit_gs,
                 fluorescence = y.AncSR2) %>%
   ggplot(aes(x = geneticscore, y = fluorescence)) +
   geom_bin2d(bins = 50) +
-  scale_fill_viridis(trans = log10plus1, name = "Variants + 1",
+  scale_fill_viridis(trans = log10plus1, name = "Number of\nvariants",
                      labels = label_comma()) +
   geom_function(fun = logistic, args = list(L = AncSR2.L, U = AncSR2.U), 
                 color = "red") +
@@ -1232,6 +1235,16 @@ AncSR1.cv.pred.R2.active <- sapply(1:10, function(x)
   calc_R2(AncSR1.cv.pred.fine[[x]][AncSR1.active[AncSR1_foldid == x], 
                                    AncSR1.lambdamin.i],
           y.AncSR1[AncSR1_foldid == x & AncSR1.active]))
+# approximate lower bound of fluorescence for active variants
+AncSR1.active.lb <- meanF_data %>%
+  filter(type == "exp", bg == "AncSR1", sig == "significant") %>%
+  group_by(rcbin) %>%
+  summarize(minF = min(avg_meanF)) %>%
+  left_join(meanF_data %>%
+              filter(type == "exp", bg == "AncSR1") %>%
+              count(rcbin)) %>%
+  summarize(lb = sum(minF * n / sum(n))) %>%
+  pull(lb)
 
 AncSR2.active <- meanF_data %>%
   filter(bg == "AncSR2", type == "exp") %>%
@@ -1244,6 +1257,16 @@ AncSR2.cv.pred.R2.active <- sapply(1:10, function(x)
   calc_R2(AncSR2.cv.pred.fine[[x]][AncSR2.active[AncSR2_foldid == x], 
                                    AncSR2.lambdamin.i],
           y.AncSR2[AncSR2_foldid == x & AncSR2.active]))
+# approximate lower bound of fluorescence for active variants
+AncSR2.active.lb <- meanF_data %>%
+  filter(type == "exp", bg == "AncSR2", sig == "significant") %>%
+  group_by(rcbin) %>%
+  summarize(minF = min(avg_meanF)) %>%
+  left_join(meanF_data %>%
+              filter(type == "exp", bg == "AncSR2") %>%
+              count(rcbin)) %>%
+  summarize(lb = sum(minF * n / sum(n))) %>%
+  pull(lb)
 
 # WT AncSR2/SRE1 fluorescence level for comparison
 AncSR2.SRE1.f <- AncSR2_model_data %>%
@@ -1259,19 +1282,21 @@ lapply(1:10, function(x)
   ggplot(aes(x = pred, y = obs)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
-  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
-  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR1.active.lb, color = "gray", linetype = "dashed") + 
+  geom_vline(xintercept = AncSR1.active.lb, color = "gray", linetype = "dashed") + 
   scale_fill_viridis(trans = log10plus1, limits = c(1, 160000),
-                     labels = label_comma(), name = "Variants + 1") +
-  labs(title = bquote("AncSR1 out-of-sample fits" ~ 
-                        (R^2 == .(round(mean(AncSR1.cv.pred.R2), 2))*''%+-%''*
-                         .(round(sd(AncSR1.cv.pred.R2), 2)) ~
-                           "," ~ {R^2}[active] == 
-                           .(round(mean(AncSR1.cv.pred.R2.active), 2))*''%+-%''*
-                         .(round(sd(AncSR1.cv.pred.R2.active), 2)))), 
-       x = "Predicted fluorescence", y = "Observed fluorescence") +
-  facet_wrap(facets = vars(fold)) +
-  theme_classic()
+                     labels = label_comma(), name = "Number of\nvariants") +
+  labs(title = bquote(
+    "AncSR1 cross-validation" ~ 
+      (italic(R)^2 == .(format(round(mean(AncSR1.cv.pred.R2), 2), nsmall = 2))*
+         ''%+-%''*.(format(round(sd(AncSR1.cv.pred.R2), 2), nsmall = 2)) ~"," ~ 
+         {italic(R)^2}[active] == .(format(round(mean(AncSR1.cv.pred.R2.active), 2), nsmall = 2))*
+         ''%+-%''*.(format(round(sd(AncSR1.cv.pred.R2.active), 2), nsmall = 2)))
+  ), x = "Predicted fluorescence", y = "Observed fluorescence") +
+  facet_wrap(facets = vars(fold), nrow = 2) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        strip.text.x = element_blank())
 
 lapply(1:10, function(x)
   data.frame(pred = AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i],
@@ -1281,19 +1306,21 @@ lapply(1:10, function(x)
   ggplot(aes(x = pred, y = obs)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
-  geom_vline(xintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
-  geom_hline(yintercept = AncSR2.SRE1.f, color = "gray", linetype = 2) +
+  geom_hline(yintercept = AncSR2.active.lb, color = "gray", linetype = "dashed") + 
+  geom_vline(xintercept = AncSR2.active.lb, color = "gray", linetype = "dashed") + 
   scale_fill_viridis(trans = log10plus1, limits = c(1, 160000),
-                     labels = label_comma(), name = "Variants + 1") +
-  labs(title = bquote("AncSR2 out-of-sample fits" ~ 
-                        (R^2 == .(round(mean(AncSR2.cv.pred.R2), 2))*''%+-%''*
-                         .(round(sd(AncSR2.cv.pred.R2), 2)) ~
-                           "," ~ {R^2}[active] == 
-                           .(round(mean(AncSR2.cv.pred.R2.active), 2))*''%+-%''*
-                         .(round(sd(AncSR2.cv.pred.R2.active), 2)))), 
-       x = "Predicted fluorescence", y = "Observed fluorescence") +
-  facet_wrap(facets = vars(fold)) +
-  theme_classic()
+                     labels = label_comma(), name = "Number of\nvariants") +
+  labs(title = bquote(
+    "AncSR2 cross-validation" ~ 
+      (italic(R)^2 == .(format(round(mean(AncSR2.cv.pred.R2), 2), nsmall = 2))*
+         ''%+-%''*.(format(round(sd(AncSR2.cv.pred.R2), 2), nsmall = 2)) ~"," ~ 
+         {italic(R)^2}[active] == .(format(round(mean(AncSR2.cv.pred.R2.active), 2), nsmall = 2))*
+         ''%+-%''*.(format(round(sd(AncSR2.cv.pred.R2.active), 2), nsmall = 2)))
+  ), x = "Predicted fluorescence", y = "Observed fluorescence") +
+  facet_wrap(facets = vars(fold), nrow = 2) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize),
+        strip.text.x = element_blank())
 
 # calculate number of false positives and false negatives for calling variants 
 # more active than WT AncSR2:SRE1
@@ -1332,42 +1359,6 @@ print(paste("AncSR2 false negative rate:", round(mean(AncSR2.FN.rate), 2),
             "+/-", round(sd(AncSR2.FN.rate), 2)))
 print(paste("AncSR2 false positive rate:", round(mean(AncSR2.FP.rate), 5),
             "+/-", round(sd(AncSR2.FP.rate), 5)))
-
-# # plot residuals as a function of fitted fluorescence
-# AncSR1.cv.residuals <- lapply(1:10, function(x)
-#    y.AncSR1[AncSR1_foldid == x] - AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i])
-# lapply(1:10, function(x)
-#   data.frame(pred = AncSR1.cv.pred.fine[[x]][,AncSR1.lambdamin.i],
-#              res = AncSR1.cv.residuals[[x]])) %>%
-#   bind_rows(.id = "fold") %>%
-#   mutate(fold = factor(fold, levels = 1:10)) %>%
-#   ggplot(aes(x = pred, y = res)) +
-#   geom_bin_2d() +
-#   geom_hline(yintercept = 0, color = "gray", linetype = 2) +
-#   stat_smooth(col = "red") +
-#   scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
-#   labs(title = "AncSR1 out-of-sample residuals",
-#        x = "Predicted fluorescence", y = "Residual") +
-#   facet_wrap(facets = vars(fold)) +
-#   theme_classic()
-# 
-# AncSR2.cv.residuals <- lapply(1:10, function(x)
-#    y.AncSR2[AncSR2_foldid == x] - AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i])
-# lapply(1:10, function(x)
-#   data.frame(pred = AncSR2.cv.pred.fine[[x]][,AncSR2.lambdamin.i],
-#              res = AncSR2.cv.residuals[[x]])) %>%
-#   bind_rows(.id = "fold") %>%
-#   mutate(fold = factor(fold, levels = 1:10)) %>%
-#   ggplot(aes(x = pred, y = res)) +
-#   geom_bin_2d() +
-#   geom_hline(yintercept = 0, color = "gray", linetype = 2) +
-#   stat_smooth(col = "red") +
-#   scale_fill_viridis(trans = "log", limits = c(1, 160000)) +
-#   labs(title = "AncSR2 out-of-sample residuals",
-#        x = "Predicted fluorescence", y = "Residual") +
-#   facet_wrap(facets = vars(fold)) +
-#   theme_classic()
-
 ```
 
 The out-of-sample $R^2$ for the AncSR1 cross-validation fits is quite low (0.20), likely because there are very few variants in the dynamic range of fluorescence for this dataset. The out-of-sample $R^2$ for the AncSR2 cross-validation fits is much higher (0.79) because there are many more variants in the dynamic range.
@@ -1470,27 +1461,43 @@ data.frame(gs = full.gs.final.AncSR1,
   geom_bin_2d() +
   geom_function(fun = logistic, args = list(L = AncSR1.L, U = AncSR1.U), 
                 color = "red") +
+  geom_hline(yintercept = AncSR1.active.lb, color = "gray", linetype = "dashed") +
   scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
-                     name = "Variants + 1") +
-  labs(title = bquote("AncSR1 final predictions" ~ 
-                        (R^2 == .(round(AncSR1.final.R2, 2)) ~ "," ~
-                        {R^2}[active] == .(round(AncSR1.active.final.R2, 2)))), 
-       x = "Genetic score", y = "Observed fluorescence") +
-  theme_classic()
+                     name = "Number of\nvariants") +
+  labs(title = "AncSR1 final predictions", x = "Genetic score", 
+       y = "Observed fluorescence") +
+  annotate(x = min(full.gs.final.AncSR1), y = max(y.AncSR1), 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(R^2 == .(round(AncSR1.final.R2, 2))))) +
+  annotate(x = min(full.gs.final.AncSR1), y = max(y.AncSR1) - 0.15, 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(
+             {R^2}[active] == .(round(AncSR1.active.final.R2, 2))))) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize))
 
 # plot predicted vs. true phenotypes for AncSR1
-data.frame(pred = full.pred.final.AncSR1,
+AncSR1fullmodelfitplot <- data.frame(pred = full.pred.final.AncSR1,
            y = y.AncSR1) %>%
   ggplot(aes(x = pred, y = y)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_hline(yintercept = AncSR1.active.lb, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = AncSR1.active.lb, color = "gray", linetype = "dashed") +
   scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
-                     name = "Variants + 1") +
-  labs(title = bquote("AncSR1 final predictions" ~ 
-                        (R^2 == .(round(AncSR1.final.R2, 2)) ~ "," ~
-                        {R^2}[active] == .(round(AncSR1.active.final.R2, 2)))), 
+                     name = "Number of\nvariants", limits = c(1, 1200000)) +
+  labs(title = "AncSR1 final predictions", 
        x = "Predicted fluorescence", y = "Observed fluorescence") +
-  theme_classic()
+  annotate(x = min(full.pred.final.AncSR1), y = max(y.AncSR1), 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(italic(R)^2 == .(round(AncSR1.final.R2, 2))))) +
+  annotate(x = min(full.pred.final.AncSR1), y = max(y.AncSR1) - 0.15, 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(
+             {italic(R)^2}[active] == .(round(AncSR1.active.final.R2, 2))))) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize))
+AncSR1fullmodelfitplot
 
 
 ### AncSR2
@@ -1509,30 +1516,115 @@ data.frame(gs = full.gs.final.AncSR2,
   geom_bin_2d() +
   geom_function(fun = logistic, args = list(L = AncSR2.L, U = AncSR2.U), 
                 color = "red") +
+  geom_hline(yintercept = AncSR2.active.lb, color = "gray", linetype = "dashed") +
   scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
-                     name = "Variants + 1") +
-  labs(title = bquote("AncSR2 final predictions" ~ 
-                        (R^2 == .(round(AncSR2.final.R2, 2)) ~ "," ~
-                        {R^2}[active] == .(round(AncSR2.active.final.R2, 2)))), 
-       x = "Genetic score", y = "Observed fluorescence") +
-  theme_classic()
+                     name = "Number of\nvariants") +
+  labs(title = "AncSR2 final predictions", x = "Genetic score", 
+       y = "Observed fluorescence") +
+  annotate(x = min(full.gs.final.AncSR2), y = max(y.AncSR2), 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(R^2 == .(round(AncSR2.final.R2, 2))))) +
+  annotate(x = min(full.gs.final.AncSR2), y = max(y.AncSR2) - 0.15, 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(
+             {R^2}[active] == .(round(AncSR2.active.final.R2, 2))))) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize))
 
 # plot predicted vs. true phenotypes for AncSR2
-data.frame(pred = full.pred.final.AncSR2,
+AncSR2fullmodelfitplot <- data.frame(pred = full.pred.final.AncSR2,
            y = y.AncSR2) %>%
   ggplot(aes(x = pred, y = y)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_hline(yintercept = AncSR2.active.lb, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = AncSR2.active.lb, color = "gray", linetype = "dashed") +
   scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
-                     name = "Variants + 1") +
-  labs(title = bquote("AncSR2 final predictions" ~ 
-                        (R^2 == .(round(AncSR2.final.R2, 2)) ~ "," ~
-                        {R^2}[active] == .(round(AncSR2.active.final.R2, 2)))), 
+                     name = "Number of\nvariants", limits = c(1, 1200000)) +
+  labs(title = "AncSR2 final predictions", 
        x = "Predicted fluorescence", y = "Observed fluorescence") +
-  theme_classic()
+  annotate(x = min(full.pred.final.AncSR2), y = max(y.AncSR2), 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(italic(R)^2 == .(round(AncSR2.final.R2, 2))))) +
+  annotate(x = min(full.pred.final.AncSR2), y = max(y.AncSR2) - 0.15, 
+           hjust = 0, vjust = 1, geom = "text", parse = TRUE, size = 6, 
+           label = as.expression(bquote(
+             {italic(R)^2}[active] == .(round(AncSR2.active.final.R2, 2))))) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize))
+AncSR2fullmodelfitplot
 ```
 
-We see that the fits look quite good. The $R^2$ is again quite low for the AncSR1 dataset at 0.31, but much higher for the subset of active variants at 0.96. The $R^2$ for the AncSR2 dataset is higher at 0.88 for all variants and 0.99 for active variants.
+We see that the fits look quite good. The $R^2$ is again quite low for the AncSR1 dataset at 0.31, but much higher for the subset of active variants at 0.96. The $R^2$ for the AncSR2 dataset is higher at 0.88 for all variants and 0.99 for active variants. Let's compare to the $R^2$ between replicates in the training data.
+
+```{r replicater2, purl = FALSE}
+# AncSR1
+# mean pairwise R^2 all reps all data
+meanF_data %>%
+  filter(type == "exp", bg == "AncSR1") %>%
+  select(AA_var, bg, RE, meanF_REP1:meanF_REP4) %>%
+  right_join(AncSR1_model_data) %>%
+  mutate(meanF_REP1 = replace(meanF_REP1, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP2 = replace(meanF_REP2, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP3 = replace(meanF_REP3, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP4 = replace(meanF_REP4, type == "debulk", .$avg_meanF[type == "debulk"])) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  {round(mean(.[upper.tri(.)])^2, 2)}
+
+# mean pairwise R^2 reps 1-3 all data
+meanF_data %>%
+  filter(type == "exp", bg == "AncSR1") %>%
+  select(AA_var, bg, RE, meanF_REP1:meanF_REP3) %>%
+  right_join(AncSR1_model_data) %>%
+  mutate(meanF_REP1 = replace(meanF_REP1, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP2 = replace(meanF_REP2, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP3 = replace(meanF_REP3, type == "debulk", .$avg_meanF[type == "debulk"])) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  {round(mean(.[upper.tri(.)])^2, 2)}
+
+# mean pairwise R^2 all reps active variants
+meanF_data %>%
+  filter(type == "exp", bg == "AncSR1", sig == "significant") %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  {round(mean(.[upper.tri(.)])^2, 2)}
+
+# AncSR2
+# mean pairwise R^2 all reps all data
+meanF_data %>%
+  filter(type == "exp", bg == "AncSR2") %>%
+  select(AA_var, bg, RE, meanF_REP1:meanF_REP4) %>%
+  right_join(AncSR2_model_data) %>%
+  mutate(meanF_REP1 = replace(meanF_REP1, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP2 = replace(meanF_REP2, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP3 = replace(meanF_REP3, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP4 = replace(meanF_REP4, type == "debulk", .$avg_meanF[type == "debulk"])) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  {round(mean(.[upper.tri(.)])^2, 2)}
+
+# mean pairwise R^2 reps 1-3 all data
+meanF_data %>%
+  filter(type == "exp", bg == "AncSR2") %>%
+  select(AA_var, bg, RE, meanF_REP1:meanF_REP3) %>%
+  right_join(AncSR2_model_data) %>%
+  mutate(meanF_REP1 = replace(meanF_REP1, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP2 = replace(meanF_REP2, type == "debulk", .$avg_meanF[type == "debulk"]),
+         meanF_REP3 = replace(meanF_REP3, type == "debulk", .$avg_meanF[type == "debulk"])) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  {round(mean(.[upper.tri(.)])^2, 2)}
+
+# mean pairwise R^2 all reps active variants
+meanF_data %>%
+  filter(type == "exp", bg == "AncSR2", sig == "significant") %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  {round(mean(.[upper.tri(.)])^2, 2)}
+```
+
 
 
 ## Predictions for missing data
@@ -1690,7 +1782,7 @@ data.frame(res = AncSR1.cv.residuals.cat,
   ggplot(aes(x = pred, y = abs(res))) +
   geom_bin_2d() +
   scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
-                     name = "Variants + 1") +
+                     name = "Number of\nvariants") +
   stat_summary_bin(geom = "line", fun = "mean", breaks = breaks, color = "red") +
   labs(title = "AncSR1 out-of-sample residuals", x = "Predicted fluorescence",
        y = "abs(residual)") +
@@ -1701,7 +1793,7 @@ data.frame(res = AncSR2.cv.residuals.cat,
   ggplot(aes(x = pred, y = abs(res))) +
   geom_bin_2d() +
   scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
-                     name = "Variants + 1") +
+                     name = "Number of\nvariants") +
   stat_summary_bin(geom = "line", fun = "mean", breaks = breaks, color = "red") +
   labs(title = "AncSR2 out-of-sample residuals", x = "Predicted fluorescence",
        y = "abs(residual)") +
@@ -1740,7 +1832,7 @@ Combine predictions for missing variants with data for observed variants and exp
 # combine predictions with observed data and add back per-replicate meanF
 AncSR1_complete_data <- AncSR1_model_data %>%
   left_join(meanF_data %>%
-              filter(type == "exp", bg == "AncSR1") %>%
+              dplyr::filter(type == "exp", bg == "AncSR1") %>%
               select(AA_var, RE, meanF_REP1:meanF_REP4, 
                      avg_meanF, sd_meanF, p:sig)) %>%
   bind_rows(mutate(AncSR1_missing_data, type = "predicted")) %>%
@@ -1748,7 +1840,7 @@ AncSR1_complete_data <- AncSR1_model_data %>%
 
 AncSR2_complete_data <- AncSR2_model_data %>%
   left_join(meanF_data %>%
-              filter(type == "exp", bg == "AncSR2") %>%
+              dplyr::filter(type == "exp", bg == "AncSR2") %>%
               select(AA_var, RE, meanF_REP1:meanF_REP3, 
                      avg_meanF, sd_meanF, p:sig)) %>%
   bind_rows(mutate(AncSR2_missing_data, type = "predicted")) %>%
@@ -1758,17 +1850,19 @@ AncSR2_complete_data <- AncSR2_model_data %>%
 # fluorescent that nonsense variants ("debulk" variants are automatically not
 # active)
 AncSR1_complete_data <- AncSR1_complete_data %>%
-  mutate(active = ifelse(sig == "significant" & !is.na(sig), TRUE, FALSE)) %>%
-  select(-(p:sig))
+  mutate(padj = p.adjust(p, method = "fdr")) %>%   # recompute adjusted p-values for combined data
+  select(-sig) %>%
+  mutate(active = padj < 0.1, active = replace(active, is.na(active), FALSE))
 AncSR2_complete_data <- AncSR2_complete_data %>%
-  mutate(active = ifelse(sig == "significant" & !is.na(sig), TRUE, FALSE)) %>%
-  select(-(p:sig))
+  mutate(padj = p.adjust(p, method = "fdr")) %>%   # recompute adjusted p-values for combined data
+  select(-sig) %>%
+  mutate(active = padj < 0.1, active = replace(active, is.na(active), FALSE))
 
 # export complete datasets
-write.csv(AncSR1_complete_data, 
+write.csv(select(AncSR1_complete_data, -(p:padj)), 
           file = gzfile(file.path(results_dir, "AncSR1_complete_data.csv.gz")),
           row.names = FALSE)
-write.csv(AncSR2_complete_data, 
+write.csv(select(AncSR2_complete_data, -(p:padj)), 
           file = gzfile(file.path(results_dir, "AncSR2_complete_data.csv.gz")),
           row.names = FALSE)
 ```
@@ -1798,10 +1892,9 @@ AncSR2_complete_data %>%
   labs(title = "AncSR2 fluorescence", x = "Fluorescence") +
   theme_classic()
 
-# plot number of predicted and observed variants with greater fluorescence than 
-# WT AncSR2:SRE1 on each RE
+# plot number of predicted and observed active variants
 AncSR1_complete_data %>%
-  filter(avg_meanF > AncSR2.SRE1.f) %>%
+  filter(active) %>%
   group_by(RE, type) %>%
   dplyr::count() %>%
   mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
@@ -1812,7 +1905,7 @@ AncSR1_complete_data %>%
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
 
 AncSR2_complete_data %>%
-  filter(avg_meanF > AncSR2.SRE1.f) %>%
+  filter(active) %>%
   group_by(RE, type) %>%
   dplyr::count() %>%
   mutate(RE = factor(RE, levels = levels(REs[[1]]))) %>%
@@ -1822,10 +1915,9 @@ AncSR2_complete_data %>%
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
 
-# print number of predicted and observed variants with greater fluorescence than 
-# WT AncSR2:SRE1 on each RE
+# print number of predicted and observed active variants
 AncSR1_complete_table <- AncSR1_complete_data %>%
-  filter(avg_meanF >= AncSR2.SRE1.f) %>%
+  filter(active) %>%
   group_by(RE, type) %>%
   dplyr::count() %>% 
   pivot_wider(names_from = type, values_from = n) %>%
@@ -1833,17 +1925,17 @@ AncSR1_complete_table <- AncSR1_complete_data %>%
   dplyr::rename(observed = binned) %>%
   mutate(total = observed + predicted, prop.pred = predicted / total)
 knitr::kable(mutate(AncSR1_complete_table, prop.pred = round(prop.pred, 3)), 
-             caption = "AncSR1 functional variants")
+             caption = "AncSR1 active variants")
 # sum across REs
 AncSR1_complete_table %>%
   ungroup %>%
   summarize(observed = sum(observed), predicted = sum(predicted),
             total = sum(total), prop.pred = predicted / total) %>%
   mutate(prop.pred = round(prop.pred, 3)) %>%
-  knitr::kable(caption = "AncSR1 functional variants (total)")
+  knitr::kable(caption = "AncSR1 active variants (total)")
 
 AncSR2_complete_table <- AncSR2_complete_data %>%
-  filter(avg_meanF >= AncSR2.SRE1.f) %>%
+  filter(active) %>%
   group_by(RE, type) %>%
   dplyr::count() %>% 
   pivot_wider(names_from = type, values_from = n) %>%
@@ -1851,46 +1943,43 @@ AncSR2_complete_table <- AncSR2_complete_data %>%
   dplyr::rename(observed = binned) %>%
   mutate(total = observed + predicted, prop.pred = predicted / total)
 knitr::kable(mutate(AncSR2_complete_table, prop.pred = round(prop.pred, 3)), 
-             caption = "AncSR2 functional variants")
+             caption = "AncSR2 active variants")
 # sum across REs
 AncSR2_complete_table %>%
   ungroup %>%
   summarize(observed = sum(observed), predicted = sum(predicted),
             total = sum(total), prop.pred = predicted / total) %>%
   mutate(prop.pred = round(prop.pred, 3)) %>%
-  knitr::kable(caption = "AncSR1 functional variants (total)")
+  knitr::kable(caption = "AncSR2 active variants (total)")
 ```
 
 
 ## SRE2 correction
 
-The SRE2 yeast strain used in the sort-seq experiments was modified from the original SRE2 strain to include mutations at nucleotide sites flanking the core SRE2 motif. This was to correct for an artifact in the original SRE2 strain that caused high basal fluorescence in the absence of DBD protein. We expected that these flanking mutations would not affect the binding affinity of SR DBD to the RE site; however, two lines of evidence suggest that the flanking mutations did in fact lower the affinity of the protein for the SRE2 site. First, the wild type AncSR2 protein, which is known to bind and activate gene expression on SRE2 to a similar level as on SRE1 when the flanking sequence is kept constant (McKeown *et al., Cell* 2014; Anderson, McKeown & Thornton, *eLife* 2015), is at the lower bound of fluorescence in our sort-seq assay, whereas wild type AncSR2 on SRE1 is within the dynamic range. Second, we used flow cytometry to measure the fluorescence for a panel of SR DBD variants in the ERE, SRE1, and the modified SRE2 strain, and compared this to *in vitro* affinity measurements for this same panel of SR DBD variants on the same REs, but with the flanking sequence kept constant (McKeown *et al., Cell* 2014; Anderson, McKeown & Thornton, *eLife* 2015). We observed that the affinity-fluorescence relationship appears similar for ERE and SRE1, but is right-shifted for SRE2, such that fluorescence is lower than expected in SRE2 based on affinity. This is shown below.
+The GA-RE yeast strain used in the sort-seq experiments was modified from the original GA-RE strain to include mutations at nucleotide sites flanking the core SRE2 motif. This was to correct for an artifact in the original GA-RE strain that caused high basal fluorescence in the absence of DBD protein. We expected that these flanking mutations would not affect the binding affinity of SR DBD to the RE site; however, two lines of evidence suggest that the flanking mutations did in fact lower the affinity of the protein for the GA-RE site. First, the wild type AncSR2 protein, which is known to bind and activate gene expression on GA-RE to a similar level as on SRE1 when the flanking sequence is kept constant (McKeown *et al., Cell* 2014; Anderson, McKeown & Thornton, *eLife* 2015), is at the lower bound of fluorescence in our sort-seq assay, whereas wild type AncSR2 on SRE1 is within the dynamic range. Second, we used flow cytometry to measure the fluorescence for a panel of SR DBD variants in the ERE, SRE1, and the modified GA-RE strain, and compared this to *in vitro* affinity measurements for this same panel of SR DBD variants on the same REs, but with the flanking sequence kept constant (McKeown *et al., Cell* 2014; Anderson, McKeown & Thornton, *eLife* 2015). We observed that the affinity-fluorescence relationship appears similar for ERE and SRE1, but is right-shifted for GA-RE, such that fluorescence is lower than expected in SRE2 based on affinity. This is shown below.
 
 ```{r affinityfluorescence, purl = FALSE}
-# read in functions for parsing flow cytometry data
-source(file.path(basedir, "scripts", "FACS_functions.R"))
-
 # extract mean GFP fluorescence from flow cytometry data on isogenic strains
-# measured on ERE, SRE1, and the modified SRE2
+# measured on ERE, SRE1, and the modified SRE2 (GA)
 fcs_files <- list.files(file.path(basedir, "data", "flow_cytometry", "SRE2_test"), 
                         full.names = TRUE)
 iso_GFP <- sapply(fcs_files, function(x) mean(extract_GFP(x)), USE.NAMES = FALSE)
 
 # read in affinity measurements for isogenic strains measured on ERE, SRE1, and
-# unmodified SRE2
-iso_KD <- read.table(file.path(basedir, "data", "DBDvariants_KD_vals.txt"), 
-                     sep = "\t", header = TRUE)
+# unmodified SRE2 (GA)
+iso_Kmac <- read.table(file.path(basedir, "data", "DBDvariants_KAmac_vals.txt"), 
+                       sep = "\t", header = TRUE)
 
 # combine data
 iso_strains <- data.frame(sample = str_extract(fcs_files, ".RE2?\\+."),
                           meanGFP = iso_GFP) %>%
-  left_join(select(iso_KD, sample, DBD, log10_Kmac)) %>%
+  left_join(select(iso_Kmac, sample, DBD, log10_Kmac)) %>%
   separate(sample, sep = "\\+", into = c("RE", "DBD_variant")) %>%
   mutate(RE = map_chr(RE, ~ if(.x == "ERE") {levels(REs[[1]])[1]} 
                       else if(.x == "SRE") {levels(REs[[1]])[2]} 
                       else levels(REs[[1]])[3]))
 
-# fit logistic function to log10(KD) vs. fluorescence,
+# fit logistic function to log10(Kmac) vs. fluorescence,
 # with range constrained to the range of the AncSR1 reference free model
 
 # Define maximum range of fluorescence
@@ -1898,64 +1987,58 @@ AncSR1.range <- AncSR1.U - AncSR1.L
 
 # Fit curves with the same midpoint for all REs
 iso_X <- select(iso_strains, log10_Kmac)
-# KD_F_fit_1midpoint <- optim(c(AncSR1.L, mean(iso_strains$log10_Kmac), 1), 
-#                             obj_logis_iso,
-#                             X = iso_X,
-#                             y = iso_strains$meanGFP,
-#                             range = AncSR1.range)
-KD_F_fit_1midpoint <- nls(meanGFP ~ L + AncSR1.range / (1 + exp((xmid - log10_Kmac) / scal)),
-                          iso_strains, 
-                          start = c(L = AncSR1.L, 
-                                    xmid = mean(iso_strains$log10_Kmac), 
-                                    scal = 1))
+Kmac_F_fit_1midpoint <- nls(
+  meanGFP ~ L + AncSR1.range / (1 + exp((xmid - log10_Kmac) / scal)), 
+  iso_strains, 
+  start = c(L = AncSR1.L, xmid = mean(iso_strains$log10_Kmac), scal = 1))
 # calculate log-likelihood
-ll_1midpoint <- as.numeric(logLik(KD_F_fit_1midpoint))
+ll_1midpoint <- as.numeric(logLik(Kmac_F_fit_1midpoint))
 
 # Likelihood ratio test to test for significant RE effects
-KD_F_fit_2midpoint <- list()
+Kmac_F_fit_2midpoint <- list()
 ll_2midpoint <- numeric(length = 3)
 for(i in 1:3) {
   re <- unique(iso_strains$RE)[i]
   # fit curves with an effect for one RE, and the other two have the same midpoint
-  KD_F_fit_2midpoint[[i]] <- nls(meanGFP ~ L + AncSR1.range / (1 + exp((xmid + xmid1*RE1 - log10_Kmac) / scal)),
-                                 mutate(iso_strains, RE1 = RE == re), 
-                                 start = c(L = AncSR1.L, 
-                                           xmid = mean(iso_strains$log10_Kmac), 
-                                           xmid1 = 0, scal = 1))
-  names(KD_F_fit_2midpoint)[i] <- re
+  Kmac_F_fit_2midpoint[[i]] <- nls(
+    meanGFP ~ L + AncSR1.range / (1 + exp((xmid + xmid1*RE1 - log10_Kmac) / scal)),
+    mutate(iso_strains, RE1 = RE == re), 
+    start = c(L = AncSR1.L, xmid = mean(iso_strains$log10_Kmac), xmid1 = 0, scal = 1))
+  names(Kmac_F_fit_2midpoint)[i] <- re
   
   # LRT against one-midpoint model
-  ll_2midpoint[i] <- as.numeric(logLik(KD_F_fit_2midpoint[[i]]))
+  ll_2midpoint[i] <- as.numeric(logLik(Kmac_F_fit_2midpoint[[i]]))
   LRS <- -2 * (ll_1midpoint - ll_2midpoint[i])
   pval <- pchisq(LRS, df = 1, lower.tail = FALSE)
   print(paste(re, "p =", pval))
 }
 
 # fit curves with a separate midpoint for each RE
-KD_F_fit_3midpoint <- nls(meanGFP ~ L + AncSR1.range / (1 + exp((xmid + xmid1*RE1 + xmid2*RE2 - log10_Kmac) / scal)),
-                          mutate(iso_strains, RE1 = RE == "SRE1 (AA)", RE2 = RE == "SRE2 (GA)"), 
-                          start = c(L = AncSR1.L, 
-                                    xmid = mean(iso_strains$log10_Kmac), 
-                                    xmid1 = 0, xmid2 = 0, scal = 1))
-# LRT against best two-midpoint model (SRE2)
-ll_3midpoint <- as.numeric(logLik(KD_F_fit_3midpoint))
+Kmac_F_fit_3midpoint <- nls(
+  meanGFP ~ L + AncSR1.range / (1 + exp((xmid + xmid1*RE1 + xmid2*RE2 - log10_Kmac) / scal)),
+  mutate(iso_strains, RE1 = RE == "SRE1 (AA)", RE2 = RE == "SRE2 (GA)"), 
+  start = c(L = AncSR1.L, xmid = mean(iso_strains$log10_Kmac), 
+            xmid1 = 0, xmid2 = 0, scal = 1))
+# LRT against best two-midpoint model (SRE2 (GA))
+ll_3midpoint <- as.numeric(logLik(Kmac_F_fit_3midpoint))
 LRS <- -2 * (max(ll_2midpoint) - ll_3midpoint)
 pval <- pchisq(LRS, df = 1, lower.tail = FALSE)
 print(paste("p = ", pval))
 
 # print summary of best fit model
-KD_F_fit_best <- KD_F_fit_2midpoint[[3]]
-summary(KD_F_fit_best)
+Kmac_F_fit_best <- Kmac_F_fit_2midpoint[[3]]
+summary(Kmac_F_fit_best)
 
-# Plot log10(KD) vs. fluorescence for best fit model (SRE2 effect).
+# Plot log10(Kmac) vs. fluorescence for best fit model (SRE2 (GA) effect).
 # Solid lines show the best-fit logistic curves with midpoints specific for 
-# ERE/SRE1 and SRE2. Dashed lines show confidence intervals for the ERE/SRE1
-# midpoint and SRE2 midpoint.
-SRE2affcoefs <- coef(KD_F_fit_best)
-SRE2affcoefsse <- summary(KD_F_fit_best)$coefficients[,2]
+# ERE/SRE1 and SRE2 (GA). Dashed lines show confidence intervals for the ERE/SRE1
+# midpoint and SRE2 (GA) midpoint.
+SRE2affcoefs <- coef(Kmac_F_fit_best)
+SRE2affcoefsse <- summary(Kmac_F_fit_best)$coefficients[,2]
 ggplot(iso_strains, aes(x = log10_Kmac, y = meanGFP, color = RE)) +
-  geom_point() +
-  scale_color_manual(values = visually_distinct1[names(visually_distinct1) %in% levels(REs[[1]])[1:3]]) +
+  geom_point(size = 2) +
+  scale_color_manual(values = visually_distinct1[names(visually_distinct1) %in% levels(REs[[1]])[1:3]],
+                     labels = c("ERE (GT)", "SRE (AA)", "GA")) +
   theme_classic() +
   stat_function(fun = function(x, L, xmid, scal) L + AncSR1.range / (1 + exp((xmid - x) / scal)),
                 args = list(L = SRE2affcoefs[1],
@@ -1989,38 +2072,43 @@ ggplot(iso_strains, aes(x = log10_Kmac, y = meanGFP, color = RE)) +
                             scal = SRE2affcoefs[4]),
                 color = visually_distinct1[names(visually_distinct1) == "SRE2 (GA)"],
                 linetype = "dashed") +
-  labs(x = bquote(log[10](K[D]) ~ "(same flanking sequence)"), 
-       y = "Fluorescence (SRE2 modified flanking sequence)")
+  labs(x = bquote(log[10](K[A, mac]) ~ ", original FS"), 
+       y = "Fluorescence, GA FS mutant") +
+  theme(text = element_text(size = 16))
 ```
 
-The above shows that a logistic curve with one midpoint for ERE and SRE1 and a right-shifted midpoint for SRE2 best fits the data, with dashed lines denoting 95% confidence intervals for the midpoints. (The confidence interval is wider for the SRE2 curve because it incorporates uncertainty in both the ERE/SRE1 midpoint and the SRE2 effect.) These observations suggest that the flanking mutations have an affinity-decreasing effect, which causes a global decrease in the fluorescence measured for DBD variants on SRE2 relative to what would have been expected without the flanking mutations.
+The above shows that a logistic curve with one midpoint for ERE and SRE1 and a right-shifted midpoint for GA-RE best fits the data, with dashed lines denoting 95% confidence intervals for the midpoints. (The confidence interval is wider for the GA-RE curve because it incorporates uncertainty in both the ERE/SRE1 midpoint and the GA-RE effect.) These observations suggest that the flanking mutations have an affinity-decreasing effect, which causes a global decrease in the fluorescence measured for DBD variants on GA-RE relative to what would have been expected without the flanking mutations.
 
-To correct for this effect, it is not enough to simply adjust all of the SRE2 fluorescence values up because of the nonlinear relationship between affinity and fluorescence. Instead, we can take advantage of the genetic scores inferred from our reference-free models, which account for this nonlinear relationship. Specifically, the effect of the flanking mutations on fluorescence, $\Delta F$, can be expressed either in terms of an effect on affinity, $\Delta\log_{10}(K_D)$, or an effect on genetic score $\Delta x$, *i.e.*
+To correct for this effect, it is not enough to simply adjust all of the GA-RE fluorescence values up because of the nonlinear relationship between affinity and fluorescence. Instead, we can take advantage of the genetic scores inferred from our reference-free models, which account for this nonlinear relationship. Specifically, the effect of the flanking mutations on fluorescence, $\Delta F$, can be expressed either in terms of an effect on affinity, $\Delta\log_{10}(K_A)$, or an effect on genetic score $\Delta x$, *i.e.*
 
 $$
 \begin{align*}
-  \Delta F &= \left(L + \frac{R}{1 + e^{-x_{\text{WT}}}}\right) - \left(L + \frac{R}{1 + e^{-(x_{\text{WT}} + \Delta x)}}\right) \\
-  \Delta F &= \left(L + L' + \frac{R}{1 + e^{-[{\log_{10}(K_D)}_{\text{WT}} - C] / a}}\right) - \left(L + L' + \frac{R}{1 + e^{-[{\log_{10}(K_D)}_{\text{WT}} + \Delta\log_{10}(K_D) - C] / a}}\right)
+  \Delta F &= L + \frac{R}{1 + e^{-\Delta x}} \\
+  \Delta F &= L + \Delta L + \frac{R}{1 + e^{-\Delta \log_{10}(K_A) / a}}
 \end{align*}
 $$
-where $C$ is the midpoint of the $\log_{10}(K_D)$-fluorescence curve for ERE and SRE1, $a$ is its steepness, $L'$ is the difference between the lower bound of the reference-free model and that of the affinity-fluorescence curve, and $x_{\text{WT}}$ and ${\log_{10}(K_D)}_{\text{WT}}$ are the genetic score and affinity of the unmodified RE sequence, respectively. Setting these expressions equal to each other and solving for $\Delta x$, we obtain
+where $a$ is the steepness of the $\log_{10}(K_A)$-fluorescence curve and $\Delta L$ is the difference between the lower bound of the reference-free model and that of the affinity-fluorescence curve. Setting these expressions equal to each other and solving for $\Delta x$, we obtain
 
 $$
-\Delta x = -\ln\left(\frac{R\left(1 + e^{-\Delta\log_{10}(K_D) / a}\right)}{L'\left(1 + e^{-\Delta\log_{10}(K_D) / a}\right) + R} - 1\right).
+\Delta x = -\ln\left(\frac{R}{\Delta L + \frac{R}{1 + e^{-\Delta\log_{10}(K_A) / a}}} - 1\right).
 $$
 
-We can thus correct for the effect of the flanking substitutions on SRE2 library variants by taking the inferred effect on affinity, transforming it to a genetic score scale, and subtracting this value from the genetic score inferred for each SRE2 variant to infer corrected fluorescence values for those variants. This is done below using the inferred SRE2 effect on affinity as well as the 95% confidence interval bounds for the effect.
+We can thus correct for the effect of the flanking substitutions on GA-RE library variants by taking the inferred effect on affinity, transforming it to a genetic score scale, and subtracting this value from the genetic score inferred for each GA-RE variant to infer corrected fluorescence values for those variants. This is done below using the inferred GA-RE effect on affinity as well as the 95% confidence interval bounds for the effect.
 
 ```{r}
-# scale SRE2 affinity effect to genetic score scale
+# scale SRE2 (GA) affinity effect to genetic score scale
 z <- 1 + exp(-SRE2affcoefs[3] / SRE2affcoefs[4])
 SRE2GSeffect <- -log(AncSR1.range * z / ((SRE2affcoefs[1] - AncSR1.L) * z + AncSR1.range) - 1)
-zupper <- 1 + exp(-(SRE2affcoefs[3] + 1.96*SRE2affcoefsse[3]) / SRE2affcoefs[4])
+zupper <- 1 + exp(-(SRE2affcoefs[3] + SRE2affcoefsse[3]) / SRE2affcoefs[4])
 SRE2GSeffectupper <- -log(AncSR1.range * zupper / ((SRE2affcoefs[1] - AncSR1.L) * zupper + AncSR1.range) - 1)
-zlower <- 1 + exp(-(SRE2affcoefs[3] - 1.96*SRE2affcoefsse[3]) / SRE2affcoefs[4])
+zlower <- 1 + exp(-(SRE2affcoefs[3] - SRE2affcoefsse[3]) / SRE2affcoefs[4])
 SRE2GSeffectlower <- -log(AncSR1.range * zlower / ((SRE2affcoefs[1] - AncSR1.L) * zlower + AncSR1.range) - 1)
 
-# correct SRE2 genetic scores
+# print inferred flank-spacer effect on genetic score +/- SE
+paste("Genetic score effect:", round(SRE2GSeffect, 2), "+/-", 
+      round(SRE2GSeffectupper - SRE2GSeffect, 2))
+
+# correct SRE2 (GA) genetic scores
 AncSR1.SRE2.observed.gs.corrected <- full.gs.final.AncSR1[AncSR1_model_data$RE == "SRE2 (GA)"] + SRE2GSeffect
 AncSR1.SRE2.missing.gs.corrected <- AncSR1.missing.gs[AncSR1_missing_data$RE == "SRE2 (GA)"] + SRE2GSeffect
 AncSR2.SRE2.observed.gs.corrected <- full.gs.final.AncSR2[AncSR2_model_data$RE == "SRE2 (GA)"] + SRE2GSeffect
@@ -2064,28 +2152,100 @@ AncSR2.SRE2.observed.fluor.corrected.lower <- logistic(AncSR2.SRE2.observed.gs.c
 AncSR2.SRE2.missing.fluor.corrected.lower <- logistic(AncSR2.SRE2.missing.gs.corrected.lower,
                                                 L = AncSR2.L, U = AncSR2.U)
 
+
+# recompute p-values for calling variants active vs. inactive
+if(!file.exists(file.path(results_dir, "AncSR1_SRE2_corrected_obs_active_p.rda"))) {
+  # compute p-value for calling variants active 
+  # (greater fluorescence than nonsense variants)
+  fstop <- meanF_data %>% 
+    filter(type == "exp", bg == "AncSR1", stop == TRUE) %>% 
+    pull(avg_meanF)
+  nstop <- length(fstop)
+    
+  # compute fraction of nonsense variants whose meanF is above that of the test variant;
+  # perform test for all non-nonsense variants
+  p.AncSR1.SRE2.obs <- sapply(AncSR1.SRE2.observed.fluor.corrected, 
+                              function(x) sum(fstop > x) / nstop)
+  save(p.AncSR1.SRE2.obs, 
+       file = file.path(results_dir, "AncSR1_SRE2_corrected_obs_active_p.rda"))
+} else load(file.path(results_dir, "AncSR1_SRE2_corrected_obs_active_p.rda"))
+
+if(!file.exists(file.path(results_dir, "AncSR1_SRE2_corrected_miss_active_p.rda"))) {
+  # compute p-value for calling variants active 
+  # (greater fluorescence than nonsense variants)
+  fstop <- meanF_data %>% 
+    filter(type == "exp", bg == "AncSR1", stop == TRUE) %>% 
+    pull(avg_meanF)
+  nstop <- length(fstop)
+    
+  # compute fraction of nonsense variants whose meanF is above that of the test variant;
+  # perform test for all non-nonsense variants
+  p.AncSR1.SRE2.miss <- sapply(AncSR1.SRE2.missing.fluor.corrected, 
+                               function(x) sum(fstop > x) / nstop)
+  save(p.AncSR1.SRE2.miss, 
+       file = file.path(results_dir, "AncSR1_SRE2_corrected_miss_active_p.rda"))
+} else load(file.path(results_dir, "AncSR1_SRE2_corrected_miss_active_p.rda"))
+
+if(!file.exists(file.path(results_dir, "AncSR2_SRE2_corrected_obs_active_p.rda"))) {
+  # compute p-value for calling variants active 
+  # (greater fluorescence than nonsense variants)
+  fstop <- meanF_data %>% 
+    filter(type == "exp", bg == "AncSR2", stop == TRUE) %>% 
+    pull(avg_meanF)
+  nstop <- length(fstop)
+    
+  # compute fraction of nonsense variants whose meanF is above that of the test variant;
+  # perform test for all non-nonsense variants
+  p.AncSR2.SRE2.obs <- sapply(AncSR2.SRE2.observed.fluor.corrected, 
+                              function(x) sum(fstop > x) / nstop)
+  save(p.AncSR2.SRE2.obs, 
+       file = file.path(results_dir, "AncSR2_SRE2_corrected_obs_active_p.rda"))
+} else load(file.path(results_dir, "AncSR2_SRE2_corrected_obs_active_p.rda"))
+
+if(!file.exists(file.path(results_dir, "AncSR2_SRE2_corrected_miss_active_p.rda"))) {
+  # compute p-value for calling variants active 
+  # (greater fluorescence than nonsense variants)
+  fstop <- meanF_data %>% 
+    filter(type == "exp", bg == "AncSR2", stop == TRUE) %>% 
+    pull(avg_meanF)
+  nstop <- length(fstop)
+    
+  # compute fraction of nonsense variants whose meanF is above that of the test variant;
+  # perform test for all non-nonsense variants
+  p.AncSR2.SRE2.miss <- sapply(AncSR2.SRE2.missing.fluor.corrected, 
+                               function(x) sum(fstop > x) / nstop)
+  save(p.AncSR2.SRE2.miss, 
+       file = file.path(results_dir, "AncSR2_SRE2_corrected_miss_active_p.rda"))
+} else load(file.path(results_dir, "AncSR2_SRE2_corrected_miss_active_p.rda"))
+
 # concatenate final results
 AncSR1_complete_data_corrected <- AncSR1_model_data %>%
-  mutate(avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)", 
+  mutate(avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)",
                              AncSR1.SRE2.observed.fluor.corrected),
          avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
                                         AncSR1.SRE2.observed.fluor.corrected.upper),
          avg_meanF_SRE2_lower = replace(avg_meanF, RE == "SRE2 (GA)",
                                         AncSR1.SRE2.observed.fluor.corrected.lower)) %>%
   left_join(meanF_data %>%
-              dplyr::filter(type == "exp", bg == "AncSR1") %>%
+              filter(type == "exp", bg == "AncSR1") %>%
               select(AA_var, RE, meanF_REP1:meanF_REP4, sd_meanF, p:sig),
             by = c("AA_var", "RE")) %>%
-  bind_rows(mutate(AncSR1_missing_data, type = "predicted", 
+  mutate(p = replace(p, RE == "SRE2 (GA)", p.AncSR1.SRE2.obs)) %>%
+  bind_rows(mutate(AncSR1_missing_data, type = "predicted",
                    avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)",
                                        AncSR1.SRE2.missing.fluor.corrected),
                    avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
                                                   AncSR1.SRE2.missing.fluor.corrected.upper),
                    avg_meanF_SRE2_lower = replace(avg_meanF, RE == "SRE2 (GA)",
-                                                  AncSR1.SRE2.missing.fluor.corrected.lower))) %>%
+                                                  AncSR1.SRE2.missing.fluor.corrected.lower),
+                   p = replace(p, RE == "SRE2 (GA)", p.AncSR1.SRE2.miss))) %>%
+  mutate(padj = p.adjust(p, method = "fdr"), active = padj < 0.1, 
+         active = replace(active, is.na(active), FALSE)) %>%
+  replace_na(list(active = FALSE)) %>%
+  select(-sig) %>%
   arrange(AA_var, RE)
 AncSR2_complete_data_corrected <- AncSR2_model_data %>%
-  mutate(avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)", 
+  mutate(avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)",
                              AncSR2.SRE2.observed.fluor.corrected),
          avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
                                         AncSR2.SRE2.observed.fluor.corrected.upper),
@@ -2095,82 +2255,95 @@ AncSR2_complete_data_corrected <- AncSR2_model_data %>%
               dplyr::filter(type == "exp", bg == "AncSR2") %>%
               select(AA_var, RE, meanF_REP1:meanF_REP4, sd_meanF, p:sig),
             by = c("AA_var", "RE")) %>%
-  bind_rows(mutate(AncSR2_missing_data, type = "predicted", 
+  mutate(p = replace(p, RE == "SRE2 (GA)", p.AncSR2.SRE2.obs)) %>%
+  bind_rows(mutate(AncSR2_missing_data, type = "predicted",
                    avg_meanF = replace(avg_meanF, RE == "SRE2 (GA)",
                                        AncSR2.SRE2.missing.fluor.corrected),
                    avg_meanF_SRE2_upper = replace(avg_meanF, RE == "SRE2 (GA)",
                                                   AncSR2.SRE2.missing.fluor.corrected.upper),
                    avg_meanF_SRE2_lower = replace(avg_meanF, RE == "SRE2 (GA)",
-                                                  AncSR2.SRE2.missing.fluor.corrected.lower))) %>%
+                                                  AncSR2.SRE2.missing.fluor.corrected.lower),
+                   p = replace(p, RE == "SRE2 (GA)", p.AncSR2.SRE2.miss))) %>%
+  mutate(padj = p.adjust(p, method = "fdr"), active = padj < 0.1, 
+         active = replace(active, is.na(active), FALSE)) %>%
+  replace_na(list(active = FALSE)) %>%
+  select(-sig) %>%
   arrange(AA_var, RE)
 
-# check old vs. new SRE2 fluorescence values
-data.frame(old = AncSR1_complete_data %>% 
-             dplyr::filter(RE == "SRE2 (GA)") %>% 
+# plot old vs. new SRE2 (GA) fluorescence values
+# AncSR1
+AncSR1_GA_corrected_plot <- data.frame(old = AncSR1_complete_data %>% 
+             filter(RE == "SRE2 (GA)") %>% 
              pull(avg_meanF),
            new = AncSR1_complete_data_corrected %>% 
-             dplyr::filter(RE == "SRE2 (GA)") %>% 
+             filter(RE == "SRE2 (GA)") %>% 
              pull(avg_meanF)) %>%
   ggplot(aes(x = old, y = new)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
-  geom_hline(yintercept = AncSR1.L) +
-  scale_fill_viridis(trans = "log10") +
+  geom_hline(yintercept = AncSR1.active.lb, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = AncSR1.active.lb, color = "gray", linetype = "dashed") +
+  scale_fill_viridis(trans = "log10", limits = c(1, 200000)) +
+  xlim(min(c(y.AncSR1, y.AncSR2)), max(c(y.AncSR1, y.AncSR2))) +
+  ylim(AncSR1.L, AncSR2.U) +
   labs(title = "AncSR1", 
-       x = "original SRE2 fluorescence", 
-       y = "corrected SRE2 fluorescence") +
+       x = "original GA fluorescence", 
+       y = "corrected GA fluorescence",
+       fill = "Number of\nvariants") +
   theme_classic() +
   theme(text = element_text(size = 16))
+AncSR1_GA_corrected_plot
 
-data.frame(old = AncSR2_complete_data %>% 
-             dplyr::filter(RE == "SRE2 (GA)") %>% 
+# AncSR2
+AncSR2_GA_corrected_plot <- data.frame(old = AncSR2_complete_data %>% 
+             filter(RE == "SRE2 (GA)") %>% 
              pull(avg_meanF),
            new = AncSR2_complete_data_corrected %>% 
-             dplyr::filter(RE == "SRE2 (GA)") %>% 
+             filter(RE == "SRE2 (GA)") %>% 
              pull(avg_meanF)) %>%
   ggplot(aes(x = old, y = new)) +
   geom_bin_2d() +
   geom_abline(slope = 1, intercept = 0, color = "red") +
-  geom_hline(yintercept = AncSR2.L) +
-  scale_fill_viridis(trans = "log10") +
+  geom_hline(yintercept = AncSR2.active.lb, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = AncSR2.active.lb, color = "gray", linetype = "dashed") +
+  scale_fill_viridis(trans = "log10", limits = c(1, 200000)) +
+  xlim(min(c(y.AncSR1, y.AncSR2)), max(c(y.AncSR1, y.AncSR2))) +
+  ylim(AncSR1.L, AncSR2.U) +
   labs(title = "AncSR2", 
-       x = "original SRE2 fluorescence", 
-       y = "corrected SRE2 fluorescence") +
+       x = "original GA fluorescence", 
+       y = "corrected GA fluorescence",
+       fill = "Number of\nvariants") +
   theme_classic() +
   theme(text = element_text(size = 16))
+AncSR2_GA_corrected_plot
 
-# How many variants are above AncSR2-WT:SRE1 threshold on SRE2 with correction?
+# How many variants active variants with and without the GA-RE correction?
+# AncSR1
 AncSR1_complete_data_corrected %>%
   group_by(RE) %>%
-  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f),
-            nupper = sum(avg_meanF_SRE2_upper >= AncSR2.SRE1.f),
-            nlower = sum(avg_meanF_SRE2_lower >= AncSR2.SRE1.f))
-
-AncSR1_complete_data %>%
-  group_by(RE) %>%
-  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f))
-
+  summarize(active_corrected = sum(active)) %>%
+  left_join(AncSR1_complete_data %>% 
+              group_by(RE) %>% 
+              summarize(active_uncorrected = sum(active)))
+# AncSR2
 AncSR2_complete_data_corrected %>%
   group_by(RE) %>%
-  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f),
-            nupper = sum(avg_meanF_SRE2_upper >= AncSR2.SRE1.f),
-            nlower = sum(avg_meanF_SRE2_lower >= AncSR2.SRE1.f))
+  summarize(active_corrected = sum(active)) %>%
+  left_join(AncSR2_complete_data %>% 
+              group_by(RE) %>% 
+              summarize(active_uncorrected = sum(active)))
 
-AncSR2_complete_data %>%
-  group_by(RE) %>%
-  summarize(n = sum(avg_meanF >= AncSR2.SRE1.f))
-
-# comparing AncSR2-WT on SRE1 and SRE2 with correction
+# comparing AncSR2-WT on SRE1 and SRE2 (GA) with correction
 AncSR2_complete_data_corrected %>%
-  dplyr::filter(AA_var == "GSKV", RE %in% c("SRE1 (AA)", "SRE2 (GA)"))
+  filter(AA_var == "GSKV", RE %in% c("SRE1 (AA)", "SRE2 (GA)"))
 AncSR2_complete_data %>%
-  dplyr::filter(AA_var == "GSKV", RE %in% c("SRE1 (AA)", "SRE2 (GA)"))
+  filter(AA_var == "GSKV", RE %in% c("SRE1 (AA)", "SRE2 (GA)"))
 
 # export corrected datasets
-write.csv(AncSR1_complete_data_corrected, 
+write.csv(AncSR1_complete_data_corrected %>% select(-(p:padj)),
           file = gzfile(file.path(results_dir, "AncSR1_complete_data_corrected.csv.gz")),
           row.names = FALSE)
-write.csv(AncSR2_complete_data_corrected, 
+write.csv(AncSR2_complete_data_corrected %>% select(-(p:padj)), 
           file = gzfile(file.path(results_dir, "AncSR2_complete_data_corrected.csv.gz")),
           row.names = FALSE)
 ```
