@@ -384,6 +384,11 @@ meanF_data <- rbind(meanF_data %>% filter(type == "binned") %>%
   arrange(bg, AA_var, RE)
 
 # export data
+write.csv(meanF_data %>% select(bg:meanF_REP4),
+          file = gzfile(file.path(results_dir, "meanF_data_fxnal_all.csv.gz"), 
+                        compression = 9),
+          row.names = FALSE)
+# just functional variants
 write.csv(meanF_data %>% filter(functional) %>% select(bg:meanF_REP4), 
           file = gzfile(file.path(results_dir, "meanF_data_fxnal.csv.gz"), 
                         compression = 9),
