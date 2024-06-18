@@ -6,8 +6,12 @@ scripts/phenotype_frequency_distributions_final/*
 scripts/mutation_effects_model/*
 notebooks/prelim_analyses/*
 notebooks/phenotype_frequency_distributions_SRE2_corrected/*
+notebooks/genotype_phenotype_distributions/*
+notebooks/phenotype_frequency_distributions_final/*
 results/mutation_effects_model/*.rda
 results/prelim_analyses/*
 results/phenotype_frequency_distributions_SRE2_corrected/*
+results/genotype_phenotype_distributions/*
+results/phenotype_frequency_distributions_final/*
 figures/*
 
