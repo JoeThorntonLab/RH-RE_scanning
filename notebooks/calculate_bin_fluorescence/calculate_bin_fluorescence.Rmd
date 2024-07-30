@@ -6,14 +6,12 @@ output: github_document
 ---
 
 
-This notebook reads in flow cytometry data from the binned sorting experiments and calculates the mean fluorescence for each bin, sample, and replicate, for both libraries and isogenic control samples. It also calculates the overall mean fluorescence for each sample from flow cytometry data. 
+This notebook reads in flow cytometry data from the binned sort experiments and calculates the mean fluorescence for each bin, sample, and replicate, for both libraries and spiked in isogenic control strains. These values are then used to calculate the mean fluorescence per complex from the binned sort sequencing data (see Methods, Mean fluorescence estimation).
 
-FCS files for each sample (libraries and isogenic strains) were exported from FACSDiva after sorting. Gates were drawn in FlowJo based on bin boundary coordinates recorded during sorting. These coordinates were identical across sorting replicates. In addition to the sort gates, we included upstream gates selecting for homogenous cell populations, single cells, and DBD plasmid retention, as shown in the gating plots. Sort bin populations were then exported as FCS files for analysis here.
+FCS files for each sample (libraries and isogenic strains) were exported from FACSDiva after sorting. Gates were drawn in FlowJo based on bin boundary coordinates recorded during sorting. These coordinates were identical across sorting replicates. In addition to the sort gates, we included upstream gates selecting for homogenous cell populations, single cells, and DBD plasmid retention, as shown in the gating plots. Sort bin populations were exported as FCS files for analysis.
 
 
-## Setup
-
-```{r setup, message=FALSE}
+```{r setup, message=FALSE, echo = FALSE}
 require("knitr")
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(fig.width=5, fig.height=5)
@@ -37,7 +35,7 @@ if(!dir.exists(file.path(basedir, "results", "sort_bin_fluorescence"))) {
 
 ## Functions
 
-Read in functions for extracting normalized GFP fluorescence values from FCS files. These read in data and normalize GFP by cell volume by taking $\textrm{FITC-A} / \textrm{FSC-A}^{1.5}$, where FSC-A is assumed to be proportional to the area of the cross section of a cell. The log-10 of this value is the mean fluorescence output.
+Reading in functions for extracting flow cytometry data from FCS files and normalizing GFP fluorescence to cell volume. We assume that for each cell, forward scatter area (FSC-A) is proportional to the area of the cell's cross-section. Since $V \propto A^{1.5}$, we normalize GFP to cell volume by taking $\textrm{GFP} / \textrm{FSC-A}^{1.5}$. We then take the $\log_{10}$ of this value to be a cell's fluorescence.
 
 ```{r}
 source(file.path(basedir, "scripts", "FACS_functions.R"))
@@ -46,7 +44,7 @@ source(file.path(basedir, "scripts", "FACS_functions.R"))
 
 ## Calculating mean fluorescence
 
-For each replicate, we calculate the mean fluorescence for each sort bin and sample, as well as the mean fluorescence across all sort bins for each sample. These are written to a file.
+For each binned sort replicate, we calculate the mean fluorescence for each sort bin and sample, as well as the mean fluorescence across all sort bins for each sample. These are written to a file.
 
 ```{r, warning = FALSE}
 fcs_files <- list()  # to store file names for each replicate
