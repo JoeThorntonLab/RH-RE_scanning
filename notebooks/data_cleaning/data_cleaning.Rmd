@@ -19,6 +19,8 @@ packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble",
               "splines2", "matrixStats", "forcats", "dplyr", "scales")
 installed_packages <- packages %in% rownames(installed.packages())
 
+invisible(lapply(paste0('package:', names(sessionInfo()$otherPkgs)), 
+                 detach, character.only=TRUE, unload=TRUE))
 if(any(installed_packages == F)) {
   install.packages(packages[!installed_packages])
 }
@@ -27,7 +29,7 @@ if(any(installed_packages == F)) {
 invisible(lapply(packages, library, character.only=TRUE))
 
 # make output directories
-results_dir <- file.path(basedir, "results", "cleaned_data")
+results_dir <- file.path(basedir, "results", "data_cleaning")
 if(!dir.exists(results_dir)) dir.create(results_dir)
 
 # set fontsize for plotting
@@ -103,7 +105,7 @@ if(!file.exists(file.path(basedir, "data", "meanF", "meanF_data.rda"))) {
 
 ## Filtering binned sort data
 
-These plots show some general features of the dataset. 1) SE(meanF) decays with read depth, as expected, because variants with more reads have more precise estimates of meanF. 2) Variants with a minimum read count of ~15 have a SE(meanF) < 0.1, regardless of the number of replicates. 
+These plots show some general features of the dataset. 1) SE(meanF) decays with read depth, as expected, because complexes with more reads have more precise estimates of meanF. 2) Complexes with a minimum read count of ~15 have a SE(meanF) < 0.1, regardless of the number of replicates. 
 
 ```{r exploratoryfigs}
 # histogram of read counts for binned sort data, separated by replicate
@@ -127,21 +129,7 @@ meanF_data %>%
         legend.text = element_text(size = 14)) +
   labs(color = "replicate")
 
-# SE(meanF) as a function of minimum read depth per variant
-# meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
-#   ggplot(aes(x=min_read_count,y=se_meanF)) +
-#   stat_bin2d(bins = 75) +
-#   theme_classic() + 
-#   # xlim(0,2000) +
-#   scale_x_log10() +
-#   theme(axis.title.x = element_text(size=12,face="bold"), 
-#         axis.text.x = element_text(size=10),
-#         axis.text.y = element_text(size = 10),
-#         axis.title=element_text(size=12,face="bold")) +
-#   geom_hline(aes(yintercept = mean(se_meanF)),color="red",linetype="dashed") +
-#   xlab("Min. read count") + ylab("SE(meanF)")
-
-# same plot but showing median and range for variants binned by mean read count
+# same plot but showing median and range for complexes binned by mean read count
 meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
   ggplot(aes(x=min_read_count,y=se_meanF)) +
   stat_summary_bin(fun = "median", fun.min = "min", fun.max = "max") +
@@ -156,7 +144,8 @@ meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
   ylab("SE(meanF)")
   
 
-# Gruop variants by Avg. Min Read Depth (RC) and plot SE(meanF) by n_reps. This shows that variants with a minimum read count of ~15
+# Gruop complexes by Avg. Min Read Depth (RC) and plot SE(meanF) by n_reps. 
+# This shows that complexes with a minimum read count of ~15
 # have a SE(meanF) < 0.1, regardless of the number of replicates. 
 meanF_data %>% filter(!(n_reps==1)) %>% 
   mutate(RC = case_when(min_read_count >= 150 ~ ">150",
@@ -175,18 +164,19 @@ meanF_data %>% filter(!(n_reps==1)) %>%
 
 ### Filtering data
 
-DMS binned sort data is filtered based on two approaches. First, we filter out variants with low read count (across replicates) to reduce the global standard error; second, we correct use an I-spline to correct the nonlinearity between replicates, and remove variants with high SE(meanF). These two procedures ensure that we keep variants for which we have high confidence in their meanF estimates. 
+The DMS binned sort data is filtered based on two approaches. First, we filter out complexes with low read count (across replicates) to reduce the global standard error; second, we correct use an I-spline to correct the nonlinearity between replicates, and remove complexes with high SE(meanF). These two procedures ensure that we keep complexes for which we have high confidence in their meanF estimates. 
 
 ```{r filterdata}
-### First strategy: Choose a read count for which we maximize the fraction of retained variants, maximize the 
-### fraction of retained variants with SE(meanF) <= 0.1, and minimize the global SE(meanF).
+# First strategy: Choose a read count for which we maximize the fraction of 
+# retained complexes, maximize the fraction of retained complexes with 
+# SE(meanF) <= 0.1, and minimize the global SE(meanF).
 
 median_se <- median(meanF_data$se_meanF, na.rm = T) # global median SE(meanF)
-n_var <- dim(meanF_data)[1] # number of total variants
+n_var <- dim(meanF_data)[1] # number of total complexes
 
 choose_read_count <- function(r) {
-  # remove measurements (variant*replicate) with read count < r;
-  # remove variants with fewer than 2 replicate measurements remaining;
+  # remove measurements (complex*replicate) with read count < r;
+  # remove complexes with fewer than 2 replicate measurements remaining;
   # re-calculate SE
   meanF_data_filter <- meanF_data %>%
     select(AA_var:Count_total_REP4) %>%
@@ -204,12 +194,18 @@ choose_read_count <- function(r) {
             sd_meanF = rowSds(as.matrix(.[5:8]), na.rm=TRUE),
             se_meanF = sd_meanF / sqrt(n_reps)) # standard error of average meanF)
   
-  median_se_r <- median(meanF_data_filter$se_meanF, na.rm = T)  # global median SE(meanF) after rc filter
-  n_var_r <-  nrow(meanF_data_filter)  # variants retained after rc filtering
-  n_var_01_r <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% nrow() # variants eith SE <= 0.1 retained after rc filtering
-  p <- n_var_r / n_var # fraction of variants retained
-  se <- ((median_se_r-median_se)/median_se)*100 # % change in global SE(meanF)
-  var_01 <- n_var_01_r /n_var_r # fraction of retained variants with SE(meanF) <= 0.1
+  # global median SE(meanF) after rc filter
+  median_se_r <- median(meanF_data_filter$se_meanF, na.rm = T)  
+  # complexes retained after rc filtering
+  n_var_r <-  nrow(meanF_data_filter)  
+  # complexes eith SE <= 0.1 retained after rc filtering
+  n_var_01_r <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% nrow() 
+  # fraction of complexes retained
+  p <- n_var_r / n_var 
+  # % change in global SE(meanF)
+  se <- ((median_se_r-median_se)/median_se)*100 
+  # fraction of retained complexes with SE(meanF) <= 0.1
+  var_01 <- n_var_01_r /n_var_r 
   return(data.frame(p=p,abs_se=median_se_r,se=se,var_01=var_01))
 }
 
@@ -227,32 +223,40 @@ if(!file.exists(file.path(results_dir, "outliers.rda"))) {
 }
 
 
-# get read count threshold where >= 95% variants passing the threshold have SE <= 0.1
+# get read count threshold where >= 95% complexes passing the threshold have SE <= 0.1
 outliers$r <- seq(1,100,1)
 rc <- outliers %>% filter(var_01 >= 0.95) %>% slice_head() %>% pull(r)
 paste("read count threshold:", rc)
-paste("variants retained:", outliers %>% filter(r == rc) %>% pull(p) * nrow(meanF_data))
+paste("variants retained:", outliers %>% 
+        filter(r == rc) %>% pull(p) * nrow(meanF_data))
 
 
-# plot results: A read count threshold of 27 ensures that 95% of variants have SE <= 0.1, decreasing the global SE by 27%
+# plot results: A read count threshold of 27 ensures that 95% of complexes have 
+# SE <= 0.1, decreasing the global SE by 27%
 par(mar = c(5, 4, 4, 4) + 1.4)
-plot(outliers$r, outliers$abs_se, type="l", col = "black",xlab="Read count threshold",ylab="Global median SE(meanF)",lwd=2)             
+plot(outliers$r, outliers$abs_se, type="l", col = "black",
+     xlab="Read count threshold",ylab="Global median SE(meanF)",lwd=2)             
 par(new = TRUE) 
-plot(outliers$r, outliers$p, type="l", ylim = c(0,1), col = "red",axes = FALSE, xlab = "", ylab = "",lwd=2)
+plot(outliers$r, outliers$p, type="l", ylim = c(0,1), 
+     col = "red",axes = FALSE, xlab = "", ylab = "",lwd=2)
 axis(side = 4, at = pretty(range(c(0,1))),col="red",col.ticks="red")
 mtext("Fraction variants retained", side = 4, line = 3,col="red")
 par(new = TRUE)
-plot(outliers$r, outliers$var_01, type="l", col = "#cf6b08",axes = FALSE, xlab = "", ylab = "",lwd=2,ylim=range(c(outliers$p,outliers$var_01)))
-mtext("Fraction of variants with SE(meanF) <= 0.1", side = 4, line = 4,col="#cf6b08")
+plot(outliers$r, outliers$var_01, type="l", 
+     col = "#cf6b08",axes = FALSE, xlab = "", 
+     ylab = "", lwd=2, ylim=range(c(outliers$p,outliers$var_01)))
+mtext("Fraction of variants with SE(meanF) <= 0.1", 
+      side = 4, line = 4,col="#cf6b08")
 abline(v = rc, lty=2,col="gray",lwd=3)
 abline(h = 0.95, lty = 2, col = "gray", lwd = 3)
 ```
 
 
-After having identified the read threshold, we will perform a second filter removing variants with SE(meanF) > 0.1. This is not the final filter based on standard error, we do this to remove noisy variants and will help to fit the splines in order to capture the *global* relationships between replicates (compare the plots in the left column with those in the right column).
+After having identified the read threshold, we will perform a second filter removing complexes with SE(meanF) > 0.1. This is not the final filter based on standard error, we do this to remove noisy variants and will help to fit the splines in order to capture the *global* relationships between replicates (compare the plots in the left column with those in the right column).
 
 ```{r filterse}
-# Filter variants per replicate based on a read threshold and recalculate SE. Then filter out variants by SE(meanF) > 0.1
+# Filter complexes per replicate based on a read threshold and recalculate SE. 
+# Then filter out complexes by SE(meanF) > 0.1
 meanF_data_filter <- meanF_data %>%
     select(AA_var:Count_total_REP4) %>%
     pivot_longer(cols = meanF_REP1:Count_total_REP4,
@@ -268,50 +272,64 @@ meanF_data_filter <- meanF_data %>%
     mutate(n_reps = rowSums(!is.na(.[5:8])), # number of replicates in which var-REBC is found
             sd_meanF = rowSds(as.matrix(.[5:8]), na.rm=TRUE),
             se_meanF = sd_meanF / sqrt(n_reps),
-           avg_meanF = rowMeans(.[5:8], na.rm = TRUE)) # standard error of average meanF)
+           avg_meanF = rowMeans(.[5:8], na.rm = TRUE)) # standard error of average meanF
 
 ## REP1-2
 a <- meanF_data_filter %>% ggplot(aes(x=meanF_REP2,y=meanF_REP1,z=se_meanF)) +
-  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep1") +
-  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
-  guides(fill=guide_legend(title="SE(meanF)")) + ggtitle("Reps 1-2") # points colored by SE(meanF)
+  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + 
+  ylab("meanF, rep1") + geom_abline(slope = 1,intercept = 0,col="gray") + 
+  viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
+  guides(fill=guide_legend(title="SE(meanF)")) + 
+  ggtitle("Reps 1-2") # points colored by SE(meanF)
 
-b <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP1)) +
-  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep1") +
-  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
+b <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% 
+  ggplot(aes(x=meanF_REP2,y=meanF_REP1)) +
+  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + 
+  ylab("meanF, rep1") + geom_abline(slope = 1,intercept = 0,col="gray") + 
+  viridis::scale_fill_viridis() + theme(legend.position = "none")
 
 
 ## REP2-3
 c <- meanF_data_filter %>% ggplot(aes(x=meanF_REP2,y=meanF_REP3,z=se_meanF)) +
-  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep3") +
-  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
+  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + 
+  ylab("meanF, rep3") + geom_abline(slope = 1,intercept = 0,col="gray") + 
+  viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
   guides(fill=guide_legend(title="SE(meanF)")) + ggtitle("Reps 2-3")
 
-d <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP3)) +
-  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep3") +
-  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
+d <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% 
+  ggplot(aes(x=meanF_REP2,y=meanF_REP3)) +
+  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + 
+  ylab("meanF, rep3") + geom_abline(slope = 1,intercept = 0,col="gray") + 
+  viridis::scale_fill_viridis() + theme(legend.position = "none")
 
 
 ## REP2-4
 e <- meanF_data_filter %>% ggplot(aes(x=meanF_REP2,y=meanF_REP4,z=se_meanF)) +
-  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep4") +
-  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
+  stat_summary_2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + 
+  ylab("meanF, rep4") + geom_abline(slope = 1,intercept = 0,col="gray") + 
+  viridis::scale_fill_viridis(option = "B",begin=0,end=1) + 
   guides(fill=guide_legend(title="SE(meanF)")) + ggtitle("Reps 2-4")
 
-f <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% ggplot(aes(x=meanF_REP2,y=meanF_REP4)) +
-  stat_bin2d(bins = 90) + theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep4") +
-  geom_abline(slope = 1,intercept = 0,col="gray") + viridis::scale_fill_viridis() + theme(legend.position = "none")
+f <- meanF_data_filter %>% filter(se_meanF <= 0.1) %>% 
+  ggplot(aes(x=meanF_REP2,y=meanF_REP4)) + stat_bin2d(bins = 90) + 
+  theme_classic() + xlab("meanF, rep2") + ylab("meanF, rep4") +
+  geom_abline(slope = 1,intercept = 0,col="gray") + 
+  viridis::scale_fill_viridis() + theme(legend.position = "none")
 
 # How much data is retained after filtering by standard error?
 meanF_data_filter %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
-  group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
+  group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% 
+  mutate(prop=n/sum(n))
 
+# histogram of SE(meanF)
 g <- meanF_data_filter %>% 
   ggplot(aes(x = se_meanF)) +
-  geom_histogram(aes(y=..count../sum(..count..)),bins = 100,color="black",fill="gray") +
+  geom_histogram(aes(y=..count../sum(..count..)),
+                 bins = 100,color="black",fill="gray") +
   theme_classic() + xlab("SE(meanF)") + ylab("Percent of variants") +
-  geom_vline(xintercept = 0.1, col="gray") + scale_y_continuous(labels = scales::percent) +
-  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 4.94%") # histogram of SE(meanF)
+  geom_vline(xintercept = 0.1, col="gray") + 
+  scale_y_continuous(labels = scales::percent) +
+  annotate(geom = "text", x = 0.35, y = 0.04, label="Removed variants: 4.94%")
 ```
 
 ```{r plotfiltereddata, echo=FALSE, fig.width=6, fig.height=8}
@@ -328,19 +346,23 @@ Here we will correct for the remaining nonlinearity between replicates in order 
 
 ```{r splinefit}
 # Datasets:
-r12 <- meanF_data_filter %>% filter(!is.na(meanF_REP1), !is.na(meanF_REP2), se_meanF <= 0.1) %>%
+r12 <- meanF_data_filter %>% filter(!is.na(meanF_REP1), 
+                                    !is.na(meanF_REP2), se_meanF <= 0.1) %>%
   select(AA_var,REBC,avg_meanF,meanF_REP1,meanF_REP2)
-r23 <- meanF_data_filter %>% filter(!is.na(meanF_REP3), !is.na(meanF_REP2), se_meanF <= 0.1) %>%
+r23 <- meanF_data_filter %>% filter(!is.na(meanF_REP3), 
+                                    !is.na(meanF_REP2), se_meanF <= 0.1) %>%
   select(AA_var,REBC,avg_meanF,meanF_REP2,meanF_REP3)
-r24 <- meanF_data_filter %>% filter(!is.na(meanF_REP4), !is.na(meanF_REP2), se_meanF <= 0.1) %>%
+r24 <- meanF_data_filter %>% filter(!is.na(meanF_REP4), 
+                                    !is.na(meanF_REP2), se_meanF <= 0.1) %>%
   select(AA_var,REBC,avg_meanF,meanF_REP2,meanF_REP4) 
 
 # Correct for nonlinearity between replicates using I-splines.
 # Correction with respect to Rep2
 
 # Rationale:
-# Use an I-spline to capture the nonlinearity between replicates. Then use the fitted spline model to correct
-# the values of the other replicate, by predicting their new values on the rep2 scale.
+# Use an I-spline to capture the nonlinearity between replicates. 
+# Then use the fitted spline model to correct the values of the other replicate, 
+# by predicting their new values on the rep2 scale.
 
 #################
 
@@ -350,21 +372,36 @@ bound_knots_r12 <- c(min(c(meanF_data$meanF_REP1,meanF_data$meanF_REP2),na.rm = 
 degree <- 2 # degree of piecewise polynomials
 
 # Create the basis matrix for the I-spline:
-basis_mat12 <- iSpline(r12$meanF_REP1, knots = knots_r12, Boundary.knots = bound_knots_r12, degree = degree)
-# Fit a linear regression model to the second replicate using the basis matrix as predictors:
+basis_mat12 <- iSpline(r12$meanF_REP1, knots = knots_r12, 
+                       Boundary.knots = bound_knots_r12, degree = degree)
+# Fit a linear regression model to the second replicate using the basis matrix 
+# as predictors:
 spline_r12 <- lm(r12$meanF_REP2 ~ basis_mat12)
-# Correct rep1 values using I-Spline models: Predict the values of the rep1 using the fitted model and the basis matrix.
-# The 'predict' function generates a new basis matrix based on the fitted basis matrix and the new data. 
-# The new basis matrix is multiplied by the spline coefficients to get the new X's (and then add the intercept)
-r12$meanF_REP1_c <- (predict(basis_mat12, newx = r12$meanF_REP1) %*% coef(spline_r12)[-1])[,1] + coef(spline_r12)[1]
+# Correct rep1 values using I-Spline models: 
+# Predict the values of the rep1 using the fitted model and the basis matrix.
+# The 'predict' function generates a new basis matrix based on the fitted basis 
+# matrix and the new data. 
+# The new basis matrix is multiplied by the spline coefficients to get the new 
+# X's (and then add the intercept)
+r12$meanF_REP1_c <- (predict(basis_mat12, newx = r12$meanF_REP1) %*% 
+                       coef(spline_r12)[-1])[,1] + coef(spline_r12)[1]
 
 # plot results:
-r12_before <- r12 %>% ggplot(aes(x=meanF_REP1,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
-  xlab("meanF, rep1") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
-  geom_line(data=data.frame(meanF_REP1 = r12$meanF_REP1, meanF_REP2 = spline_r12$fitted.values), size=1.3,col="red") + ggtitle("Reps 1 and 2")
+r12_before <- r12 %>% ggplot(aes(x=meanF_REP1,y=meanF_REP2)) + 
+  stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep1") + ylab("meanF, rep2") + 
+  geom_abline(intercept = 0, slope = 1,col="gray") + 
+  theme(legend.position = "none") +
+  geom_line(data=data.frame(meanF_REP1 = r12$meanF_REP1, 
+                            meanF_REP2 = spline_r12$fitted.values), 
+            size=1.3,col="red") + 
+  ggtitle("Reps 1 and 2")
 
-r12_after <- r12 %>% ggplot(aes(x=meanF_REP1_c,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
-  xlab("meanF, rep1") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
+r12_after <- r12 %>% ggplot(aes(x=meanF_REP1_c,y=meanF_REP2)) + 
+  stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep1") + ylab("meanF, rep2") + 
+  geom_abline(intercept = 0, slope = 1,col="gray") + 
+  theme(legend.position = "none")
 
 
 #################
@@ -373,17 +410,28 @@ knots_r23 <- summary(r23$meanF_REP3)[3] #using the median meanF of rep3 as inter
 bound_knots_r23 <- c(min(c(meanF_data$meanF_REP2,meanF_data$meanF_REP3),na.rm = T), max(c(meanF_data$meanF_REP2,meanF_data$meanF_REP3),na.rm = T)) # boundary knots
 degree <- 2 # degree of piecewise polynomials
 
-basis_mat23 <- iSpline(r23$meanF_REP3, knots = knots_r23, Boundary.knots = bound_knots_r23, degree = degree)
+basis_mat23 <- iSpline(r23$meanF_REP3, knots = knots_r23, 
+                       Boundary.knots = bound_knots_r23, degree = degree)
 spline_r23 <- lm(r23$meanF_REP2 ~ basis_mat23)
-r23$meanF_REP3_c <- (predict(basis_mat23, newx = r23$meanF_REP3) %*% coef(spline_r23)[-1])[,1] + coef(spline_r23)[1]
+r23$meanF_REP3_c <- (predict(basis_mat23, newx = r23$meanF_REP3) %*% 
+                       coef(spline_r23)[-1])[,1] + coef(spline_r23)[1]
 
 # plot results:
-r23_before <- r23 %>% ggplot(aes(x=meanF_REP3,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
-  xlab("meanF, rep3") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
-  geom_line(data=data.frame(meanF_REP3 = r23$meanF_REP3, meanF_REP2 = spline_r23$fitted.values), size=1.3,col="red") + ggtitle("Reps 2 and 3")
+r23_before <- r23 %>% ggplot(aes(x=meanF_REP3,y=meanF_REP2)) + 
+  stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep3") + ylab("meanF, rep2") + 
+  geom_abline(intercept = 0, slope = 1,col="gray") + 
+  theme(legend.position = "none") +
+  geom_line(data=data.frame(meanF_REP3 = r23$meanF_REP3, 
+                            meanF_REP2 = spline_r23$fitted.values), 
+            size=1.3,col="red") + 
+  ggtitle("Reps 2 and 3")
 
-r23_after <- r23 %>% ggplot(aes(x=meanF_REP3_c,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
-  xlab("meanF, rep3") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
+r23_after <- r23 %>% ggplot(aes(x=meanF_REP3_c,y=meanF_REP2)) + 
+  stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep3") + ylab("meanF, rep2") + 
+  geom_abline(intercept = 0, slope = 1,col="gray") + 
+  theme(legend.position = "none")
 
 
 #################
@@ -392,19 +440,32 @@ knots_r24 <- -4.6#summary(r24$meanF_REP4)[1] #using the median meanF of rep4 as 
 bound_knots_r24 <- c(min(c(meanF_data$meanF_REP2,meanF_data$meanF_REP4),na.rm = T), max(c(meanF_data$meanF_REP2,meanF_data$meanF_REP4),na.rm = T)) # boundary knots
 degree <- 2 # degree of piecewise polynomials
 
-basis_mat24 <- iSpline(r24$meanF_REP4, knots = knots_r24, Boundary.knots = bound_knots_r24, degree = degree)
+basis_mat24 <- iSpline(r24$meanF_REP4, knots = knots_r24, 
+                       Boundary.knots = bound_knots_r24, degree = degree)
 spline_r24 <- lm(r24$meanF_REP2 ~ basis_mat24)
-r24$meanF_REP4_c <- (predict(basis_mat24, newx = r24$meanF_REP4) %*% coef(spline_r24)[-1])[,1] + coef(spline_r24)[1]
+r24$meanF_REP4_c <- (predict(basis_mat24, newx = r24$meanF_REP4) %*% 
+                       coef(spline_r24)[-1])[,1] + coef(spline_r24)[1]
 
 # plot results:
-r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
-  xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none") +
-  geom_line(data=data.frame(meanF_REP4 = r24$meanF_REP4, meanF_REP2 = spline_r24$fitted.values), size=1.3,col="red") + ggtitle("Reps 2 and 4")
+r24_before <- r24 %>% ggplot(aes(x=meanF_REP4,y=meanF_REP2)) + 
+  stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep4") + ylab("meanF, rep2") + 
+  geom_abline(intercept = 0, slope = 1,col="gray") + 
+  theme(legend.position = "none") +
+  geom_line(data=data.frame(meanF_REP4 = r24$meanF_REP4, 
+                            meanF_REP2 = spline_r24$fitted.values), 
+            size=1.3,col="red") + 
+  ggtitle("Reps 2 and 4")
 
-r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + stat_bin2d(bins = 100) + theme_classic() + 
-  xlab("meanF, rep4") + ylab("meanF, rep2") + geom_abline(intercept = 0, slope = 1,col="gray") + theme(legend.position = "none")
+r24_after <- r24 %>% ggplot(aes(x=meanF_REP4_c,meanF_REP2)) + 
+  stat_bin2d(bins = 100) + theme_classic() + 
+  xlab("meanF, rep4") + ylab("meanF, rep2") + 
+  geom_abline(intercept = 0, slope = 1,col="gray") + 
+  theme(legend.position = "none")
 
-## *Note: Spline for rep2-4 seems to overshoot the fit. It does reduce the SE(meanF) for isogenic controls but predicts some functional controls as null (see below)
+## *Note: Spline for rep2-4 seems to overshoot the fit. It does reduce the 
+# SE(meanF) for isogenic controls but predicts some functional controls as 
+# null (see below)
 
 ```
 
@@ -419,66 +480,125 @@ a / b / c
 ```
 
 
-The splines were fitted with those variants that are present in replicate 2 and the other replicate. We'll use the fitted splines to correct *all* variants that passed the previous read count filter - not only the ones that are shared with rep2 and the other replicates. This will also reduce the SE(meanF) of the noisy variants that were filtered out before.
+The splines were fitted with those complexes that are present in replicate 2 and the other replicate. We'll use the fitted splines to correct *all* complexes that passed the previous read count filter - not only the ones that are shared with rep2 and the other replicates. This will also reduce the SE(meanF) of the noisy complexes that were filtered out before.
 
 ```{r correction, fig.width = 6, fig.height = 5}
-# Variants per replicate that passed initial read count QC filter
+# Complexes per replicate that passed initial read count QC filter
 rep2 <- meanF_data %>% filter(Count_total_REP2 >= rc) %>% 
-  select(AA_var,REBC,bg,RE,meanF_REP2,Count_total_REP2,cellCount_total_REP2,cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,cellCount_b4_REP2,type) %>% 
-  dplyr::rename(meanF = meanF_REP2, Count_total = Count_total_REP2, cellCount_total = cellCount_total_REP2, cellCount_b1 =  cellCount_b1_REP2,
-                cellCount_b2 = cellCount_b2_REP2, cellCount_b3 = cellCount_b3_REP2, cellCount_b4 = cellCount_b4_REP2) %>% mutate(REP = "REP2") # all rep2 variants
+  select(AA_var,REBC,bg,RE,meanF_REP2,Count_total_REP2,cellCount_total_REP2,
+         cellCount_b1_REP2,cellCount_b2_REP2,cellCount_b3_REP2,
+         cellCount_b4_REP2,type) %>% 
+  dplyr::rename(meanF = meanF_REP2, Count_total = Count_total_REP2, 
+                cellCount_total = cellCount_total_REP2, 
+                cellCount_b1 = cellCount_b1_REP2,
+                cellCount_b2 = cellCount_b2_REP2, 
+                cellCount_b3 = cellCount_b3_REP2, 
+                cellCount_b4 = cellCount_b4_REP2) %>% 
+  mutate(REP = "REP2") # all rep2 complexes
 
 rep1 <- meanF_data %>% filter(Count_total_REP1 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP1,Count_total_REP1,cellCount_total_REP1,cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,cellCount_b4_REP1,type) %>% 
-  dplyr::rename(meanF = meanF_REP1, Count_total = Count_total_REP1, cellCount_total = cellCount_total_REP1, cellCount_b1 =  cellCount_b1_REP1,
-                cellCount_b2 = cellCount_b2_REP1, cellCount_b3 = cellCount_b3_REP1, cellCount_b4 = cellCount_b4_REP1) %>%  mutate(REP = "REP1") # all rep1 variants
+  select(AA_var,REBC,bg,RE,meanF_REP1,Count_total_REP1,cellCount_total_REP1,
+         cellCount_b1_REP1,cellCount_b2_REP1,cellCount_b3_REP1,
+         cellCount_b4_REP1,type) %>% 
+  dplyr::rename(meanF = meanF_REP1, Count_total = Count_total_REP1, 
+                cellCount_total = cellCount_total_REP1, 
+                cellCount_b1 =  cellCount_b1_REP1,
+                cellCount_b2 = cellCount_b2_REP1, 
+                cellCount_b3 = cellCount_b3_REP1, 
+                cellCount_b4 = cellCount_b4_REP1) %>%  
+  mutate(REP = "REP1") # all rep1 complexes
 
 rep3 <- meanF_data %>% filter(Count_total_REP3 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP3,Count_total_REP3,cellCount_total_REP3,cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,cellCount_b4_REP3,type) %>% 
-  dplyr::rename(meanF = meanF_REP3, Count_total = Count_total_REP3, cellCount_total = cellCount_total_REP3, cellCount_b1 =  cellCount_b1_REP3,
-                cellCount_b2 = cellCount_b2_REP3, cellCount_b3 = cellCount_b3_REP3, cellCount_b4 = cellCount_b4_REP3) %>%  mutate(REP = "REP3") # all rep3 variants
+  select(AA_var,REBC,bg,RE,meanF_REP3,Count_total_REP3,cellCount_total_REP3,
+         cellCount_b1_REP3,cellCount_b2_REP3,cellCount_b3_REP3,
+         cellCount_b4_REP3,type) %>% 
+  dplyr::rename(meanF = meanF_REP3, Count_total = Count_total_REP3, 
+                cellCount_total = cellCount_total_REP3, 
+                cellCount_b1 =  cellCount_b1_REP3,
+                cellCount_b2 = cellCount_b2_REP3, 
+                cellCount_b3 = cellCount_b3_REP3, 
+                cellCount_b4 = cellCount_b4_REP3) %>%  
+  mutate(REP = "REP3") # all rep3 complexes
 
 rep4 <- meanF_data %>% filter(Count_total_REP4 >= rc) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP4,Count_total_REP4,cellCount_total_REP4,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4,type) %>% 
-  dplyr::rename(meanF = meanF_REP4, Count_total = Count_total_REP4, cellCount_total = cellCount_total_REP4, cellCount_b1 =  cellCount_b1_REP4,
-                cellCount_b2 = cellCount_b2_REP4, cellCount_b3 = cellCount_b3_REP4, cellCount_b4 = cellCount_b4_REP4) %>% mutate(REP = "REP4") # all rep4 variants
+  select(AA_var,REBC,bg,RE,meanF_REP4,Count_total_REP4,cellCount_total_REP4,
+         cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,
+         cellCount_b4_REP4,type) %>% 
+  dplyr::rename(meanF = meanF_REP4, Count_total = Count_total_REP4, 
+                cellCount_total = cellCount_total_REP4, 
+                cellCount_b1 = cellCount_b1_REP4,
+                cellCount_b2 = cellCount_b2_REP4, 
+                cellCount_b3 = cellCount_b3_REP4, 
+                cellCount_b4 = cellCount_b4_REP4) %>% 
+  mutate(REP = "REP4") # all rep4 complexes
 
 rep4_ctls <- meanF_data %>% filter(Count_total_REP4 >= rc & type== "control") %>%
   filter(AA_var %in% c("GSKV","EGKA","GGKM")) %>%
-  select(AA_var,REBC,bg,RE,meanF_REP4,Count_total_REP4,cellCount_total_REP4,cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,cellCount_b4_REP4,type) %>% 
-  dplyr::rename(meanF = meanF_REP4, Count_total = Count_total_REP4, cellCount_total = cellCount_total_REP4, cellCount_b1 =  cellCount_b1_REP4,
-                cellCount_b2 = cellCount_b2_REP4, cellCount_b3 = cellCount_b3_REP4, cellCount_b4 = cellCount_b4_REP4) %>% mutate(REP = "REP4")
-rep4 <- unique(rbind(rep4,rep4_ctls)) # manually include isogenic controls (make sure they're not discarded)
+  select(AA_var,REBC,bg,RE,meanF_REP4,Count_total_REP4,cellCount_total_REP4,
+         cellCount_b1_REP4,cellCount_b2_REP4,cellCount_b3_REP4,
+         cellCount_b4_REP4,type) %>% 
+  dplyr::rename(meanF = meanF_REP4, Count_total = Count_total_REP4, 
+                cellCount_total = cellCount_total_REP4, 
+                cellCount_b1 = cellCount_b1_REP4,
+                cellCount_b2 = cellCount_b2_REP4, 
+                cellCount_b3 = cellCount_b3_REP4, 
+                cellCount_b4 = cellCount_b4_REP4) %>% 
+  mutate(REP = "REP4")
+# manually include isogenic controls (make sure they're not discarded)
+rep4 <- unique(rbind(rep4,rep4_ctls)) 
 
-# Correct values to be on the same scale as rep2: This assumes that the relationship found between the shared variants holds for the other variants, which should be the case (Don't correct Rep4).
+# Correct values to be on the same scale as rep2: This assumes that the 
+# relationship found between the shared complexes holds for the other complexes, 
+# which should be the case (Don't correct Rep4).
 
-rep1 <- rep1 %>% mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF) %*% coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% 
-  select(-c(meanF)) %>% dplyr::rename(meanF = meanF_REP1_c) %>% relocate(meanF,.after = RE)
+rep1 <- rep1 %>% 
+  mutate(meanF_REP1_c = ((predict(basis_mat12, newx = rep1$meanF) %*% 
+                            coef(spline_r12)[-1]) + coef(spline_r12)[1])[,1]) %>% 
+  select(-c(meanF)) %>% dplyr::rename(meanF = meanF_REP1_c) %>% 
+  relocate(meanF,.after = RE)
 
-rep3 <- rep3 %>% mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF) %*% coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% 
-  select(-c(meanF)) %>% dplyr::rename(meanF = meanF_REP3_c) %>% relocate(meanF,.after = RE)
+rep3 <- rep3 %>% 
+  mutate(meanF_REP3_c = ((predict(basis_mat23, newx = rep3$meanF) %*% 
+                            coef(spline_r23)[-1]) + coef(spline_r23)[1])[,1]) %>% 
+  select(-c(meanF)) %>% dplyr::rename(meanF = meanF_REP3_c) %>% 
+  relocate(meanF,.after = RE)
 
 # Comparison of uncorrected vs corrected meanF values for isogenic controls in Rep4:
-# Given the overshoot of the I-spline, all estimated values are pulled towards lower predicted values of meanF (compare 'meanF' vs 'meanF_c' columns). The effect is especially severe for AncSR2_SRE and AncSR1_GGKM_ERE. These variants are active based on cytometry data from isogenic strains, but are predicted as null variants (see plot below showing the lower and upper bounds of detection).  
-rep4_ctls %>% mutate(meanF_c = ((predict(basis_mat24, newx = rep4_ctls$meanF) %*% coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>% select(AA_var,REBC,bg,RE,type,REP,meanF,meanF_c)
+# Given the overshoot of the I-spline, all estimated values are pulled towards 
+# lower predicted values of meanF (compare 'meanF' vs 'meanF_c' columns). 
+# The effect is especially severe for AncSR2_SRE and AncSR1_GGKM_ERE. 
+# These complexes are active based on cytometry data from isogenic strains, 
+# but are predicted as null complexes (see plot below showing the lower and upper 
+# bounds of detection).  
+rep4_ctls %>% 
+  mutate(meanF_c = ((predict(basis_mat24, newx = rep4_ctls$meanF) %*% 
+                       coef(spline_r24)[-1]) + coef(spline_r24)[1])[,1]) %>%
+  select(AA_var,REBC,bg,RE,type,REP,meanF,meanF_c)
 
-# Re-calculate SE(meanF) of variants after correction.
+# Re-calculate SE(meanF) of complexes after correction.
 meanF_data_corrected <- rbind(rep1,rep2,rep3,rep4) %>%
-  pivot_wider(names_from = REP, values_from = c(meanF,Count_total,cellCount_total,cellCount_b1,cellCount_b2,cellCount_b3,cellCount_b4)) %>%
+  pivot_wider(names_from = REP, 
+              values_from = c(meanF,Count_total,cellCount_total,cellCount_b1,
+                              cellCount_b2,cellCount_b3,cellCount_b4)) %>%
   mutate(avg_meanF = rowMeans(.[6:9],na.rm = T), # meanF per var-REBC across replicates
          n_reps = rowSums(!is.na(.[6:9])), # number of replicates in which var-REBC is found
          sd_meanF = rowSds(as.matrix(.[6:9]),na.rm=TRUE),
          se_meanF = sd_meanF / sqrt(n_reps)) # standard error of average meanF
             
-# Proportions of variants kept and discarded based on SE(meanF) cutoff
-meanF_data_corrected %>% filter(n_reps != 1) %>% mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
-  group_by(included) %>% summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
+# Proportions of complexes kept and discarded based on SE(meanF) cutoff
+meanF_data_corrected %>% filter(n_reps != 1) %>% 
+  mutate(included = ifelse(se_meanF>0.1,"out","in")) %>% 
+  group_by(included) %>% 
+  summarise(n=n(),mean_se = mean(se_meanF)) %>% mutate(prop=n/sum(n))
 
 # plot histogram of SE(meanF) 
 meanF_data_corrected %>% filter(n_reps != 1) %>% 
-  ggplot(aes(x=se_meanF)) + geom_histogram(aes(y=..count../sum(..count..)),binwidth = 0.01,color="black",fill="gray") +
+  ggplot(aes(x=se_meanF)) + 
+  geom_histogram(aes(y=..count../sum(..count..)),binwidth = 0.01,
+                 color="black",fill="gray") +
   theme_classic() + xlab("SE(fluorescence)") + ylab("% variants") + 
-  geom_vline(xintercept = 0.1,col="gray") + scale_y_continuous(labels = scales::percent) +
+  geom_vline(xintercept = 0.1,col="gray") + 
+  scale_y_continuous(labels = scales::percent) +
   annotate(geom = "text", x = 0.15, y = 0.04, size = 6, hjust = 0,
            label = as.expression(bquote(
              Removed~variants~":"~.(round(sum(meanF_data_corrected$n_reps != 1 & 
@@ -498,9 +618,10 @@ print(beforesplinecormat)
 paste("Mean pairwise R^2:",
       round(mean(beforesplinecormat[upper.tri(beforesplinecormat)]^2), 2))
 paste("Mean pairwise R^2 no rep 4:",
-      round(mean(beforesplinecormat[1:3, 1:3][upper.tri(beforesplinecormat[1:3,1:3])]^2), 2))
+      round(mean(beforesplinecormat[1:3, 1:3][
+        upper.tri(beforesplinecormat[1:3,1:3])]^2), 2))
 
-# Excluding inactive variants
+# Excluding inactive complexes
 beforesplinecormatactive <- meanF_data_filter %>%
   filter(RE %in% REs[[1]]) %>%
   filter(avg_meanF >= -4) %>%
@@ -509,9 +630,11 @@ beforesplinecormatactive <- meanF_data_filter %>%
 paste("Before correction Pearson's R (active variants)")
 print(beforesplinecormatactive)
 paste("Mean pairwise R^2:",
-      round(mean(beforesplinecormatactive[upper.tri(beforesplinecormatactive)]^2), 2))
+      round(mean(beforesplinecormatactive[
+        upper.tri(beforesplinecormatactive)]^2), 2))
 paste("Mean pairwise R^2 no rep 4:",
-      round(mean(beforesplinecormatactive[1:3, 1:3][upper.tri(beforesplinecormatactive[1:3,1:3])]^2), 2))
+      round(mean(beforesplinecormatactive[1:3, 1:3][
+        upper.tri(beforesplinecormatactive[1:3,1:3])]^2), 2))
 
 # Pairwise Pearson correlation between all replicates after spline correction
 aftersplinecormat <- meanF_data_corrected %>%
@@ -523,9 +646,10 @@ print(aftersplinecormat)
 paste("Mean pairwise R^2:",
       round(mean(aftersplinecormat[upper.tri(aftersplinecormat)]^2), 2))
 paste("Mean pairwise R^2 no rep 4:",
-      round(mean(aftersplinecormat[1:3, 1:3][upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
+      round(mean(aftersplinecormat[1:3, 1:3][
+        upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
 
-# Excluding inactive variants
+# Excluding inactive complexes
 aftersplinecormatactive <- meanF_data_corrected %>%
   filter(RE %in% REs[[1]], n_reps > 1) %>%
   filter(avg_meanF >= -4) %>%
@@ -534,12 +658,13 @@ aftersplinecormatactive <- meanF_data_corrected %>%
 paste("After correction Pearson's R (active variants)")
 print(aftersplinecormatactive)
 paste("Mean pairwise R^2:",
-      round(mean(aftersplinecormatactive[upper.tri(aftersplinecormatactive)]^2), 2))
+      round(mean(aftersplinecormatactive[
+        upper.tri(aftersplinecormatactive)]^2), 2))
 paste("Mean pairwise R^2 no rep 4:",
       round(mean(aftersplinecormatactive[1:3, 1:3][upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
 
 # Plot uncorrected vs. corrected fluorescence between replicates with spline 
-# fits for all variants (not just those used in fitting).
+# fits for all complexes (not just those used in fitting).
 r12_before_all <- meanF_data_filter %>%
   ggplot(aes(x = meanF_REP1, y = meanF_REP2)) +
   geom_bin2d(bins = 100) +
@@ -556,8 +681,10 @@ r12_before_all <- meanF_data_filter %>%
   annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
            parse = T,
            label = as.expression(bquote(
-             {italic(r)^2==.(format(round(beforesplinecormat[1,2]^2, 2), nsmall = 2))} * ", " * 
-               {{italic(r)^2}["">-4]==.(format(round(beforesplinecormatactive[1,2]^2, 2), nsmall = 2))}
+             {italic(r)^2==.(format(round(
+               beforesplinecormat[1,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(
+                 beforesplinecormatactive[1,2]^2, 2), nsmall = 2))}
            )),
            vjust = 1, hjust = 0) +
   theme_classic() +
@@ -576,8 +703,10 @@ r12_after_all <- meanF_data_corrected %>%
   annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
            parse = T,
            label = as.expression(bquote(
-             {italic(r)^2==.(format(round(aftersplinecormat[1,2]^2, 2), nsmall = 2))} * ", " * 
-               {{italic(r)^2}["">-4]==.(format(round(aftersplinecormatactive[1,2]^2, 2), nsmall = 2))}
+             {italic(r)^2==.(format(round(
+               aftersplinecormat[1,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(
+                 aftersplinecormatactive[1,2]^2, 2), nsmall = 2))}
            )),
            vjust = 1, hjust = 0) +
   theme_classic() +
@@ -599,8 +728,10 @@ r23_before_all <- meanF_data_filter %>%
   annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
            parse = T,
            label = as.expression(bquote(
-             {italic(r)^2==.(format(round(beforesplinecormat[3,2]^2, 2), nsmall = 2))} * ", " * 
-               {{italic(r)^2}["">-4]==.(format(round(beforesplinecormatactive[3,2]^2, 2), nsmall = 2))}
+             {italic(r)^2==.(format(round(
+               beforesplinecormat[3,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(
+                 beforesplinecormatactive[3,2]^2, 2), nsmall = 2))}
            )),
            vjust = 1, hjust = 0) +
   theme_classic() +
@@ -619,8 +750,10 @@ r23_after_all <- meanF_data_corrected %>%
   annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
            parse = T,
            label = as.expression(bquote(
-             {italic(r)^2==.(format(round(aftersplinecormat[3,2]^2, 2), nsmall = 2))} * ", " * 
-               {{italic(r)^2}["">-4]==.(format(round(aftersplinecormatactive[3,2]^2, 2), nsmall = 2))}
+             {italic(r)^2==.(format(round(
+               aftersplinecormat[3,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(
+                 aftersplinecormatactive[3,2]^2, 2), nsmall = 2))}
            )),
            vjust = 1, hjust = 0) +
   theme_classic() +
@@ -631,9 +764,11 @@ r23_after_all <- meanF_data_corrected %>%
 
 # New corrected dataset
 ctls <- meanF_data_corrected %>% filter(type=="control") %>% 
-  filter(grepl(paste(c("GSKV","EGKA","GGKM"),collapse = "|"),AA_var)) # Extract control variants, and filter out sequencing errors in controls
+  # Extract control complexes, and filter out sequencing errors in controls
+  filter(grepl(paste(c("GSKV","EGKA","GGKM"),collapse = "|"),AA_var)) 
 meanF_data_corrected <- meanF_data_corrected %>% filter(se_meanF <= 0.1) 
-meanF_data_corrected <- unique(rbind(meanF_data_corrected,ctls)) # Manually add controls to new dataset
+# Manually add controls to new dataset
+meanF_data_corrected <- unique(rbind(meanF_data_corrected,ctls)) 
 
 # Pairwise Pearson correlation between all replicates after spline correction
 aftersplinecormat <- meanF_data_corrected %>%
@@ -645,9 +780,10 @@ print(aftersplinecormat)
 paste("Mean pairwise R^2:",
       round(mean(aftersplinecormat[upper.tri(aftersplinecormat)]^2), 2))
 paste("Mean pairwise R^2 no rep 4:",
-      round(mean(aftersplinecormat[1:3, 1:3][upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
+      round(mean(aftersplinecormat[1:3, 1:3][
+        upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
 
-# Excluding inactive variants
+# Excluding inactive complexes
 aftersplinecormatactive <- meanF_data_corrected %>%
   filter(RE %in% REs[[1]]) %>%
   filter(avg_meanF >= -4) %>%
@@ -656,9 +792,11 @@ aftersplinecormatactive <- meanF_data_corrected %>%
 paste("After correction and filtering Pearson's R (active variants)")
 print(aftersplinecormatactive)
 paste("Mean pairwise R^2:",
-      round(mean(aftersplinecormatactive[upper.tri(aftersplinecormatactive)]^2), 2))
+      round(mean(aftersplinecormatactive[
+        upper.tri(aftersplinecormatactive)]^2), 2))
 paste("Mean pairwise R^2 no rep 4:",
-      round(mean(aftersplinecormatactive[1:3, 1:3][upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
+      round(mean(aftersplinecormatactive[1:3, 1:3][
+        upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
 ```
 
 
@@ -668,13 +806,23 @@ We used two kinds of control variants. First, we spiked into our DMS library sev
 
 ```{r}
 # Plot meanF of control variants
-bounds <- meanF_data_corrected %>% mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
-  group_by(group) %>% summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
+bounds <- meanF_data_corrected %>% 
+  mutate(group=ifelse(grepl("[*]",AA_var),"null","other")) %>%
+  group_by(group) %>% 
+  summarise(min = min(avg_meanF), mean = mean(avg_meanF), max= max(avg_meanF))
 
-ctl_rep1 <- ctls %>% filter(!is.na(meanF_REP1)) %>% select(AA_var,REBC,meanF_REP1) %>% mutate(REP = "REP1") %>% rename(meanF = meanF_REP1)
-ctl_rep2 <- ctls %>% filter(!is.na(meanF_REP2)) %>% select(AA_var,REBC,meanF_REP2) %>% mutate(REP = "REP2") %>% rename(meanF = meanF_REP2)
-ctl_rep3 <- ctls %>% filter(!is.na(meanF_REP3)) %>% select(AA_var,REBC,meanF_REP3) %>% mutate(REP = "REP3") %>% rename(meanF = meanF_REP3)
-ctl_rep4 <- ctls %>% filter(!is.na(meanF_REP4)) %>% select(AA_var,REBC,meanF_REP4) %>% mutate(REP = "REP4") %>% rename(meanF = meanF_REP4)
+ctl_rep1 <- ctls %>% filter(!is.na(meanF_REP1)) %>% 
+  select(AA_var,REBC,meanF_REP1) %>% mutate(REP = "REP1") %>% 
+  rename(meanF = meanF_REP1)
+ctl_rep2 <- ctls %>% filter(!is.na(meanF_REP2)) %>% 
+  select(AA_var,REBC,meanF_REP2) %>% mutate(REP = "REP2") %>% 
+  rename(meanF = meanF_REP2)
+ctl_rep3 <- ctls %>% filter(!is.na(meanF_REP3)) %>% 
+  select(AA_var,REBC,meanF_REP3) %>% mutate(REP = "REP3") %>% 
+  rename(meanF = meanF_REP3)
+ctl_rep4 <- ctls %>% filter(!is.na(meanF_REP4)) %>% 
+  select(AA_var,REBC,meanF_REP4) %>% mutate(REP = "REP4") %>% 
+  rename(meanF = meanF_REP4)
 
 # test whether REBC has fluorescence effect (one-way ANOVA)
 # AncSR1
@@ -688,7 +836,8 @@ summary(aov(meanF ~ REBC,
 
 # Extract genotypes of isogenic controls from the DMS library mutants.
 ctls_in_lib <- meanF_data_corrected %>% mutate(v = paste(AA_var,REBC,sep = "_")) %>% 
-  filter(v %in% c("EGKA_AncSR1_REBC3","EGKA_AncSR2_REBC3","GGKM_AncSR1_REBC3","GGKM_AncSR2_REBC1","GSKV_AncSR2_REBC1")) %>% 
+  filter(v %in% c("EGKA_AncSR1_REBC3","EGKA_AncSR2_REBC3",
+                  "GGKM_AncSR1_REBC3","GGKM_AncSR2_REBC1","GSKV_AncSR2_REBC1")) %>% 
   mutate(REP = "Library",
          Variant = case_when(v == "EGKA_AncSR1_REBC3" ~ "AncSR1_ERE",
                          v == "EGKA_AncSR2_REBC3" ~ "AncSR2_rh_ERE",
@@ -721,12 +870,15 @@ c1 <- rbind(ctl_rep1,ctl_rep2,ctl_rep3,ctl_rep4) %>% mutate(type = "spike-in") %
 # Check correlations in meanF between measured isogenics and DMS spiked-in isogenics
 iso_file = file.path(basedir, "data", "meanF", "rep4_isogenic_controls_FlowJo_bin.csv")
 isogenics <- read.csv(iso_file,header=T) %>% rowwise() %>%
-  mutate(meanF_iso = sum(c(fbin1*cell_countb1,fbin2*cell_countb2,fbin3*cell_countb3,fbin4*cell_countb4))/sum(c(cell_countb1,cell_countb2,cell_countb3,cell_countb4)))
+  mutate(meanF_iso = sum(c(fbin1*cell_countb1,fbin2*cell_countb2,
+                           fbin3*cell_countb3,fbin4*cell_countb4))/
+           sum(c(cell_countb1,cell_countb2,cell_countb3,cell_countb4)))
   
 ctls_in_lib <- pivot_wider(ctls_in_lib, names_from = REP, values_from = meanF) %>%
   mutate(avg_meanF = rowMeans(select(., REP1:REP3)))
 
-c2 <- inner_join(select(isogenics, c(REBC, meanF_iso)), select(ctls, c(REBC, avg_meanF)),by="REBC") %>% 
+c2 <- inner_join(select(isogenics, c(REBC, meanF_iso)), 
+                 select(ctls, c(REBC, avg_meanF)),by="REBC") %>% 
   left_join(ctls_in_lib, by = "REBC", suffix = c("_spikein", "_lib")) %>%
   ggplot(aes(x=meanF_iso)) +
   geom_abline(slope = 1,intercept = 0,color="gray") +
@@ -738,14 +890,17 @@ c2 <- inner_join(select(isogenics, c(REBC, meanF_iso)), select(ctls, c(REBC, avg
   xlim(-4.5,-2.1) + ylim(-4.5,-2.1) +
   scale_y_continuous(name = "Spike-in fluorescence",
                      sec.axis = sec_axis(~., name = "Library fluorescence")) +
-  # ylab("Fluorescence, spike-in") + 
   xlab("Flow cytometry fluorescence") +
   annotate(geom = "text", x = -4.5, y = -2.1, hjust = 0, vjust = 1, size = 6, parse = TRUE,
            label=as.expression(bquote(italic(r)^2==.(
-             round(cor(isogenics$meanF_iso, ctls[match(isogenics$REBC, ctls$REBC), "avg_meanF"])^2, 2))))) +
-  annotate(geom = "text", x = -4.5, y = -2.4, hjust = 0, vjust = 1, size = 6, parse = TRUE, color = "red",
+             round(cor(isogenics$meanF_iso, 
+                       ctls[match(isogenics$REBC, ctls$REBC), 
+                            "avg_meanF"])^2, 2))))) +
+  annotate(geom = "text", x = -4.5, y = -2.4, hjust = 0, vjust = 1, size = 6, 
+           parse = TRUE, color = "red",
            label=as.expression(bquote(italic(r)^2==.(
-             round(cor(isogenics$meanF_iso, ctls_in_lib[match(isogenics$REBC, ctls_in_lib$REBC), "avg_meanF"], 
+             round(cor(isogenics$meanF_iso, 
+                       ctls_in_lib[match(isogenics$REBC, ctls_in_lib$REBC), "avg_meanF"], 
                        use = "complete.obs")^2, 2))))) +
   theme(text = element_text(size = fontsize),
         plot.margin = unit(c(10,15,10,10), "pt"),
@@ -758,7 +913,7 @@ c1 + c2
 
 ## Testing for fluorescence significance
 
-We will now determine a significance threshold for calling a variant active vs. null in the binned (2nd round) sort data. We will use the fluorescence distribution of nonsense variants as a null distribution to compute a nonparametric p-value for each variant, and perform multiple testing correction using a Benjamini-Hochberg false discovery rate.
+We will now determine a significance threshold for calling a complexe active vs. null in the binned sort data. We will use the fluorescence distribution of nonsense variants as a null distribution to compute a nonparametric p-value for each variant, and perform multiple testing correction using a Benjamini-Hochberg false discovery rate.
 
 We observed during the sorting experiment that the fluorescence distribution of null variants in the AncSR2 protein background is systematically higher than in the AncSR1 protein background. We will therefore test each variant using the fluorescence distribution of nonsense variants from the same protein background. We will also bin variants by mean read count across sorting replicates for testing, since we observe that the null fluorescence distribution also depends on this variable. Below we plot the distribution of mean fluorescence for nonsense variants splitting by protein background and mean read count.
 
@@ -875,7 +1030,8 @@ meanF_p %>%
   geom_histogram(binwidth = 0.05, position = "stack", color = "black") +
   facet_grid(bg ~ rcbin, labeller = label_bquote(cols = .(as.character(rcbin))~reads)) +
   scale_fill_manual(values = c("white", "gray30")) +
-  scale_y_continuous(trans = log10plus1, name = "Number of variants + 1", labels = label_log()) +
+  scale_y_continuous(trans = log10plus1, 
+                     name = "Number of variants + 1", labels = label_log()) +
   geom_vline(aes(xintercept = minF + 0.05), color = "red", linetype = "dashed") +
   geom_vline(aes(xintercept = minF - 0.05), color = "red", linetype = "dashed") +
   geom_vline(aes(xintercept = minF), color = "red") +
@@ -893,30 +1049,31 @@ write.csv(meanF_data_corrected,
 ```
 
 
-## Filtering debulk sort data
+## Filtering enrichment sort data
 
-Now let's turn to filtering the data from the debulk sort (first round of sorting to enrich for GFP+ variants). For this experiment, we had two sort bins: GFP- and GFP+. We sequenced cells collected in the GFP- bin to determine the set of variants that were present in the unsorted library. Variants that are seen in the debulk GFP- dataset but not in the binned (round 2) sort dataset may be null variants that have a very low proportion of GFP+ cells, and therefore were not collected in the debulk GFP+ bin. Alternatively, they may be variants that are active (i.e. have a significant proportion of GFP+ cells), but by chance were not sorted at high enough frequency to be detected in the binned sort dataset. 
+Now let's turn to filtering the data from the enrichment sort. For this experiment, we had two sort bins: GFP- and GFP+. We sequenced cells collected in the GFP- bin to determine the set of complexes that were present in the unsorted library. Complexes that are seen in the enrichment sort GFP- dataset but not in the binned (round 2) sort dataset may be null complexes that have a very low proportion of GFP+ cells, and therefore were not collected in the enrichment sort GFP+ bin. Alternatively, they may be complexes that are active (i.e. have a significant proportion of GFP+ cells), but by chance were not sorted at high enough frequency to be detected in the binned sort dataset. 
 
-We want to have some criterion to call variants null if they are detected in the debulk GFP- dataset but not the binned sort dataset. We can do this using a read count threshold on the debulk GFP- dataset. Variants that are detected at high frequency in the debulk GPF- dataset but not at all in the filtered binned sort dataset are likely to be null, whereas variants that are not at high frequency in either dataset do not have enough information to be called either null or active.
+We want to have some criterion to call complexes null if they are detected in the enrichment sort GFP- dataset but not the binned sort dataset. We can do this using a read count threshold on the enrichment sort GFP- dataset. Complexes that are detected at high frequency in the enrichment sort GPF- dataset but not at all in the filtered binned sort dataset are likely to be null, whereas complexes that are not at high frequency in either dataset do not have enough information to be called either null or active.
 
-How can we determine a good threshold? First, we can calculate the binomial sampling probability of a variant being sorted into the debulk GFP+ bin given a total number of cells sorted for that variant and the proportion of cells in the GFP+ bin. If we know the number and proportion of cells that a variant must have in the debulk GFP+ bin to be called active in the binned sort data, then we can then find a read count threshold for the debulk GFP- data that ensures that variants that are truly active would have a high probability of being classified as such. Conversely, if they are not detected in the binned sort data given that debulk threshold then they are likely to be null.
+How can we determine a good threshold? First, we can calculate the binomial sampling probability of a complex being sorted into the enrichment sort GFP+ bin given a total number of cells sorted for that complex and the proportion of cells in the GFP+ bin. If we know the number and proportion of cells that a complex must have in the enrichment sort GFP+ bin to be called active in the binned sort data, then we can then find a read count threshold for the enrichment sort GFP- data that ensures that complexes that are truly active would have a high probability of being classified as such. Conversely, if they are not detected in the binned sort data given that enrichment sort threshold then they are likely to be null.
 
-We first need to know how many cells must be sorted for a variant into the debulk GFP+ bin to be detected in the filtered binned sort dataset. To do this, we can estimate the average number of cells that were sorted into the debulk GFP+ bin, given that they are present in the filtered binned sort dataset. We will assume that the total proportion of cells for a variant in the binned sort data is the same as the proportion of cells for that same variant in the debulk sort GFP+ bin, given a particular RE/protein background. We can then multiply this by the total number of GFP+ cells sorted per RE/protein library in the debulk sort to estimate the number of GFP+ cells sorted per binned sort variant.
+We first need to know how many cells must be sorted for a complex into the enrichment sort GFP+ bin to be detected in the filtered binned sort dataset. To do this, we can estimate the average number of cells that were sorted into the enrichment sort GFP+ bin, given that they are present in the filtered binned sort dataset. We will assume that the total proportion of cells for a complex in the binned sort data is the same as the proportion of cells for that same variant in the enrichment sort GFP+ bin, given a particular RE/protein background. We can then multiply this by the total number of GFP+ cells sorted per RE/protein library in the enrichment sort to estimate the number of GFP+ cells sorted per binned sort variant.
 
 ```{r estimateGFPpluscellcount, fig.width=10, fig.height=6}
-# data frame of number of GFP+ cells sorted per RE library in debulk sort
-debulkposcells <- data.frame(bg = c(rep(rep(c("AncSR1", "AncSR2"), each = 16), 3), rep("AncSR1", 8)),
-                             RE = c(rep(REs[[1]], 2*3), REs[[1]][9:16]),
-                             REP = c(rep(c("1", "2", "3"), each = 32), rep("4", 8)),
-                             GFPposcellslib = c(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
-                                                  858760, 379479, 744771, 285197, 329854, 587774, 348916, 437954,
-                                                  847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
-                                                  903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539),
-                                                rep(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
-                                                      342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658,
-                                                      847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
-                                                      903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539), 2),
-                                                c(342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658)))
+# data frame of number of GFP+ cells sorted per RE library in enrichment sort
+debulkposcells <- data.frame(
+  bg = c(rep(rep(c("AncSR1", "AncSR2"), each = 16), 3), rep("AncSR1", 8)),
+  RE = c(rep(REs[[1]], 2*3), REs[[1]][9:16]),
+  REP = c(rep(c("1", "2", "3"), each = 32), rep("4", 8)),
+  GFPposcellslib = c(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
+                       858760, 379479, 744771, 285197, 329854, 587774, 348916, 437954,
+                       847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
+                       903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539),
+                     rep(c(625635, 435760, 405514, 528709 ,408313, 472083, 726379, 448824,
+                           342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658,
+                           847039, 391276, 425418, 533981, 434945, 421661, 777213, 409661,
+                           903819, 796209, 940935, 679816, 673875, 1105703, 617178, 854539), 2),
+                     c(342425, 705351, 239443, 360510, 377694, 439835, 410126, 380658)))
 
 meanF_data_corrected_long <- meanF_data_corrected %>%
   select(AA_var:cellCount_b4_REP4, avg_meanF, avg_Count_total) %>%
@@ -928,65 +1085,71 @@ meanF_data_corrected_long <- meanF_data_corrected %>%
 meanF_data_corrected_long <- meanF_data_corrected_long %>%
   left_join(debulkposcells, by = c("bg", "RE", "REP"))
 
-# estimate number of GFP+ cells sorted per variant per rep
+# estimate number of GFP+ cells sorted per complex per rep
 meanF_data_corrected_long <- meanF_data_corrected_long %>%
   filter(type == "exp") %>%
   group_by(REP, REBC) %>%
   mutate(estGFPposcells = cellCount_total / sum(cellCount_total) * GFPposcellslib)
 
 # check correlations in estimates between replicates
-print(cor.test(~ REP1 + REP2,
-               data = meanF_data_corrected_long %>%
-                 # filter out libraries for which we re-did the debulk sort between rep1 and the others
-                 filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12", 
-                                     "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
-                 select(AA_var:REP, estGFPposcells) %>%
-                 pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
+print(cor.test(
+  ~ REP1 + REP2,
+  data = meanF_data_corrected_long %>%
+    # filter out libraries for which we re-did the enrichment sort between rep1 and the others
+    filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12", 
+                        "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
+    select(AA_var:REP, estGFPposcells) %>%
+    pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
                na.action = "na.omit"))
-print(cor.test(~ REP3 + REP2,
-               data = meanF_data_corrected_long %>%
-                 select(AA_var:REP, estGFPposcells) %>%
-                 pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
-               na.action = "na.omit"))
-print(cor.test(~ REP4 + REP2,
-               data = meanF_data_corrected_long %>%
-                 select(AA_var:REP, estGFPposcells) %>%
-                 pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
-               na.action = "na.omit"))
+print(cor.test(
+  ~ REP3 + REP2,
+  data = meanF_data_corrected_long %>%
+    select(AA_var:REP, estGFPposcells) %>%
+    pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
+  na.action = "na.omit"))
+print(cor.test(
+  ~ REP4 + REP2,
+  data = meanF_data_corrected_long %>%
+    select(AA_var:REP, estGFPposcells) %>%
+    pivot_wider(names_from = REP, values_from = estGFPposcells, names_prefix = "REP"),
+  na.action = "na.omit"))
 
 # average estimates of GFP+ cells across binned sort replicates, but not for the libraries
-# in rep 1 that were from a different debulk sorting experiment than the other replicates
+# in rep 1 that were from a different enrichment sorting experiment than the other replicates
 if(!file.exists(file.path("..", "results", "cleaned_data", "estGFPpos.rda"))) {
   estGFPpos <- meanF_data_corrected_long %>%
     ungroup() %>%
     filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                       "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), REP == "1") %>%
+                       "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), 
+           REP == "1") %>%
     select(AA_var:RE, avg_meanF, avg_Count_total, estGFPposcells) %>%
     mutate(BinBC = "GFPneg")
-  estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
-                       filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                                          "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), 
-                              REP != "1") %>%
-                       group_by(AA_var, REBC, bg, RE) %>%
-                       summarize(avg_meanF = mean(avg_meanF), 
-                                 avg_Count_total = mean(avg_Count_total), 
-                                 estGFPposcells = mean(estGFPposcells)) %>%
-                       mutate(BinBC = "GFPneg2"))
-  estGFPpos <- rbind(estGFPpos, meanF_data_corrected_long %>%
-                       filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
-                                           "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
-                       group_by(AA_var, REBC, bg, RE) %>%
-                       summarize(avg_meanF = mean(avg_meanF), 
-                                 avg_Count_total = mean(avg_Count_total), 
-                                 estGFPposcells = mean(estGFPposcells)) %>%
-                       mutate(BinBC = "GFPneg"))
+  estGFPpos <- rbind(
+    estGFPpos, meanF_data_corrected_long %>%
+      filter(REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                         "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16"), 
+             REP != "1") %>%
+      group_by(AA_var, REBC, bg, RE) %>%
+      summarize(avg_meanF = mean(avg_meanF), 
+                avg_Count_total = mean(avg_Count_total), 
+                estGFPposcells = mean(estGFPposcells)) %>%
+      mutate(BinBC = "GFPneg2"))
+  estGFPpos <- rbind(
+    estGFPpos, meanF_data_corrected_long %>%
+      filter(!REBC %in% c("AncSR1_REBC9", "AncSR1_REBC10", "AncSR1_REBC11", "AncSR1_REBC12",
+                          "AncSR1_REBC13", "AncSR1_REBC14", "AncSR1_REBC15", "AncSR1_REBC16")) %>%
+      group_by(AA_var, REBC, bg, RE) %>%
+      summarize(avg_meanF = mean(avg_meanF), 
+                avg_Count_total = mean(avg_Count_total), 
+                estGFPposcells = mean(estGFPposcells)) %>%
+      mutate(BinBC = "GFPneg"))
   
   save(estGFPpos, file = file.path(results_dir, "estGFPpos.rda"))
 } else load(file.path(results_dir, "estGFPpos.rda"))
 
 
-# now for libraries that underwent two different debulk sorts, average GFP+ cell count
-# estimates across the two debulk sorts
+# now for libraries that underwent two different enrichment sorts, average GFP+ cell count
+# estimates across the two enrichment sorts
 if(!file.exists(file.path(results_dir, "estGFPposave.rda"))) {
   estGFPposave <- estGFPpos %>%
     group_by(AA_var, REBC, bg, RE, avg_meanF, avg_Count_total) %>%
@@ -1018,7 +1181,8 @@ estGFPposave <- estGFPposave %>%
   left_join(meanF_cutoffs, by = c("bg", "rcbin"))
 
 # plot meanF vs. estimated GFP+ cells sorted (median, 2.5%, and 97.5% quantiles)
-mean_meanF_se <- meanF_data_corrected %>% filter(type == "exp") %>% pull(se_meanF) %>% mean(na.rm = T)
+mean_meanF_se <- meanF_data_corrected %>% filter(type == "exp") %>% 
+  pull(se_meanF) %>% mean(na.rm = T)
 estGFPposave %>%
   ggplot(aes(x = avg_meanF, y = estGFPposcells)) +
   stat_summary_bin(geom = "line", fun = "median", size = 1.5) +
@@ -1032,16 +1196,16 @@ estGFPposave %>%
   theme_classic() +
   labs(x = "meanF", y = "estimated debulk GFP+ cells sorted")
 
-# get median # of GFP+ cells sorted for variants at the fluorescence significance
+# get median # of GFP+ cells sorted for complexes at the fluorescence significance
 # threshold, according to the protein background and read count bin
 GFPpluscellssig <- estGFPposave %>%
   group_by(bg, rcbin) %>%
   filter(avg_meanF >= minF - 2*mean_meanF_se & avg_meanF <= minF + 2*mean_meanF_se) %>%
   summarize(GFPpluscellssig = median(estGFPposcells))
 
-# get estimated # of GFP+ cells for variants at fluorescence significance threshold
+# get estimated # of GFP+ cells for complexes at fluorescence significance threshold
 # across backgrounds and mean read count bins by computing a weighted average based on the
-# number of variants in each background/read count category
+# number of complexes in each background/read count category
 GFPpluscellssig <- estGFPposave %>%
   group_by(bg, rcbin) %>%
   count() %>%
@@ -1054,12 +1218,12 @@ GFPpluscellssig <- GFPpluscellssig %>%
 print(GFPpluscellssig)
 ```
 
-Our estimated number of cells in the GFP+ bin for variants at the fluorescence significance threshold is 8.74.
+Our estimated number of cells in the GFP+ bin for complexes at the fluorescence significance threshold is 8.74.
 
-Now let's estimate the proportion of cells that fall into the GFP+ bin for variants at the fluorescence significance threshold. Because the fluorescence boundary between the GFP- and GFP+ debulk sort bins corresponds roughly to the boundary between bins 2 and 3 in the binned sort, we can use the fraction of cells per variant that are in the upper two binned sort bins (bins 3 and 4) as an estimate of the fraction of cells per variant in the GFP+ debulk sort bin.
+Now let's estimate the proportion of cells that fall into the GFP+ bin for complexes at the fluorescence significance threshold. Because the fluorescence boundary between the GFP- and GFP+ enrichment sort bins corresponds roughly to the boundary between bins 2 and 3 in the binned sort, we can use the fraction of cells per complex that are in the upper two binned sort bins (bins 3 and 4) as an estimate of the fraction of cells per complex in the GFP+ enrichment sort bin.
 
 ```{r estimateGFPplusproportion, fig.width=10, fig.height=6}
-# calculate proportion of cells in bins 3 and 4 for each variant and replicate,
+# calculate proportion of cells in bins 3 and 4 for each complex and replicate,
 # then average across replicates
 proppos <- meanF_data_corrected_long %>% 
   mutate(propb34 = (cellCount_b3 + cellCount_b4) / cellCount_total) %>%
@@ -1084,16 +1248,16 @@ proppos %>%
   theme_classic() +
   labs(x = "meanF", y = "proportion of cells in bins 3 and 4")
 
-# get median proportion of cells in bins 3 and 4 for variants at the fluorescence significance
+# get median proportion of cells in bins 3 and 4 for complexes at the fluorescence significance
 # threshold, according to the protein background and read count bin
 proppossig <- proppos %>%
   group_by(bg, rcbin) %>%
   filter(avg_meanF >= minF - 2*mean_meanF_se & avg_meanF <= minF + 2*mean_meanF_se) %>%
   summarize(proppossig = median(propb34))
 
-# get estimated proportion of cells in bins 3 and 4 for variants at fluorescence significance threshold
-# across backgrounds and read count bins by computing a weighted average based on the
-# number of variants in each background/read count bin.
+# get estimated proportion of cells in bins 3 and 4 for complexes at fluorescence 
+# significance threshold across backgrounds and read count bins by computing a 
+# weighted average based on the number of complexes in each background/read count bin.
 proppossig <- estGFPposave %>%
   group_by(bg, rcbin) %>%
   count() %>%
@@ -1106,37 +1270,40 @@ proppossig <- proppossig %>%
 print(proppossig)
 ```
 
-Our estimated proportion of cells in the GFP+ debulk sort bin for variants at the fluorescence significance threshold is 0.23.
+Our estimated proportion of cells in the GFP+ enrichment sort bin for complexes at the fluorescence significance threshold is 0.23.
 
-Now let's use our estimates for number and proportion of cells in the GFP+ bin for variants at the significance threshold to calculate the probability of not seeing such a variant in the binned sort dataset, given an estimated total number of cells sorted per variant in the debulk sort. I.e., 
+Now let's use our estimates for number and proportion of cells in the GFP+ bin for complexes at the significance threshold to calculate the probability of not seeing such a complex in the binned sort dataset, given an estimated total number of cells sorted per complex in the enrichment sort. I.e., 
 
 $$\text{Pr}(X\text{ not in binned sort} | \text{Pr}(X = \text{null}) = \alpha_{FDR}) = F_{\text{Binom}}(p;t,f)$$ 
 
-where $X$ is a variant detected in the debulk GFP- dataset, $\alpha_{FDR}$ is the significance threshold for a variant being called null in the binned sort, $p$ and $f$ are the estimated number and fraction of GFP+ cells for a minimally active variant, respectively, and $t$ is the estimated total number of cells sorted for $X$ in the debulk sort. This gives us a p-value for the null hypothesis that a variant has too few reads in the debulk GFP- bin to be able to detect it as minimally fluorescent in the binned sort experiment. We can therefore infer that variants with low p-value were sorted to high enough frequency in the debulk experiment to be detectable as minimally fluorescent in the binned sort experiment; if we do not detect them in the binned sort dataset, it is probably because they are null variants and had very few cells that made it into the debulk GFP+ bin. We can then filter out variants with non-significant p-value, and call remaining variants null if they are present in the debulk GFP- dataset but not in the binned sort dataset. We'll then use a Benjamini-Hochberg FDR correction with threshold of 0.1 for multiple testing correction.
+where $X$ is a complex detected in the enrichment GFP- dataset, $\alpha_{FDR}$ is the significance threshold for a complex being called null in the binned sort, $p$ and $f$ are the estimated number and fraction of GFP+ cells for a minimally active complex, respectively, and $t$ is the estimated total number of cells sorted for $X$ in the enrichment sort. This gives us a p-value for the null hypothesis that a complex has too few reads in the enrichment sort GFP- bin to be able to detect it as minimally fluorescent in the binned sort experiment. We can therefore infer that complexes with low p-value were sorted to high enough frequency in the enrichment sort to be detectable as minimally fluorescent in the binned sort; if we do not detect them in the binned sort dataset, it is probably because they are null complexes and had very few cells that made it into the enrichment sort GFP+ bin. We can then filter out variants with non-significant p-value, and call remaining complexes null if they are present in the enrichment sort GFP- dataset but not in the binned sort dataset. We'll then use a Benjamini-Hochberg FDR correction with threshold of 0.1 for multiple testing correction.
 
 ```{r filterdebulk, fig.width=8, fig.height=6}
-# data frame of number of GFP- cells sorted per RE library in debulk sort
-debulknegcells <- data.frame(REBC = c(sapply(1:16, function(x) paste0("AncSR1_REBC", x)),
-                                      sapply(1:16, function(x) paste0("AncSR2_REBC", x)),
-                                      sapply(9:16, function(x) paste0("AncSR1_REBC", x))),
-                             BinBC = c(rep("GFPneg", 32), rep("GFPneg2", 8)),
-                             GFPnegcellslib = c(24375871, 24800681, 24681039, 24592905, 24662980, 24806774, 24352862, 24658946,
-                                                24326839, 24736293, 24336612, 24841745, 24748789, 24558731, 24945619, 25226917,
-                                                24220370, 24825719 ,24694083, 24602087, 24690832, 24686331, 24407887, 24637616,
-                                                24399903, 24518676, 24214644, 24511230, 24606769, 24040623, 24441448, 24619287,
-                                                24750095, 24422603, 24826229, 24622262, 24870439, 24586253, 24629933, 24685092))
+# data frame of number of GFP- cells sorted per RE library in enrichment sort
+debulknegcells <- data.frame(
+  REBC = c(sapply(1:16, function(x) paste0("AncSR1_REBC", x)),
+           sapply(1:16, function(x) paste0("AncSR2_REBC", x)),
+           sapply(9:16, function(x) paste0("AncSR1_REBC", x))),
+  BinBC = c(rep("GFPneg", 32), rep("GFPneg2", 8)),
+  GFPnegcellslib = c(24375871, 24800681, 24681039, 24592905, 24662980, 24806774, 24352862, 24658946,
+                     24326839, 24736293, 24336612, 24841745, 24748789, 24558731, 24945619, 25226917,
+                     24220370, 24825719 ,24694083, 24602087, 24690832, 24686331, 24407887, 24637616,
+                     24399903, 24518676, 24214644, 24511230, 24606769, 24040623, 24441448, 24619287,
+                     24750095, 24422603, 24826229, 24622262, 24870439, 24586253, 24629933, 24685092))
 
-# calculate total number of reads per debulk library
+# calculate total number of reads per enrichment sort library
 debulknegcells <- debulk_data %>%
   group_by(REBC, BinBC) %>%
   summarize(total_reads = sum(Count)) %>%
   right_join(debulknegcells, by = c("REBC", "BinBC")) %>%
   mutate(readspercell = total_reads/GFPnegcellslib)
 
-# estimate number of GFP- cells sorted per variant in the debulk sort,
-# as well as number of total cells sorted per variant by summing with estimated GFP+ cells
+# estimate number of GFP- cells sorted per complex in the enrichment sort,
+# as well as number of total cells sorted per complex by summing with 
+# estimated GFP+ cells
 debulk_data <- debulk_data %>%
-  left_join(debulknegcells %>% select(REBC, BinBC, readspercell), by = c("REBC", "BinBC")) %>%
+  left_join(debulknegcells %>% select(REBC, BinBC, readspercell), 
+            by = c("REBC", "BinBC")) %>%
   mutate(cells_GFPneg = Count * 1/readspercell)  %>%
   left_join(estGFPpos %>% select(AA_var, REBC, BinBC, estGFPposcells),
             by = c("AA_var", "REBC", "BinBC")) %>%
@@ -1144,15 +1311,15 @@ debulk_data <- debulk_data %>%
   mutate(total_cells = ifelse(is.na(total_cells), cells_GFPneg, total_cells))
 
 # compute p-values as the probability of sampling at least 8 cells in the GFP+ bin
-# given the fraction of cells per variant in the GFP+ bin is 0.23 (similarly to
-# a minimally significant variant)
+# given the fraction of cells per complex in the GFP+ bin is 0.23 (similarly to
+# a minimally significant complex)
 debulk_data <- debulk_data %>%
   mutate(p = pbinom(round(GFPpluscellssig) - 1, round(cells_GFPneg), proppossig))
 
 # compute FDR-adjusted p-values using Benjamini-Hochberg correction
 debulk_data$padj <- p.adjust(debulk_data$p, method = "fdr")
 
-# filter debulk data with an FDR cutoff of 0.1
+# filter enrichment sort data with an FDR cutoff of 0.1
 debulk.fdrthresh <- 0.1
 
 debulk_data %>%
@@ -1169,7 +1336,8 @@ debulk_data %>%
 debulk_data_filter <- debulk_data %>%
   filter(padj <= debulk.fdrthresh)
 
-# number of total (non-nonsense) variants classified as null from the debulk GFP- data
+# number of total (non-nonsense) complexes classified as null from the 
+# enrichment sort GFP- data
 debulk_data_filter %>%
   filter(!grepl("\\*", AA_var)) %>%
   distinct(AA_var, REBC) %>%
@@ -1178,7 +1346,7 @@ debulk_data_filter %>%
   count(bg) %>%
   mutate(frac = n / 2560000)
 
-# total number of phenotyped variants
+# total number of phenotyped complexes
 debulk_data_filter %>%
   distinct(AA_var, REBC) %>%
   mutate(bg = sub("_REBC.+", "", REBC)) %>%
