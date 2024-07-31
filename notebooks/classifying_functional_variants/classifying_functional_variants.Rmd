@@ -167,19 +167,18 @@ if(!file.exists(file.path(results_dir, "pbinned.rda"))) {
 
 # first load the cross-validation fits from the model fitting
 load(file.path(basedir, "results", "missing_variants", 
-               "AncSR1.cv.pred.fine.rda"))
+               "AncSR1.cv.pred.fine.lambdamin.rda"))
 load(file.path(basedir, "results", "missing_variants", "AncSR1_foldid.rda"))
 load(file.path(basedir, "results", "missing_variants", 
                "AncSR1_model_data.rda"))
-AncSR1.cv.pred <- lapply(AncSR1.cv.pred.fine, function(x) as.numeric(x[,10]))
 
 AncSR1.cv.obs <- lapply(1:10, function(x) 
   AncSR1_model_data$avg_meanF[AncSR1_foldid == x])
 
-rm(AncSR1.cv.pred.fine, AncSR1_foldid, AncSR1_model_data)
+rm(AncSR1_foldid, AncSR1_model_data)
 
 # concatenate fits across all 10 cross-validation folds
-AncSR1.cv <- data.frame(pred = unlist(AncSR1.cv.pred, use.names = FALSE),
+AncSR1.cv <- data.frame(pred = unlist(AncSR1.cv.pred.fine.lambdamin, use.names = FALSE),
                         obs = unlist(AncSR1.cv.obs, use.names = FALSE))
 
 # plot concatentated predicted vs. observed fluorescence
@@ -257,19 +256,18 @@ rm(bspred.AncSR1)
 
 # first load the cross-validation fits from the model fitting
 load(file.path(basedir, "results", "missing_variants", 
-               "AncSR2.cv.pred.fine.rda"))
+               "AncSR2.cv.pred.fine.lambdamin.rda"))
 load(file.path(basedir, "results", "missing_variants", "AncSR2_foldid.rda"))
 load(file.path(basedir, "results", "missing_variants", 
                "AncSR2_model_data.rda"))
-AncSR2.cv.pred <- lapply(AncSR2.cv.pred.fine, function(x) as.numeric(x[,13]))
 
 AncSR2.cv.obs <- lapply(1:10, function(x)
   AncSR2_model_data$avg_meanF[AncSR2_foldid == x])
 
-rm(AncSR2.cv.pred.fine, AncSR2_foldid, AncSR2_model_data)
+rm(AncSR2_foldid, AncSR2_model_data)
 
 # concatenate fits across all 10 cross-validation folds
-AncSR2.cv <- data.frame(pred = unlist(AncSR2.cv.pred, use.names = FALSE),
+AncSR2.cv <- data.frame(pred = unlist(AncSR2.cv.pred.fine.lambdamin, use.names = FALSE),
                         obs = unlist(AncSR2.cv.obs, use.names = FALSE))
 
 # plot concatentated predicted vs. observed fluorescence
