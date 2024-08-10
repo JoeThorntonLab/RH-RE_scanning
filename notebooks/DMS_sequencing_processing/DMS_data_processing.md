@@ -31,7 +31,6 @@ First, we will check how many sequencing reads we got. Replicate 1 binned sort l
 
 ``` r
 # histogram
-# plot histogram
 read_lengths_R1_nova <- read.table("./NovaSeq/read_lengths_R1.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(file="R1",seq="NovaSeq")
 read_lengths_R2_nova <- read.table("./NovaSeq/read_lengths_R2.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(file="R2",seq="NovaSeq")
 

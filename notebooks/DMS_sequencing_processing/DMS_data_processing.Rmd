@@ -10,7 +10,7 @@ editor_options:
 ```{r setup, include=FALSE, message=FALSE, purl = TRUE}
 require("knitr")
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(fig.width=5, fig.height=5)
+knitr::opts_chunk$set(fig.height=5)
 
 # check for packages and install any that are missing
 packages <- c("tidyr", "ggplot2","dplyr","scales",
@@ -58,7 +58,6 @@ zcat $R2_READS | awk 'NR%4 == 2 {lengths[length($0)]++} END {for (l in lengths) 
 
 ```{r}
 # histogram
-# plot histogram
 read_lengths_R1_nova <- read.table("./NovaSeq/read_lengths_R1.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(file="R1",seq="NovaSeq")
 read_lengths_R2_nova <- read.table("./NovaSeq/read_lengths_R2.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(file="R2",seq="NovaSeq")
 
@@ -89,7 +88,7 @@ zcat $R1_TRIMMED | awk 'NR%4 == 2 {lengths[length($0)]++} END {for (l in lengths
 zcat $R2_TRIMMED | awk 'NR%4 == 2 {lengths[length($0)]++} END {for (l in lengths) {print l, lengths[l]}}' > read_lengths_R2_trimmed.txt
 ```
 
-```{r}
+```{r, fig.width=5}
 # plot histograms
 trimmed_lengths_R1_nova <- read.table("./NovaSeq/read_lengths_R1_trimmed.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(file="R1",seq="NovaSeq")
 trimmed_lengths_R2_nova <- read.table("./NovaSeq/read_lengths_R2_trimmed.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(file="R2",seq="NovaSeq")
@@ -134,7 +133,7 @@ gzip -v9 $ASSEMBLED
 zcat $ASSEMBLED | awk 'NR%4 == 2 {lengths[length($0)]++} END {for (l in lengths) {print l, lengths[l]}}' > read_length_assembled_reads.txt
 ```
 
-```{r}
+```{r, fig.width=15}
 # plot histogram
 assembled_lengths_nova <- read.table("./NovaSeq/read_length_assembled_reads.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(seq="NovaSeq")
 assembled_lengths_next <- read.table("./NextSeq/read_length_assembled_reads.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(seq="NextSeq")
@@ -170,7 +169,7 @@ ASSEMBLED=$(find $PWD -name "*.assembled.fastq.gz" -print)
 python Calc_base_composition_stats_assembled_reads_v4.py $ASSEMBLED "DMS_Rep1-3_S0_L001_4_assembled" 
 ```
 
-```{r}
+```{r,fig.width=15, fig.height=3}
 #plot base composition
 bc_nova <- read.csv("./NovaSeq/DMS_Rep1-3_S0_L001_4_assembled_base_composition.csv",h=T)
 rownames(bc_nova) <- paste0("s",1:117)
