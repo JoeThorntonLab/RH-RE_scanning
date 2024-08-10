@@ -177,14 +177,6 @@ pheatmap(t(bc_nova),cluster_rows = F,cluster_cols = F, border_color="black",
 ![](DMS_data_processing_files/figure-markdown_github/unnamed-chunk-4-1.png)
 
 ``` r
-pheatmap(t(bc_next),cluster_rows = F,cluster_cols = F, border_color="black",
-         fontsize_row=10,fontsize_col=10,cellheight=10,main = "NextSeq",
-         annotation_col = DMS_sites_df,annotation_colors = DMS_sites_colors,show_colnames=F)
-```
-
-![](DMS_data_processing_files/figure-markdown_github/unnamed-chunk-4-2.png)
-
-``` r
 # Show table per site with the frequencies of NNS at the DMS sites
 print("NovaSeq dataset:")
 ```
@@ -212,6 +204,15 @@ knitr::kable(bc_nova %>% mutate(site=row_number()) %>% filter(site %in% c(55:60,
 | s69 |  0.0001378|  0.2795345|  0.7098956|  0.0104321|    69| S     |
 
 ``` r
+pheatmap(t(bc_next),cluster_rows = F,cluster_cols = F, border_color="black",
+         fontsize_row=10,fontsize_col=10,cellheight=10,main = "NextSeq",
+         annotation_col = DMS_sites_df,annotation_colors = DMS_sites_colors,show_colnames=F)
+```
+
+![](DMS_data_processing_files/figure-markdown_github/unnamed-chunk-5-1.png)
+
+``` r
+# Show table per site with the frequencies of NNS at the DMS sites
 print("NextSeq dataset:")
 ```
 

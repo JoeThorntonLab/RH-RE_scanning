@@ -133,7 +133,7 @@ gzip -v9 $ASSEMBLED
 zcat $ASSEMBLED | awk 'NR%4 == 2 {lengths[length($0)]++} END {for (l in lengths) {print l, lengths[l]}}' > read_length_assembled_reads.txt
 ```
 
-```{r, fig.width=15}
+```{r, fig.width=8}
 # plot histogram
 assembled_lengths_nova <- read.table("./NovaSeq/read_length_assembled_reads.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(seq="NovaSeq")
 assembled_lengths_next <- read.table("./NextSeq/read_length_assembled_reads.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(seq="NextSeq")
@@ -169,7 +169,7 @@ ASSEMBLED=$(find $PWD -name "*.assembled.fastq.gz" -print)
 python Calc_base_composition_stats_assembled_reads_v4.py $ASSEMBLED "DMS_Rep1-3_S0_L001_4_assembled" 
 ```
 
-```{r,fig.width=15, fig.height=3}
+```{r,fig.width=15, fig.height=4}
 #plot base composition
 bc_nova <- read.csv("./NovaSeq/DMS_Rep1-3_S0_L001_4_assembled_base_composition.csv",h=T)
 rownames(bc_nova) <- paste0("s",1:117)
@@ -184,19 +184,21 @@ pheatmap(t(bc_nova),cluster_rows = F,cluster_cols = F, border_color="black",
          fontsize_row=10,fontsize_col=10,cellheight=10,main = "NovaSeq",
          annotation_col = DMS_sites_df,annotation_colors = DMS_sites_colors,show_colnames=F)
 
+# Show table per site with the frequencies of NNS at the DMS sites
+print("NovaSeq dataset:")
+knitr::kable(bc_nova %>% mutate(site=row_number()) %>% filter(site %in% c(55:60,64:69)) %>% 
+               mutate(class = rep(c("N","N","S"),4)))
+```
+```{r,fig.width=15, fig.height=4}
+
 pheatmap(t(bc_next),cluster_rows = F,cluster_cols = F, border_color="black",
          fontsize_row=10,fontsize_col=10,cellheight=10,main = "NextSeq",
          annotation_col = DMS_sites_df,annotation_colors = DMS_sites_colors,show_colnames=F)
 
 # Show table per site with the frequencies of NNS at the DMS sites
-print("NovaSeq dataset:")
-knitr::kable(bc_nova %>% mutate(site=row_number()) %>% filter(site %in% c(55:60,64:69)) %>% 
-               mutate(class = rep(c("N","N","S"),4)))
-
 print("NextSeq dataset:")
 knitr::kable(bc_next %>% mutate(site=row_number()) %>% filter(site %in% c(55:60,64:69)) %>% 
                mutate(class = rep(c("N","N","S"),4)))
-
 
 ```
 
