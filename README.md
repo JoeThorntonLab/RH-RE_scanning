@@ -2,7 +2,7 @@
 Combinatorial deep mutational scanning of ancestral steroid receptor recognition helices and their associated DNA response elements
 
 <p align="center">
-  <img src="./figures/main_fig1.png" alt="plot" width="20" height="20">
+  <img src="./figures/main_fig1.png" alt="plot" width="100" height="100">
 </p>
 
 The diagram below depicts the organization of the GitHub project:
