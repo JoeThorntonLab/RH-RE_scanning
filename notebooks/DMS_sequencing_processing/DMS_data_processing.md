@@ -5,7 +5,7 @@ Santiago Herrera
 
 This is the workflow for cleaning, assembling and demultiplexing DMS reads based on DBD background, REBC (the synonymous mutations identifying the RE strain), and BBC (FACS bin barcode: enrichment GFP- bin, and four GFP+ bins per experimental replicate).
 
-The Python and R scripts used during the workflow are found in the `scripts` folder. The script `Read_processing.sh` is a bash script to run everything in a cluster.
+The Python and R scripts used during the workflow are found in the `scripts/library_processing` folder. The script `DMS_data_processing.sh` is a bash script to run everything on a cluster.
 
     #!/bin/bash
     # Load modules in cluster
@@ -123,13 +123,13 @@ Now, we will assemble the trimmed reads to get full length amplicon sequences, w
 assembled_lengths_nova <- read.table("./NovaSeq/read_length_assembled_reads.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(seq="NovaSeq")
 assembled_lengths_next <- read.table("./NextSeq/read_length_assembled_reads.txt",header = F) %>% dplyr::rename(length = V1, freq = V2) %>% mutate(seq="NextSeq")
 
-knitr::kable(rbind(assembled_lengths_nova,assembled_lengths_next) %>% group_by(seq) %>% reframe(file="assembled",total=sum(freq)))
+knitr::kable(rbind(assembled_lengths_nova,assembled_lengths_next) %>% group_by(seq) %>% reframe(file="assembled",total_assembled=sum(freq)))
 ```
 
-| seq     | file      |       total|
-|:--------|:----------|-----------:|
-| NextSeq | assembled |   118878340|
-| NovaSeq | assembled |  1749639397|
+| seq     | file      |  total\_assembled|
+|:--------|:----------|-----------------:|
+| NextSeq | assembled |         118878340|
+| NovaSeq | assembled |        1749639397|
 
 ``` r
 mean_lengths <- rbind(assembled_lengths_nova,assembled_lengths_next) %>% group_by(seq) %>% 
@@ -148,11 +148,13 @@ rbind(assembled_lengths_nova,assembled_lengths_next) %>%
 
 ![](DMS_data_processing_files/figure-markdown_github/unnamed-chunk-3-1.png)
 
-We see that we assembled successfully ~1.2 x 10^8 (&gt;98%) and 1.75 x 10^9 (&gt;94%) of the reads for NextSeq and NovaSeq, respectively.
+We see that we assembled successfully ~1.2 x 10^8 (&gt;98%) and 1.75 x 10^9 (&gt;94%) of the trimmed reads for NextSeq and NovaSeq, respectively.
 
-Now, we will do a quick check of the quality of the sequenced libraries by mapping a sample of 1M reads from each run to the reference sequence of AncSR1 or AncSR2. This will allow is to check the base composition per site: there should only be amino acid variation at the background sites that differ between AncSR1 and AncSR2, and at the sites corresponding to the DMS.
+------------------------------------------------------------------------
 
-For the background differences, there should only be 2 nucleotide states. For the DMS sites, we used NNS codons, that is, the first and second position of the codon should contain every nucleotide in a frequency of ~0.25, and the third position of the codon should have only G/C at a frwquency of ~0.5.
+Now, we will do a quick check of the quality of the sequenced libraries by mapping a sample of 1M reads from each run to the reference sequence of AncSR1 or AncSR2. This will allow us to check the base composition per site: there should only be amino acid variation at the background sites that differ between AncSR1 and AncSR2, the sites corresponding to the REBC, and at the DMS sites.
+
+For the background differences, there should only be 2 nucleotide states; for the REBC sites there are some sites with only two states and other with four; and for the DMS sites, we used NNS codons, that is, the first and second position of the codon should contain every nucleotide in a frequency of ~0.25, and the third position of the codon should have only G/C at a frwquency of ~0.5.
 
     ## Step 4: Compute base composition of assembled reads (based on a sample of 1M reads)
     ASSEMBLED=$(find $PWD -name "*.assembled.fastq.gz" -print)
@@ -165,12 +167,20 @@ rownames(bc_nova) <- paste0("s",1:117)
 bc_next <- read.csv("./NextSeq/DMS_Rep1_S0_L001_4_assembled_base_composition.csv",h=T)
 rownames(bc_next) <- paste0("s",1:117)
 
-DMS_sites_df <- data.frame(site = c(rep("Background",54),rep("DMS",6),rep("Background",3),rep("DMS",6),rep("Background",48)))
+DMS <- c(55:60,64:69)
+REBC <- c(42,45,46,48,49,50,51,54,63)
+Background_subs <- c(4:7,13,14,19,21,32,47:49,68,82,85,88,96,97,100,106,108,112,114,116)
+
+DMS_sites_df <- data.frame(site = 1:117) %>% mutate(type = case_when(site %in% DMS ~ "DMS",
+                                                                     site %in% REBC ~ "REBC",
+                                                                     site %in% Background_subs ~ "Bg subs",
+                                                                     T ~ "fixed")) %>% select(type)
+
 row.names(DMS_sites_df) <- rownames(bc_nova)
-DMS_sites_colors <- list(site = c("Background" = "gray60","DMS" = "yellow"))
+DMS_sites_colors <- list(type = c("fixed" = "gray60","DMS" = "yellow","REBC" = "green","Bg subs" = "red"))
   
-pheatmap(t(bc_nova),cluster_rows = F,cluster_cols = F, border_color="black",
-         fontsize_row=10,fontsize_col=10,cellheight=10,main = "NovaSeq",
+pheatmap(t(bc_nova),cluster_rows = F,cluster_cols = F, border_color="white",
+         fontsize_row=10,fontsize_col=10,cellheight=10,main = "NovaSeq",color=rev(viridis::inferno(20)),
          annotation_col = DMS_sites_df,annotation_colors = DMS_sites_colors,show_colnames=F)
 ```
 
@@ -205,8 +215,8 @@ knitr::kable(bc_nova %>% mutate(site=row_number()) %>% filter(site %in% c(55:60,
 
 ``` r
 #plot base composition
-pheatmap(t(bc_next),cluster_rows = F,cluster_cols = F, border_color="black",
-         fontsize_row=10,fontsize_col=10,cellheight=10,main = "NextSeq",
+pheatmap(t(bc_next),cluster_rows = F,cluster_cols = F, border_color="white",
+         fontsize_row=10,fontsize_col=10,cellheight=10,main = "NextSeq",color=rev(viridis::inferno(20)),
          annotation_col = DMS_sites_df,annotation_colors = DMS_sites_colors,show_colnames=F)
 ```
 
