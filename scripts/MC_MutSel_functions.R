@@ -1,7 +1,7 @@
 #===============================================
 # Evolutionary simulations on empirical GP maps
 #===============================================
-# Last modified: Sept 28, 2023
+# Last modified: May 02, 2024 - SHA
 #
 # Functions to build, simulate and work with discrete Markov processes on RH-RE DMS data
 
@@ -9,33 +9,46 @@
 
 # make factors with different levels for ordering of REs in plotting
 REs <- list()
-REs[[1]] <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", 
+REs[[1]] <- factor(c("SRE (AA)", "GA", "ERE (GT)", "AC", 
                      "AG", "AT", "CA", "CC", 
                      "CG", "CT", "GC", "GG", 
                      "TA", "TC", "TG", "TT"), 
-                   levels=c("ERE (GT)", "SRE1 (AA)", "SRE2 (GA)", "AC", 
-                            "AG", "AT", "CA", "CC", 
-                            "CG", "CT","GC", "GG", 
+                   levels=c("ERE (GT)", "SRE (AA)", "AC", "AG", 
+                            "AT", "CA", "CC", "CG", 
+                            "CT", "GA", "GC", "GG", 
                             "TA", "TC", "TG", "TT"))
-REs[[2]] <- factor(c("SRE1 (AA)", "SRE2 (GA)", "ERE (GT)", "AC", 
+REs[[2]] <- factor(c("SRE (AA)", "GA", "ERE (GT)", "AC", 
                      "AG", "AT", "CA", "CC", 
                      "CG", "CT", "GC", "GG", 
                      "TA", "TC", "TG", "TT","Promiscuous"), 
-                   levels=c("ERE (GT)", "SRE1 (AA)", "SRE2 (GA)", "AC", 
-                            "AG", "AT", "CA", "CC", 
-                            "CG", "CT","GC", "GG", 
+                   levels=c("ERE (GT)", "SRE (AA)", "AC", "AG", 
+                            "AT", "CA", "CC", "CG", 
+                            "CT", "GA", "GC", "GG", 
                             "TA", "TC", "TG", "TT","Promiscuous"))
 
 # Assign colors to each RE for plotting (and matching the colors in the networks)
-rgb_to_hex <- function(rgb_col){
-  hex <- sapply(strsplit(rgb_col, " "), function(x)
-    rgb(x[1], x[2], x[3], maxColorValue=255))
-  hex
+hex_RE_colors <- function(type = 1){
+  if(type==1){
+    col <- c("#24ff24","#ffff6d","#490092","#ffb6db","#db6d00",
+      "#009292","#006ddb","#594f15", "#ff6db6","#004949","#b66dff",
+      "#924900","#920000","#c0c0c0","#b6dbff","#6db6ff")
+    names(col) <- REs[[1]]
+  }
+  else if(type==2){
+    col <- c("#24ff24","#ffff6d","#490092","#ffb6db","#db6d00",
+      "#009292","#006ddb","#594f15", "#ff6db6","#004949","#b66dff",
+      "#924900","#920000","#c0c0c0","#b6dbff","#6db6ff","white")
+    names(col) <- REs[[2]]
+  }
+  else if(type==3){
+    col <- c("#24ff24","gray60","#490092","gray60",
+      "gray60","gray60","gray60","gray60",
+      "gray60","gray60","gray60","gray60",
+      "gray60","gray60","gray60","gray60")
+    names(col) <- REs[[1]]
+  }
+  return(col)
 }
-rgb_RE_colors <- c("0 172 88", "255 63 53", "103 71 151", "37 121 77", "58 116 157", "6 183 0", "0 190 217", "0 145 145", "244 113 0",
-                   "0 173 96", "0 169 254", "95 132 29", "184 78 86", "163 101 27", "255 47 136", "196 36 201")
-hex_RE_colors <- rgb_to_hex(rgb_RE_colors)
-names(hex_RE_colors) <- REs[[1]]
 
 # Assign colors to DBD backgrounds
 DBD_color <- function(names=T){
@@ -729,8 +742,8 @@ simulate_markov_chain <- function(states_0,tr_mat,n_steps,freqs_states_0=NULL){
   
   # Check for inconsistent/valid paramenters
   # Check whether 'tr_mat' is an ergodic transition probability matrix
-  if(!((is.matrix(tr_mat) || inherits(tr_mat,"dgCMatrix")) && nrow(tr_mat)==ncol(tr_mat) && 
-       all(tr_mat>=0 & tr_mat<=1) && sum(apply(tr_mat,1,sum))==ncol(tr_mat))){
+  if(!((is.matrix(tr_mat) || inherits(tr_mat,"dgCMatrix") || inherits(tr_mat,"dsCMatrix")) && 
+    nrow(tr_mat)==ncol(tr_mat) && all(tr_mat>=0 & tr_mat<=1) && sum(apply(tr_mat,1,sum))==ncol(tr_mat))){
     stop("Provide a square probability transition matrix")
   }
   if(is.null(n_steps) || n_steps==0){
@@ -784,13 +797,13 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
   if(!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg)){
     stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
   }
-  if(is.null(type) || !(type %in% c("network", "main network","simulated mc"))){
-    stop("Select the type of PDFV to compute: 'network', 'main network', or 'simulated mc'")
+  if(is.null(type) || !(type %in% c("production", "main network","simulated mc"))){
+    stop("Select the type of PDFV to compute: 'production', 'main network', or 'simulated mc'")
   }
-  if(is.null(state_freqs) && (type=="local network" || type=="simulated mc")){
+  if(is.null(state_freqs) && (type=="simulated mc")){
     stop("Provide a vector of state frequencies after N steps of a discrete Markov chain")
   }
-  if(type=="network" && !is.null(state_freqs)){
+  if(type=="production" && !is.null(state_freqs)){
     message("Ignoring vector of frequencies...")
   }
   if(complex & !("complex" %in% colnames(pheno_tbl))){
@@ -800,8 +813,8 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
     stop("Need to provide a graph to extract the main sub-component")
   }
   
-  if(type=="network"){
-    # Compute the expected PDFV as the fraction of genotypes encoding each function in the network.
+  if(type=="production"){
+    # Compute the expected PDFV as the fraction of protein genotypes encoding each phenotype.
     if(specific){
       # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
       pheno_tbl %>% ungroup() %>% filter(bg==Bg) %>%
@@ -827,12 +840,23 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
     
     if(complex){
       # Compute PDFV from prot-DNA complexes
-      pheno_tbl %>% ungroup() %>% filter(bg == Bg & complex %in% net_vars) %>% 
-          unnest(cols = c(bound_REs)) %>% 
-          reframe(RE =  REs[[1]],
-                  count = table(factor(bound_REs,levels=REs[[1]])),
-                  Norm_F_prob = count/sum(count),
-                  model=model) %>% select(RE,Norm_F_prob,model)
+      if(specific){
+        # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
+        pheno_tbl %>% ungroup() %>% filter(bg == Bg & complex %in% net_vars) %>% 
+        reframe(RE =  REs[[2]],
+                count = table(factor(specificity,levels=REs[[2]])),
+                Norm_F_prob = count/sum(count),
+                model=model) %>% select(RE,Norm_F_prob,model)
+      }
+      else{
+      # Combine specific and promiscuous genotypes 
+        pheno_tbl %>% ungroup() %>% filter(bg == Bg & complex %in% net_vars) %>% 
+        unnest(cols = c(bound_REs)) %>% 
+        reframe(RE =  REs[[1]],
+                count = table(factor(bound_REs,levels=REs[[1]])),
+                Norm_F_prob = count/sum(count),
+                model=model) %>% select(RE,Norm_F_prob,model)
+      }
     }
     else{
       # Compute PDFV from protein variants
@@ -862,9 +886,9 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
     acc_states <- state_freqs[state_freqs>0]
     
     if(complex){
-    # Compute PDFV from prot-DNA complexes
+      # Compute PDFV from prot-DNA complexes
       if(specific){
-      # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
+        # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
         data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("complex","bg")) %>%
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
           # Report final normalized probability for all 16 phenotypes.
@@ -874,7 +898,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
           select(RE,Norm_F_prob,model)
       }
       else{
-      # Combine specific and promiscuous genotypes 
+        # Combine specific and promiscuous genotypes 
         data.frame(complex=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("complex","bg")) %>%
           unnest(cols = c(bound_REs)) %>% 
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
@@ -887,7 +911,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
     }
     else{
       if(specific){
-      # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
+        # Use only specific genotypes. Make 'promiscuous genotypes' a separate 'phenotype'
         data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("AA_var","bg")) %>%
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
           # Report final normalized probability for all 16 phenotypes.
@@ -897,7 +921,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
           select(RE,Norm_F_prob,model)
       }
       else{
-      # Combine specific and promiscuous genotypes 
+        # Combine specific and promiscuous genotypes 
         data.frame(AA_var=names(acc_states),prob=acc_states,bg = Bg) %>% inner_join(.,pheno_tbl,by=c("AA_var","bg")) %>%
           unnest(cols = c(bound_REs)) %>% 
           # Add probabilitieis of trajectories ending in the DNA binding phenotype, and normalize probabilities.
@@ -912,7 +936,7 @@ get_PDFV_v2 <- function(state_freqs=NULL,type=NULL,Bg=NULL,model=NA,pheno_tbl=ph
 }
 
 # Simulate a multi-step markov chain: Returns a list of data frames with the prob. distribution of functions at each time step
-simulate_markov_chain_multistep <- function(states_0,tr_mat,n_iter,Bg=NULL,freqs_states_0=NULL,specific=FALSE,complex=FALSE){
+simulate_markov_chain_multistep <- function(states_0,tr_mat,n_iter,Bg=NULL,freqs_states_0=NULL,specific=FALSE,complex=FALSE,pheno_tbl=phenotypes_tbl){
   # states_0 = vector containing the states from which markov chain starts
   # tr_mat = a probability transition matrix
   # n_iter = number of (mutational) steps to run the Markov chain
@@ -933,7 +957,7 @@ simulate_markov_chain_multistep <- function(states_0,tr_mat,n_iter,Bg=NULL,freqs
   for(i in 1:n_iter){
     # simulate Markov chain for each GP map 
     mc_tmp <- simulate_markov_chain(states_0,tr_mat,n_steps = i)
-    pdfv_tmp <- get_PDFV_v2(mc_tmp,Bg = Bg,model = i,specific = specific,type="simulated mc",complex=complex)
+    pdfv_tmp <- get_PDFV_v2(mc_tmp,Bg = Bg,model = i,specific = specific,type="simulated mc",complex=complex,pheno_tbl = pheno_tbl)
     df[[i]] <- pdfv_tmp
   }
   return(df)
@@ -1045,7 +1069,7 @@ extract_step_probability <- function(var1,var2,mat){
 }
 
 # Function to plot the PDFV as a circular ('spider') chart.
-circular_PDFV_v2 <- function(data,cols = "#00AFBB",title = NULL,legend=T,fill=T,...){
+circular_PDFV_v2 <- function(data,cols = "#00AFBB",title = NULL,legend=T,fill=T,point_size=1.7,line_width=0.7,leg_position="left",...){
   # data: a single data frame or a list of data frames to plot
   
   if(!inherits(data,"list")){
@@ -1059,7 +1083,7 @@ circular_PDFV_v2 <- function(data,cols = "#00AFBB",title = NULL,legend=T,fill=T,
     radar_df <- do.call(rbind, data)
     radar_df <- radar_df %>% group_by(model) %>% 
       spread(RE,Norm_F_prob) %>% mutate_at(vars(-model), as.numeric) %>% 
-      mutate_at(vars(model),as.factor)
+      mutate_at(vars(model),as.factor) %>% mutate(model = factor(model,levels = unique(.$model),ordered=T))
     max <- radar_df %>% pivot_longer(cols=2:last_col()) %>% with(max(value))
   }
   
@@ -1068,141 +1092,96 @@ circular_PDFV_v2 <- function(data,cols = "#00AFBB",title = NULL,legend=T,fill=T,
   vals <- round(vals,digits = 2)
   if(is.null(title)) title <- ""
   
-  ggradar(radar_df,group.point.size = 1.7,fill = fill, group.colours= cols,
-          values.radar = vals, legend.position="left",
-          gridline.max.colour="black",group.line.width=0.7,axis.label.size = 3,grid.label.size=3.5,
+  ggradar(radar_df,group.point.size = point_size,fill = fill, group.colours= cols,
+          values.radar = vals, legend.position=leg_position,
+          gridline.max.colour="black",group.line.width=line_width,axis.label.size = 3,grid.label.size=3.5,
           gridline.mid.colour="gray",grid.max = max, grid.mid = vals[2],plot.title=title,plot.legend=legend,
           legend.text.size=8,...) + 
-    theme(legend.key.width = unit(0.4, 'cm'), plot.title = element_text(size=15))
+    theme(legend.key.width = unit(0.4, 'cm'), plot.title = element_text(size=15)) +
+    guides(color = guide_legend(override.aes = list(size = 5)))
 }
 
-# Compute the probability of all pairwise phenotypic transitions given a number of mutation steps.
-phenotypic_transitions <- function(from=REs[[1]],to=REs[[1]],from_nodes=NULL,tr_mat,bg,n_steps,specific=F,normalize=T,complex=FALSE,graph){
-  # from, to = vectors containing the names of the DNA phenotypes to compute the trajectory (default: all REs)
-  # from_nodes = alternative vector to 'from' which, instead of DNA phenotypes, includes the vector of starting genotypes.
-  # tr_mat = a probability transition matrix
-  # Bg = a string indicating the DBD background ("AncSR1" or "AncSR2")
-  # n_steps = number of (mutational) steps to run the Markov chain
-  # specific = logical argument to indicate whether to compute PDFV using specific genotypes (TRUE) or including promiscuous (FALSE) (default: FALSE).
-  # normalize = logical arg. to specify whether to re-normalize the probabilities (default: TRUE)
-  # complex = whether to use protein-DNA genotypes to compute transitions
+# Function to plot the PDFV as a barplot.
+bars_PDFV <- function(data,fill_by_RE = FALSE, fill_cols = "#00AFBB",col="black",title = NULL,legend=T,arrange_by=NULL,hex_id=NULL){
+  # data: a single data frame or a list of data frames to plot
   
-  # check inconsistent/valid arguments
-  if(!(bg %in% c("AncSR1","AncSR2")) || is.null(bg)){
-    stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
-  }
-  if(!is.null(from_nodes) && !is.null(from)){
-    stop("Provide only one set of starting parameters; either a vector of phenotypes, or a vector of genotypes.")
-  }
-  if(is.null(from) && is.null(to)){
-    stop("Empty 'from' and 'to' arguments. Provide the vector of phenotypes to compute the transition probabilities.")
-  }
-  if(is.null(tr_mat)){
-    stop("Provide a probability transition matrix.")
-  }
-  if(is.null(n_steps) || n_steps==0){
-    stop("Provide a correct number of steps to run the markov chain (n_steps > 0)")
-  }
-  if(is.null(graph)){
-    stop("Need to provide a genotype network")
-  }
+  if(is.null(title)) title <- ""
   
-  if(!is.null(from_nodes) & complex==FALSE){
-    # dimensions of matrix and names of columns/rows
-    # extract starting phenotypes from starting nodes
-    RE_from <- unique(phenotypes_tbl %>% filter(specific == "YES" & bg == bg) %>%
-                        filter(AA_var %in% from_nodes) %>% pull(specificity))
-    n_rows <- length(RE_from)
-    
-    n_cols <- length(to)
-    RE_to <- REs[[1]][REs[[1]] %in% to]
+  if(inherits(data,"list")){
+    data <- do.call(rbind, data)
   }
-  else if(!is.null(from_nodes) & complex==TRUE){
-    # dimensions of matrix and names of columns/rows
-    # extract starting phenotypes from starting nodes
-    RE_from <- unique(phenotypes_tbl %>% filter(bg == bg) %>%
-                    filter(complex %in% from_nodes) %>% pull(specificity))
-    n_rows <- length(RE_from)
-    n_cols <- length(to)
-    RE_to <- REs[[1]][REs[[1]] %in% to]
-
-  }
-  else{
-    # dimensions of matrix and names of columns/rows
-    n_rows <- length(from)
-    RE_from <- REs[[1]][REs[[1]] %in% from]
-    
-    n_cols <- length(to)
-    RE_to <- REs[[1]][REs[[1]] %in% to]
-  }
-  
-  # order rows and columns
-  RE_from <- RE_from[order(match(RE_from,REs[[1]]))]
-  RE_to <- RE_to[order(match(RE_to,REs[[1]]))]
-
-  # create phenotypic transition matrix between all pairs of phenotypes
-  pheno_transition_mat <- matrix(NA,ncol = n_cols, nrow = n_rows)
-  rownames(pheno_transition_mat) <- RE_from
-  colnames(pheno_transition_mat) <- RE_to
-  states <- rownames(tr_mat) # states in the transition matrix
-  
-  for(i in RE_from){
-    if(complex){
-      # extract amino acid variants from the ith neutral network 
-      phenotype_vars <- phenotypes_tbl %>% filter(complex %in% states) %>%
-          filter(bg == bg & specificity == i) %>% pull(complex)
-      phenotype_vars <- phenotype_vars[phenotype_vars %in% extract_main_ntwrk(graph,tr_mat=NULL,nodes = T)]
+  if(fill_by_RE){
+    if(!is.null(arrange_by)){
+      # create arranged levels based on selected model label
+      ord_levs <- as.character(data %>% filter(model == arrange_by) %>% arrange(desc(Norm_F_prob)) %>% pull(RE))
+      
+      p <- data %>% mutate(RE = factor(RE,levels = ord_levs),
+                           model = factor(model,levels = unique(sort(.$model)))) %>% 
+        ggplot(aes(x=RE,y=Norm_F_prob,fill=RE)) + 
+        geom_bar(stat="identity",position="dodge",color=col) +
+        scale_fill_manual(values = hex_RE_colors(hex_id))
     }
     else{
-      # extract amino acid variants from the ith neutral network 
-      phenotype_vars <- phenotypes_tbl %>% filter(AA_var %in% states) %>%
-          filter(bg == bg & specificity == i) %>% pull(AA_var)
-      phenotype_vars <- phenotype_vars[phenotype_vars %in% extract_main_ntwrk(graph,tr_mat=NULL,nodes = T)]
+      p <- data %>% mutate(RE = factor(RE,levels = REs[[1]]),
+                           model = factor(model,levels = unique(sort(.$model)))) %>% 
+        ggplot(aes(x=RE,y=Norm_F_prob,fill=RE)) + 
+        geom_bar(stat="identity",position="dodge",color=col) +
+        scale_fill_manual(values = hex_RE_colors(hex_id))
     }
-    
-    # if specific genotypes are not part of the main network, or no specific genotypes, continue:
-    if(identical(phenotype_vars, character(0))) next
-    
-    # run markov chain
-    mc_tmp <- simulate_markov_chain(phenotype_vars,tr_mat,n_steps = n_steps)
-    pdfv_tmp <- get_PDFV_v2(mc_tmp,Bg = bg ,specific = specific,type="simulated mc",complex=complex) %>% filter(RE %in% RE_to)
-    
-    # re-normalize probabilities?
-    if(normalize){
-      pdfv_tmp <- pdfv_tmp %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
-    }
-    # if excluding promiscuous, recalculate the probabilities of each transition
-    if(specific && normalize){
-      pdfv_tmp <- pdfv_tmp %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
-    }
-    
-    # order REs
-    x <- pdfv_tmp$Norm_F_prob; names(x) <- pdfv_tmp$RE
-    x <- x[order(match(names(x),REs[[1]]))]
-    pheno_transition_mat[which(rownames(pheno_transition_mat)== i),] <- x
   }
-  return(pheno_transition_mat)
+  else{
+    if(!is.null(arrange_by)){
+      # create arranged levels based on selected model label
+      ord_levs <- as.character(data %>% filter(model == arrange_by) %>% arrange(desc(Norm_F_prob)) %>% pull(RE))
+      
+      p <- data %>% mutate(RE = factor(RE,levels = ord_levs),
+                           model = factor(model,levels = unique(sort(.$model)))) %>% 
+        ggplot(aes(x=RE,y=Norm_F_prob,fill=model)) + 
+        geom_bar(stat="identity",position="dodge",color=col) +
+        scale_fill_manual(values = fill_cols)
+    }
+    else{
+      p <- data %>% mutate(RE = factor(RE,levels = REs[[1]]),
+                           model = factor(model,levels = unique(sort(.$model)))) %>% 
+        ggplot(aes(x=RE,y=Norm_F_prob,fill=model)) + 
+        geom_bar(stat="identity",position="dodge",color=col) +
+        scale_fill_manual(values = fill_cols)
+    }
+  }
+  
+  p <- p + theme_classic() + ggtitle(title) +
+    labs(x="DNA element",y="Probability") +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1,size = 10),
+          axis.text.y = element_text(size = 10),
+          legend.position = "none") + 
+    facet_grid(rows = vars(model))
+  
+  if(legend == FALSE) p <- p + theme(legend.position = "none")
+  else if(legend == "bottom") p <- p + theme(legend.position = "bottom") + guides(color = guide_legend(override.aes = list(size = 5)))
+  
+  return(p)
 }
 
 # Compute the proximity between two neutral networks
-pairwise_neutral_network_proximity <- function(n_ntwrk1,n_ntwrk2,Bg,graph,type=1,pheno_df=phenotypes_tbl,complex=FALSE){
+pairwise_neutral_network_proximity <- function(n_ntwrk1,n_ntwrk2,Bg,graph,type=1,pheno_df=phenotypes_tbl,complex=FALSE,from_specific=T,to_specific=T){
   # n_ntwrk1,n_ntwrk2 = strings specifying the names of RE functions
   # Bg = string specifying the DBD background (= 'AncSR1' or 'AncSR2')
-  # a genotype network (igraph object)
+  # graph = a genotype network (igraph object)
   # type = proximity calculation:
-    # 1 - fraction overlap due to promiscuous genotypes; 2 - number of direct links betwen neutral networks
+    # 1 - fraction overlap due to promiscuous genotypes; 2 - number of direct links betwen neutral networks; 3 - average shortest path length between neutral networks
   # pheno_df = df with phenotypic annotations per genotype
   # complex = whether to use protein-DNA complex genoytpes (default: FALSE)
+  # from_specific, to_specific = whether to select specific genotypes 
   
   # Check inconsistent parameters
-  if(!(type %in% c(1,2))){
-    stop("Provide a valid value for type: 1 or 2")
+  if(!(type %in% c(1,2,3))){
+    stop("Provide a valid value for type: 1, 2 or 3")
   }
   if(!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg)){
     stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
   }
   if(complex && type == 1){
-    stop("protein-DNA complex networks don't have promiscuous genotypes")
+    stop("protein-DNA complex networks don't have explicit promiscuous genotypes")
   }
 
   prox <- NA
@@ -1232,12 +1211,18 @@ pairwise_neutral_network_proximity <- function(n_ntwrk1,n_ntwrk2,Bg,graph,type=1
 
     # Extract genotypes from each neutral network: specific binders
     if(complex){
-      vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(complex)
-      vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(complex)
+      if(from_specific) vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(complex) # specific
+      else vars_ntwrk1 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk1 & bg == Bg) %>% pull(complex) # binding
+
+      if(to_specific) vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(complex) # specific
+      else vars_ntwrk2 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk2 & bg == Bg) %>% pull(complex) # binding
     }
     else{
-      vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(AA_var)
-      vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(AA_var)
+      if(from_specific) vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(AA_var) # specific
+      else vars_ntwrk1 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk1 & bg == Bg) %>% pull(AA_var) # binding
+      
+      if(to_specific) vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(AA_var) # specific
+      else vars_ntwrk2 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk2 & bg == Bg) %>% pull(AA_var) # binding
     }
 
     # Filter variants to retain those present in main component genotype network
@@ -1248,27 +1233,94 @@ pairwise_neutral_network_proximity <- function(n_ntwrk1,n_ntwrk2,Bg,graph,type=1
     # Check that neutral networks are encoded by at least one genotype 
     if(!identical(vars_ntwrk1, character(0)) && !identical(vars_ntwrk2, character(0))){
       # Compute all direct links
-      tmp1 <- get.data.frame(graph) %>% filter(from %in% vars_ntwrk1 & to %in% vars_ntwrk2)
-      tmp2 <- get.data.frame(graph) %>% filter(from %in% vars_ntwrk2 & to %in% vars_ntwrk1)
+      tmp1 <- as_data_frame(graph) %>% filter(from %in% vars_ntwrk1 & to %in% vars_ntwrk2)
+      tmp2 <- as_data_frame(graph) %>% filter(from %in% vars_ntwrk2 & to %in% vars_ntwrk1)
 
       prox <- dim(tmp1)[1] + dim(tmp2)[1]
+    }
+  }
+  else if(type == 3){
+    # Compute average shortest path length between neutral networks
+
+    # Extract genotypes from each neutral network: specific binders
+    if(complex){
+      if(from_specific) vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(complex) # specific
+      else vars_ntwrk1 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk1 & bg == Bg) %>% pull(complex) # binding
+      
+      if(to_specific) vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(complex) # specific
+      else vars_ntwrk2 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk2 & bg == Bg) %>% pull(complex) # binding
+    }
+    else{
+      if(from_specific) vars_ntwrk1 <- pheno_df %>% filter(specificity == n_ntwrk1 & bg == Bg) %>% pull(AA_var) # specific
+      else vars_ntwrk1 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk1 & bg == Bg) %>% pull(AA_var) # binding
+      
+      if(to_specific) vars_ntwrk2 <- pheno_df %>% filter(specificity == n_ntwrk2 & bg == Bg) %>% pull(AA_var) # specific
+      else vars_ntwrk2 <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == n_ntwrk2 & bg == Bg) %>% pull(AA_var) # binding
+    }
+
+    # Filter variants to retain those present in main component genotype network
+    net_vars <- extract_main_ntwrk(graph=graph,tr_mat=NULL,nodes=TRUE)
+    vars_ntwrk1 <- vars_ntwrk1[vars_ntwrk1 %in% net_vars]
+    vars_ntwrk2 <- vars_ntwrk2[vars_ntwrk2 %in% net_vars]
+
+    # Check that neutral networks are encoded by at least one genotype 
+    if(!identical(vars_ntwrk1, character(0)) && !identical(vars_ntwrk2, character(0))){
+      # Compute shortest path lengths between every pair og genotypes in the network
+      d_table <- distances(graph)
+      d_table <- d_table[rownames(d_table) %in% vars_ntwrk1,colnames(d_table) %in% vars_ntwrk2]
+      prox <- mean(d_table)
     }
   }
   return(prox) 
 }
 
+# Compute the fraction of neighbor nodes with same or different phenotype for a focal node
+fraction_of_neighbors_per_genotype <- function(from_g,graph,Bg,pheno_tbl=phenotypes_tbl_prot,complex=FALSE){
+  # from_g = focal genotype
+  # Bg = string specifying the DBD background (= 'AncSR1' or 'AncSR2')
+  # graph = a genotype network (igraph object)
+  # pheno_tbl = df with phenotypic annotations per genotype
+  # complex = whether to use protein-DNA complex genoytpes (default: FALSE)
+  
+  # Check inconsistent parameters
+  if(!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg)){
+    stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
+  }
+  
+  match_phenotypes <- function(g_i,g_j,complex){
+    if(complex){
+      p_i <- pheno_tbl %>% filter(complex == g_i & bg == Bg) %>% pull(specificity)
+      p_j <- pheno_tbl %>% filter(complex == g_j & bg == Bg) %>% pull(specificity)
+    }
+    else{
+      p_i <- pheno_tbl %>% filter(AA_var == g_i & bg == Bg) %>% pull(specificity)
+      p_j <- pheno_tbl %>% filter(AA_var == g_j & bg == Bg) %>% pull(specificity)
+    }
+    return(p_i == p_j)
+  }
+  
+  # extract neighbors of focal genotype and their phenotypes
+  neighbors_df <- get.data.frame(as.directed(graph)) %>% filter(from == from_g) %>% mutate(pheno_match = map2_lgl(.x=from,.y=to,.f=match_phenotypes,complex=complex)) %>% 
+    group_by(pheno_match) %>% reframe(count = n()) %>% ungroup() %>% mutate(total = sum(count)) %>%
+    group_by(pheno_match) %>% mutate(prop = count / total,g=from_g)
+  
+  return(neighbors_df)
+}
+
 # Simulate genotype networks
-simulate_GPmap <- function(graph,type=1,which="net",cores=1,seed = NULL,n_sample = NULL){
+simulate_GPmap <- function(graph,type=1,which="net",cores=1,seed = NULL,n_sample = NULL,genotypes=NULL){
   # graph: reference genotype network (igraph object) - for 'type' options 1,2 and 3
   # type: an integer indicating the type of simulation to produce
     # 1 - network built from hamming distance (not accounting for genetic code)
     # 2 - same number of nodes and edges but randomized connections between nodes
     # 3 - maximally connected network (same number of nodes)
     # 4 - network from random sample of genotypes 
+    # 5 - network from a user-specified sample of genotypes
   # which: specify whether to return the genotype network ("net"), the adjacency matrix ("mat") or both ("both").(default: "net")
   # cores: specify the number of cores to use in to use for parallel computing (default: 1)
   # seed: integer (seed) to make random networks reproducible (default: NULL)
-  # n_sample: Number of genotypes to randomly sample
+  # n_sample: Number of genotypes to randomly sample (default: NULL)
+  # genotypes: User-specified sample of genotypes (default: NULL)
   
   # check inconsistent parameters
   if(!(which %in% c("net","mat","both"))){
@@ -1277,16 +1329,22 @@ simulate_GPmap <- function(graph,type=1,which="net",cores=1,seed = NULL,n_sample
   if(type %in% c(1,2,3) && is.null(graph)){
     stop("Must provide a reference genotype network to do the simulation")
   }
-  if(type == 4 && is.null(n_sample)){
+  if(type %in% c(4) && is.null(n_sample)){
     stop("Must provide a value > 0 for 'n_sample' argument")
   }
   if(type == 4 && !is.null(graph)){
     message("Ignoring genotype network...")
   }
+  if(type == 5 && is.null(genotypes)){
+    stop("Must provide a vector of genotypes")
+  }
 
   # keep the number of nodes and edges
-  n_nodes <- length(V(graph))
-  n_edges <- length(E(graph))
+  if(type %in% c(1,2,3)){
+    n_nodes <- length(V(graph))
+    n_edges <- length(E(graph))
+  }
+  
   res <- NULL
   
   # simulate genotype network maintaining node identity from original network
@@ -1311,9 +1369,16 @@ simulate_GPmap <- function(graph,type=1,which="net",cores=1,seed = NULL,n_sample
     adj_mat <- as_adjacency_matrix(tmp_net,type = "both") # adjacency matrix
   }
   else if(type == 4){
-    # make network from random sample of genotypes
+    # make network from random sample of all possible genotypes
+    set.seed(seed)
     possible_AAvar <- do.call(paste,expand.grid(AA_STANDARD,AA_STANDARD,AA_STANDARD,AA_STANDARD)) %>% gsub(" ","",.)
     g <- sample(possible_AAvar,n_sample,replace=FALSE)
+    adj_mat <- build_mutation_matrix(nodes = g,type = 3,cores = cores)
+    tmp_net <- build_genotype_network(nodes = g,build_mat = FALSE,adj_mat = adj_mat,type = 3,cores = cores)
+  }
+  else if(type == 5){
+    # network from a user-specified sample of genotypes
+    g <- genotypes
     adj_mat <- build_mutation_matrix(nodes = g,type = 3,cores = cores)
     tmp_net <- build_genotype_network(nodes = g,build_mat = FALSE,adj_mat = adj_mat,type = 3,cores = cores)
   }
@@ -1327,7 +1392,7 @@ simulate_GPmap <- function(graph,type=1,which="net",cores=1,seed = NULL,n_sample
 # Function to check whether phenotype is in encoded by at least one variant
 is.encoded <- function(RE,graph,pheno_df,Bg,complex=FALSE){
   # extract binders
-  if(complex) vars_RE<- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(complex)
+  if(complex) vars_RE<- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == RE & bg == Bg) %>% pull(complex)
   else vars_RE <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == RE & bg == Bg) %>% pull(AA_var)
 
   return(!identical(vars_RE, character(0)))
@@ -1339,7 +1404,14 @@ is.in.ntwrk <- function(RE,graph,pheno_df,Bg,specific=FALSE,complex=FALSE){
   net_vars <- extract_main_ntwrk(graph=graph,tr_mat=NULL,nodes=TRUE)
 
   # extract binders
-  if(complex) vars_RE<- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(complex)
+  if(complex){
+    if(specific){
+      vars_RE <- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(complex)
+    }
+    else{
+      vars_RE <- pheno_df %>% unnest(bound_REs) %>% filter(bound_REs == RE & bg == Bg) %>% pull(complex)
+    }
+  }
   else{
     if(specific){
       vars_RE <- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(AA_var)
@@ -1354,13 +1426,293 @@ is.in.ntwrk <- function(RE,graph,pheno_df,Bg,specific=FALSE,complex=FALSE){
 }
 
 # Function to check whether phenotype is in bound specifically (for protein netwrok)
-is.bound.specific <- function(RE,graph,pheno_df,Bg){
+is.bound.specific <- function(RE,graph,pheno_df,Bg,complex=FALSE){
   # extract specific binders
-  vars_RE <- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(AA_var)
+  if(complex) vars_RE <- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(complex)
+  else vars_RE <- pheno_df %>% filter(specificity == RE & bg == Bg) %>% pull(AA_var)
 
   return(!identical(vars_RE, character(0)))
 }
 
+# Function to remove promiscuous from PDFV table and renormalize probabilities
+remove_promiscuous <- function(pdfv_tbl,norm=F){
+  if(norm) pdfv_tbl %>% filter(RE != "Promiscuous") %>% mutate(Norm_F_prob = Norm_F_prob /sum(Norm_F_prob))
+  else pdfv_tbl %>% filter(RE != "Promiscuous")
+}
+
+# Function to get number of genotypes and phenotypes accessed during evolutionary exploration
+network_exploration <- function(n_steps,tr_mat,Bg,from=REF_GENOTYPE,pheno_tbl,complex=F,get_pheno_id=F){
+  # n_steps = number of iterations to run mc chain
+  # tr_mat = transition matrix
+  # Bg = ancestral background ("AncSR1" or "AncSR2")
+  # from = character string or vector of characters indicating the initial states of the mc chain (default: REF_GENOTYPE)
+  # pheno_tbl = phenotypic table with annotations per genotype
+  # complex = whether to compute analysis for protein-DNA complexes
+  # get_pheno_id = whether to return the IDs of bound phenotypes (T) or just counts (F). (default: F)
+
+  mc_tmp <- simulate_markov_chain(states_0 = from,tr_mat = tr_mat,n_steps = n_steps)
+  
+  # Get number of accessible genotypes
+  n_genotypes <- length(mc_tmp[mc_tmp > 0])
+  
+  # Get number of accessible phenotypes
+  pdfv_tmp_all <- get_PDFV_v2(mc_tmp,type = "simulated mc",Bg = Bg,model = n_steps,pheno_tbl = pheno_tbl,complex = complex,specific = F)
+  pdfv_tmp_spec <- get_PDFV_v2(mc_tmp,type = "simulated mc",Bg = Bg,model = n_steps,pheno_tbl = pheno_tbl,complex = complex,specific = T)
+  
+  n_bound <- pdfv_tmp_all %>% filter(Norm_F_prob > 0) %>% summarize(c = n()) %>% pull(c)
+  n_bound_spec <- remove_promiscuous(pdfv_tmp_spec) %>% filter(Norm_F_prob > 0) %>% summarize(c = n()) %>% pull(c)
+  
+  df <- data.frame(Bg=Bg,mut_step = n_steps, n_genotypes = n_genotypes, n_bound = n_bound, n_bound_spec = n_bound_spec)
+  
+  # Get identity of bound phenotypes
+  if(get_pheno_id){
+    id_bound <- pdfv_tmp_all %>% filter(Norm_F_prob > 0) %>% pull(RE)
+    id_bound_spec <- pdfv_tmp_spec %>% filter(RE != "Promiscuous") %>% filter(Norm_F_prob > 0) %>% pull(RE)
+  
+    df <- tibble(Bg=Bg,mut_step = n_steps, n_genotypes = n_genotypes, n_bound = n_bound, n_bound_spec = n_bound_spec, 
+                  id_bound = list(id_bound), id_bound_spec = list(id_bound_spec))
+  }
+  return(df)
+}
 
 
+# Fraction of neighbor nodes that result in amino acid change (useful only for prot-DNA networks)
+frac_aa_subs_per_g <- function(graph,nodes_in_ntwrk){
+  # graph = a genotype network (igraph object)
+  # nodes_in_ntwrk = nodes in the main component of the network
+
+  # neighbors per focal genotype
+  n <-  map(.x=nodes_in_ntwrk,.f=neighbors,graph=graph)
+  n <- lapply(n,names)
+  
+  # protein genotypes of neighbor complexes and focal genotypes
+  p_g <- map(.x=nodes_in_ntwrk,.f=str_sub,start=1,end=4)
+  p_n <- lapply(n,str_sub,start=1,end=4)
+  
+  # fraction of unique protein neighbors
+  fr <- map2_dbl(.x=p_g,.y=p_n,.f=function(x,y) length(y[x != y])/length(y))
+
+  names(fr) <- nodes_in_ntwrk
+  return(fr)
+}
+
+# Compute the average number of AA substitutions per step (matrix multiplication) for protein-DNA simulations:
+# For every substitution step that includes protein OR DNA substitutions, compute the expected number of subtitutions
+# that are due to AA subs only 
+compute_aa_subs_from_protDNA_steps <- function(states_0,n_steps,tr_mat,fr_aa_subs){
+  # states_0 = vector containing the states from which markov chain starts
+  # n_steps = number of (mutational) steps to run the Markov chain
+  # tr_mat = a probability transition matrix
+  # fr_aa_neighbors = fraction of subs that result in amino acid changes (per genotype)
+
+  # Check for inconsistent/valid paramenters
+  # Check whether 'tr_mat' is an ergodic transition probability matrix
+  if(!((is.matrix(tr_mat) || inherits(tr_mat,"dgCMatrix") || inherits(tr_mat,"dsCMatrix")) && 
+    nrow(tr_mat)==ncol(tr_mat) && all(tr_mat>=0 & tr_mat<=1) && sum(apply(tr_mat,1,sum))==ncol(tr_mat))){
+    stop("Provide a square probability transition matrix")
+  }
+  if(is.null(n_steps) || n_steps==0){
+    stop("Provide a correct number of steps to run the markov chain (n_steps > 0)")
+  }
+
+  # Compute the average number of amino acid substitutions per prot-DNA step in the markov chain
+  state_probs <- simulate_markov_chain(states_0=states_0,n_steps=n_steps,tr_mat=tr_mat)
+  avg_aa_subs <- sum(state_probs*fr_aa_subs)
+  return(avg_aa_subs)
+}
+
+
+# Function to get the amount of bias (and direction) from a GP map:
+# Either due to production, equilibrium freqs., or around the local neighborhood of a variant (or set of variants)
+get_bias <- function(from,Bg,tr_mat=NULL,n_steps=NULL,complex=F,pheno_tbl=NULL,main_direction=FALSE,input_freqs=FALSE,specific=T){
+  # from = Either "production", "equilibrium", or a specific genotype
+  # bg = a string indicating the DBD background ("AncSR1" or "AncSR2")
+  # tr_mat = a transition matrix
+  # pheno_tbl = table with annotated phenotypes per variant
+  # complex = a logical argument to indicate whether PDFV is to be computed for prot-DNA complexes
+  # main_direction = whether to get the main direction of the bias
+  # input_freqs = whether to simulate a mc or use input frequency distribution
+  
+  # Check for inconsistent parameters
+  if(input_freqs == F && (!(Bg %in% c("AncSR1","AncSR2")) || is.null(Bg))){
+    stop("Specify DBD background: 'AncSR1' or 'AncSR2'")
+  }
+  if(input_freqs == T && !is.null(n_steps)){
+    message("Ignoring number of steps...")
+  }
+  if(input_freqs && (is.null(from))){
+    stop("Provide a data frame or vector with the frequency distribution")
+  }
+  if(input_freqs == F && is.null(from)){
+    stop("Provide a starting genotype or set of genotypes to compute the bias")
+  }
+  
+  if(input_freqs){
+    if(is.null(dim(from))){
+      # vector of frequencies
+      f <- from[from > 0]
+      dir <- from[from == max(from)]
+    }
+    else {
+      f <- from %>% remove_promiscuous(norm = T) %>% filter(Norm_F_prob > 0) %>% pull(Norm_F_prob)
+      dir <- from %>% remove_promiscuous(norm = T) %>% filter(Norm_F_prob==max(Norm_F_prob)) %>% pull(RE)
+    }
+  }
+  else{
+    x <- simulate_markov_chain(states_0 = from,tr_mat = tr_mat,n_steps = n_steps)
+    f <- get_PDFV_v2(x,type = "simulated mc",Bg = Bg,pheno_tbl = pheno_tbl,specific = specific,model="NA",complex = complex)
+    dir <- f %>% remove_promiscuous(norm = T) %>% filter(Norm_F_prob==max(Norm_F_prob)) %>% pull(RE)
+    f <- f %>% remove_promiscuous(norm = T) %>% filter(Norm_F_prob > 0) %>% pull(Norm_F_prob)
+  }
+  
+  # Compute bias
+  B <- 1-(-sum(f * log(f,base=16)))
+  if(main_direction){
+    r <- list(B,dir)
+    return(r)
+  }
+  else return(B)
+}
+
+
+# Function to compute the Kullback-Leibler divergence metric (relative entropy). Measures the "distance" between
+# a distribution and a reference distribution. It is asymmetric (depends on which distribution is the reference, Qx)
+KL_div <- function(Px,Qx){
+  if(length(Px) != 16){
+    extra <- 16 - length(Px)
+    Px <- c(Px,rep(0,extra))
+  }
+
+  if(0 %in% Px | 0 %in% Qx){
+    Px_tmp <- Px + .Machine$double.xmin
+    Px <- Px_tmp / sum(Px_tmp)
+    Qx_tmp <- Qx + .Machine$double.xmin
+    Qx <- Qx_tmp / sum(Qx_tmp)
+  }
+  sum(Px * log(Px/Qx)) / log(16) # normalized so that KL ranges from 0 to 1
+}
+
+# Function to compute the Population Stability Index (PSI), a symmetric derivation of the KL divergence
+# metric. Captures the total difference in information between two distributions
+PSI_div <- function(Px,Qx){
+  # PSI(Px,Qx) = KL(P||Q) + KL(Q||P)
+  if(0 %in% Px | 0 %in% Qx){
+    Px_tmp <- Px + .Machine$double.xmin
+    Px <- Px_tmp / sum(Px_tmp)
+    Qx_tmp <- Qx + .Machine$double.xmin
+    Qx <- Qx_tmp / sum(Qx_tmp)
+  }
+  sum((Px-Qx) * log(Px/Qx))
+}
+
+# function to compute Shannon's entropy per site for a sequence alignment
+shannon_entropy <- function(AA_vars,n_sites=4,which="bits"){
+  # vector of amino acid variants
+  # n_sites = number of sites in the alignment
+  # which = entropy (H per site) - bits (height of state X at position i) - freq (prop of every AA state per site)
+  
+  vars_df <- as.list(AA_vars)
+  vars_df <- lapply(vars_df,strsplit,split = '')
+  vars_df <- matrix(unlist(vars_df,recursive = T), ncol = n_sites, byrow = TRUE)
+  
+  # Compute Entropy (H) per site (from: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC332411/pdf/nar00204-0153.pdf)
+  entropy_per_site <- c()
+  bits_per_state_per_site <-  matrix(NA,ncol = length(AA_STANDARD),nrow = n_sites)
+  freq_states_per_site <- matrix(NA,ncol = length(AA_STANDARD),nrow = n_sites)
+  colnames(freq_states_per_site) <- colnames(bits_per_state_per_site) <- AA_STANDARD
+  rownames(freq_states_per_site) <- rownames(bits_per_state_per_site) <- 1:n_sites
+  
+  for(i in 1:n_sites){
+    # Entropy
+    freqs_s_i <- table(vars_df[,i])
+    prop_s_i <- freqs_s_i / dim(vars_df)[1]
+    H_i <- -sum(prop_s_i * log(prop_s_i,base=20))
+    entropy_per_site <- c(entropy_per_site,H_i)
+    
+    # frequencies for all 20 states per site
+    freqs <- table(factor(vars_df[,i],levels = AA_STANDARD)) / dim(vars_df)[1]
+    freq_states_per_site[i,] <- freqs
+    
+    # Bits per state per site
+    total_info_s_i <- log2(20) - (-sum(prop_s_i * log2(prop_s_i)))
+    bits_per_state_site_i <- freqs * total_info_s_i
+    bits_per_state_per_site[i,] <- bits_per_state_site_i
+  }
+  if(which == "bits"){
+    return(bits_per_state_per_site)
+  }
+  else if(which == "freq"){
+    return(freq_states_per_site)
+  }
+  else if(which == "entropy"){
+    return(entropy_per_site)
+  }
+}
+
+# Returns a matrix (or plot) with the marginal frequencies for each possible state*site combination, 
+# and the observed co-frequency (analagous to a variance-covariance matrix)
+freq_cofreq_mat <- function(df,plot=T){
+  # df = data frame with production spectra
+  
+  df.heatmap <- remove_promiscuous(df,norm=T) %>% 
+    mutate(RE = case_when(RE == "SRE (AA)" ~ "AA",RE == "ERE (GT)" ~ "GT",T ~ RE),
+           RE_1 = str_sub(RE,1,1),
+           RE_2 = str_sub(RE,2,2)) %>%
+    mutate_at(vars(Norm_F_prob),list(as.numeric)) 
+  
+  
+  if(plot==T){
+    h_total <- df.heatmap %>%
+      group_by(RE_2) %>%
+      reframe(Norm_F_prob = sum(Norm_F_prob)) %>%
+      mutate(RE_1 = "Total")
+    
+    v_total <- df.heatmap %>%
+      group_by(RE_1) %>%
+      reframe(Norm_F_prob = sum(Norm_F_prob)) %>%
+      mutate(RE_2 = "Total")
+    
+    midpoint_marginal <- mean(c(v_total$Norm_F_prob,h_total$Norm_F_prob))
+    midpoint_covar <- mean(df.heatmap$Norm_F_prob)
+    
+    ggplot(as.data.frame(df.heatmap), aes(x = RE_1, y = RE_2)) +
+      geom_tile(aes(fill = Norm_F_prob)) +
+      geom_text(size = 3, aes(label = round(Norm_F_prob,3))) + #displays cell values
+      scale_fill_gradient2(high = "purple", #colors
+                           mid = "lightblue",
+                           low = "white",
+                           midpoint = midpoint_covar) +
+      geom_point(data = h_total, 
+                 aes(color = Norm_F_prob), 
+                 size = 10, 
+                 shape = 19) +
+      geom_point(data = v_total, 
+                 aes(color = Norm_F_prob), 
+                 size = 10, 
+                 shape = 19) +
+      scale_color_gradient2(high = "red", #colors
+                            mid = "orange",
+                            low = "white",
+                            midpoint = midpoint_marginal) +
+      geom_text(data = h_total, size = 3, aes(label = round(Norm_F_prob,3))) +
+      geom_text(data = v_total, size = 3, aes(label = round(Norm_F_prob,3))) +
+      theme(panel.grid.major.x=element_blank(), #no gridlines
+            panel.grid.minor.x=element_blank(), 
+            panel.grid.major.y=element_blank(), 
+            panel.grid.minor.y=element_blank(),
+            panel.background=element_rect(fill="white"),
+            axis.text.x = element_text(angle=0, hjust = 0.5,vjust=0.5, size = 10,face = NULL),
+            axis.text.y = element_text(size = 10,face = NULL),
+            legend.title=element_text(face="bold", size=8))  + 
+      labs(x="site 1",y="site 2",fill="Co-frequency",color="Marginal freq")
+  }
+  else{
+    df.heatmap <- df.heatmap %>% acast(RE_1 ~ RE_2,value.var="Norm_F_prob")
+    total_s1 <- apply(df.heatmap, 1, sum)
+    total_s2 <- apply(df.heatmap, 2, sum); total_s2 <- c(total_s2,NA)
+    df.heatmap <- cbind(df.heatmap,total_s1)
+    df.heatmap <- rbind(df.heatmap,total_s2)
+    df.heatmap
+  }
+}
 
