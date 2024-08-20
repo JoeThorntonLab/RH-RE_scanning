@@ -331,7 +331,7 @@ build_genotype_network <- function(nodes,build_mat = TRUE,adj_mat=NULL,type=1,no
       # Build adjacency matrix and network
       adj_mat <- build_mutation_matrix(nodes,type=type,cores=cores)
       if(type == 1 || type == 5) net <- graph_from_adjacency_matrix(adj_mat,mode = "undirected")
-      else if(type != 1 && type != 5) net <- graph_from_adjacency_matrix(adj_mat,mode="directed",weighted=TRUE)
+      else if(type != 1 && type != 5) net <- graph_from_adjacency_matrix(adj_mat,weighted="1") %>% as.undirected()
     }
   }  
   return(net)
