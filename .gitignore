@@ -15,3 +15,4 @@ results/genotype_phenotype_distributions/*
 results/phenotype_frequency_distributions_final/*
 figures/*
 notebooks/evolutionary_modeling/*
+results/evolutionary_simulations/*
