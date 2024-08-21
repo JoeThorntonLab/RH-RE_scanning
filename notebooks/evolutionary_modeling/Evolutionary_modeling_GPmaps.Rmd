@@ -311,11 +311,11 @@ summary_sr2 <- foreach(i = 1:length(REs[[1]]), .combine = 'rbind') %do% {
 func_vars_sr1 <- phenotypes_tbl_prot %>% filter(bg == "AncSR1") %>% pull(AA_var)
 func_vars_sr2 <- phenotypes_tbl_prot %>% filter(bg == "AncSR2") %>% pull(AA_var)
 
-# Nodes in networks
+# Nodes in main network component
 nodes_in_ntwrk_sr1 <- extract_main_ntwrk(net_sr1,nodes=T,tr_mat = NULL)
 nodes_in_ntwrk_sr2 <- extract_main_ntwrk(net_sr2,nodes=T,tr_mat = NULL)
 
-# Nodes in networks that are specific
+# Nodes in main network component that are specific
 nodes_in_ntwrk_sr1_spec <- data.frame(AA_var=nodes_in_ntwrk_sr1,bg="AncSR1") %>% inner_join(.,phenotypes_tbl_prot,by=c("bg","AA_var")) %>% filter(specific=="YES") %>% pull(AA_var)
 nodes_in_ntwrk_sr1_spec <- nodes_in_ntwrk_sr1_spec[nodes_in_ntwrk_sr1_spec %in% nodes_in_ntwrk_sr1]
 nodes_in_ntwrk_sr2_spec <- data.frame(AA_var=nodes_in_ntwrk_sr2,bg="AncSR2") %>% inner_join(.,phenotypes_tbl_prot,by=c("bg","AA_var")) %>% filter(specific=="YES") %>% pull(AA_var)
@@ -516,7 +516,7 @@ knitr::kable(as.tibble(m_enrichment,rownames=NA) %>% rownames_to_column(var="Clu
 
 The table above shows the corrected p-values for the enrichment test. 5 out of 6 clusters are significantly enriched for a single specificity phenotype ($p<0.05$). Now let's visualize the frequencies of each phentoype within each cluster.
 
-```{r}
+```{r, fig.height=5}
 ####################
 # Phenotype distribution per cluster and bias
 ###################
@@ -626,7 +626,7 @@ local_bias_sr1 <- foreach(i = 1:length(nodes_in_ntwrk_sr1_spec), .combine = 'rbi
 
 stopCluster(cl)
 ```
-```{r, fig.height=4.5}
+```{r, fig.height=4.5,fig.width=4.5}
 # Number of accessible and *new* phenotypes per genotype
 accessible_phenotypes_singleStep_sr1 <- one_mut_nei_sr1 %>% filter(specificity != "Promiscuous") %>% 
   mutate(new_pheno = ifelse(focal_pheno == specificity,FALSE,TRUE)) %>%
@@ -639,7 +639,7 @@ accessible_phenotypes_singleStep_sr1 <- one_mut_nei_sr1 %>% filter(specificity !
 p1 <- accessible_phenotypes_singleStep_sr1 %>%
   ggplot(aes(x=n_new_pheno)) + 
   geom_bar(aes(y = after_stat(count))) +
-  labs(x="Number of new phenotypes accessible",y="Number of specific RH genotypes") +
+  labs(x="Number of new\nphenotypes accessible",y="Number of specific RH genotypes") +
   geom_text(aes(label = scales::percent(after_stat(count)/sum(after_stat(count))),y= after_stat(count)), stat= "count", vjust = -.5,size=3) +
   theme_classic() + 
   theme(axis.title = element_text(size=11),
@@ -799,7 +799,7 @@ for(i in 1:nrow(pval_matrix)){
   }
 }
 
-fdr_pvals <- p.adjust(pval_matrix,method = "fdr")
+fdr_pvals <- p.adjust(pval_matrix,method = "bonferroni")
 fdr_pval_matrix <- matrix(fdr_pvals,byrow = T,nrow = 6,ncol = 6,
                       dimnames = list(rownames(pairwise_dists_sr1),colnames(pairwise_dists_sr1)))
 
@@ -810,7 +810,9 @@ pheatmap(pairwise_dists_sr1,cluster_rows = F,cluster_cols = F,angle_col = 45, na
          breaks = seq(3.5,8,0.5),legend_breaks = seq(3.5,8,0.5),legend_labels = seq(3.5,8,0.5),main = "Average distances")
 
 # phenotype pairs that are significantly closer/farther than expected
-knitr::kable(inner_join(as.data.frame.table(fdr_pval_matrix), as.data.frame.table(pairwise_dists_sr1),by=c("Var1","Var2")) %>% filter(Freq.x < 0.05) %>% select(Var1,Var2,Freq.y) %>% dplyr::rename(Phenotype_A=Var1,Phenotype_B=Var2,avg_mut_distance=Freq.y))
+knitr::kable(inner_join(as.data.frame.table(fdr_pval_matrix), as.data.frame.table(pairwise_dists_sr1),by=c("Var1","Var2")) %>% filter(Freq.x < 0.05) %>%
+               mutate_at(vars(Var1,Var2),list(as.character)) %>% rowwise() %>% mutate(pair=paste(min(Var1,Var2),max(Var1,Var2),sep="_")) %>% ungroup() %>%
+               distinct(.,pair,.keep_all = TRUE) %>% select(Var1,Var2,Freq.y) %>% dplyr::rename(Phenotype_A=Var1,Phenotype_B=Var2,avg_mut_distance=Freq.y))
 
 ```
 
@@ -823,7 +825,7 @@ Since we have established that the AncSR1 GPmap is anisotrpic and heterogeneous,
 
 First, we will assess the timescales at which global and local bias affect evolutionary outcomes. The equilibrium outcome spectrum provides an approximation of the most likely evolutionary outcomes when there has been enough sequence evolution, such that the outcomes no longer depend on the specific starting genotype. By comparing the equilibrium spectrum to the global production spectrum, we can determine whether evolutionary outcomes are still biased at long timescales.
 
-```{r timescales_sr1_1, fig.width=7}
+```{r timescales_sr1_1, fig.width=8,fig.height=5}
 # Production spectrum and equilibrium outcome spectrum
 df_long_term_sr1 <- inner_join(remove_promiscuous(var.prop_spec_AncSR1_df,norm = T),remove_promiscuous(stationary_PDFV_spec_sr1,norm = T),by="RE")
 
@@ -984,13 +986,12 @@ mean_new_pheno_3s <- new_pheno_3s_df %>% with(mean(n_new_pheno))
 
 # plot distribution
 new_pheno_3s_df %>%
-  ggplot(aes(x=n_new_pheno)) + geom_histogram(binwidth = 1,col="black",fill="gray50") + 
+  ggplot(aes(x=n_new_pheno)) + geom_histogram(binwidth = 1,col="black",fill="gray65") + 
   geom_vline(xintercept = mean_new_pheno_3s,linetype="dashed") +
   theme_classic() +
   labs(x = "Number of new phenotypes per genotype", y= "Frequency") +
   theme(axis.title = element_text(size=13),
-        axis.text = element_text(size=9)) +
-  ggtitle("Phenotypic evolution after 3 substitutions (AncSR1)")
+        axis.text = element_text(size=9))
 
 print(paste("Mean number of new phenotypes per genotype = ",round(mean_new_pheno_3s,2)))
 
@@ -1042,7 +1043,7 @@ if(SPEC_BINDING){
 
 stopCluster(cl)
 ```
-```{r, fig.width=4.5}
+```{r, fig.width=5}
 # Run Markov chain for 8 amino acid substitutions averaged across all genotypes
 N_MUTATIONS <- 8 # ~ 2 subs per site
 if(SPEC_BINDING){
@@ -1195,7 +1196,7 @@ The likelihood of particular phenotypic transitions also vary across starting ph
 
 Heterogeneity and mutational connectivity also imply that as genotypes evolve in the RH network, the spectrum of outcomes will change. Thus, we can quantity the effect of heterogeneity in the map by assessing how much of the variation in the similariry of evolutionary outcomes is explained by cluster membership, and also assess the effect of mutational distance on the variation in similarity of phenotypic outcomes.
 
-```{r outcome_similarity_sr1, fig.width=5.5}
+```{r outcome_similarity_sr1, fig.width=7}
 ###################################
 # Compute similarity of phenotypic outcomes - Pairwise correlations of outcome spectra between genotypes
 ###################################
@@ -1351,7 +1352,7 @@ SPEC_BINDING <- TRUE
 # Run Markov chain for 25 substitutions and track the outcome spectra at every time point
 pdfv_mc_multistep_sr1 <- simulate_markov_chain_multistep(REF_GENOTYPE,P_drift_sr1_ntwrk,mc_iter,"AncSR1",specific = SPEC_BINDING)
 ```
-```{r}
+```{r, fig.height=5,fig.width=6.5}
 mc_iter <- 25 # number of substitutions to track
 SPEC_BINDING <- TRUE
 REMOVE_PROMISCUOUS <- TRUE
@@ -1422,7 +1423,7 @@ We will now turn to analyze the AncSR2 GP map. Following a similar structure as 
 
 First, we can see that the AncSR2 GP map has >20X more functional variants than the AncSR1 GP map. The amino acid profiles of these functional variants are very similar to those in AncSR1, but the profile is less stringent in AncSR2.
 
-```{r gpmap_sr2_structure_1, fig.width=3, fig.height=3.5}
+```{r gpmap_sr2_structure_1, fig.width=6, fig.height=3.5}
 # Number of functional variants per GP map
 knitr::kable(rbind(data.frame(Bg="AncSR1",total_fxnal_vars = length(phenotypes_tbl_prot %>% filter(bg == "AncSR1") %>% pull(AA_var)), fxnal_vars_in_net = length(extract_main_ntwrk(net_sr1,nodes = T,tr_mat = NULL))),
                    data.frame(Bg="AncSR2",total_fxnal_vars = length(phenotypes_tbl_prot %>% filter(bg == "AncSR2") %>% pull(AA_var)), fxnal_vars_in_net = length(extract_main_ntwrk(net_sr2,nodes = T,tr_mat = NULL)))))
@@ -1530,7 +1531,7 @@ Fourth, while genotype clusters are still present in the AncSR2 map, a lower pro
 
 cl_sr2 <- cluster_edge_betweenness(net_sr2)
 ```
-```{r}
+```{r, fig.width=6.5,fig.height=5}
 
 # assocate genotypes with clusters
 modules_sr2 <- data.frame(AA_var=names(membership(cl_sr2)),cluster=as.integer(membership(cl_sr2)),bg="AncSR2") %>%
@@ -1679,7 +1680,7 @@ local_bias_sr2 <- foreach(i = 1:length(nodes_in_ntwrk_sr2_spec), .combine = 'rbi
 
 stopCluster(cl)
 ```
-```{r, fig.width=5}
+```{r, fig.width=5.5}
 # Numberof accessible and *new* phenotypes per genotype
 accessible_phenotypes_singleStep_sr2 <- one_mut_nei_sr2 %>% filter(specificity != "Promiscuous") %>% 
   mutate(new_pheno = ifelse(focal_pheno == specificity,FALSE,TRUE)) %>%
@@ -1692,7 +1693,7 @@ accessible_phenotypes_singleStep_sr2 <- one_mut_nei_sr2 %>% filter(specificity !
 p1 <- accessible_phenotypes_singleStep_sr2 %>%
   ggplot(aes(x=n_new_pheno)) + 
   geom_bar(aes(y = after_stat(count))) +
-  labs(x="Number of new phenotypes accessible",y="Number of specific RH genotypes") +
+  labs(x="Number of new\nphenotypes accessible",y="Number of specific RH genotypes") +
   geom_text(aes(label = scales::percent(after_stat(count)/sum(after_stat(count))),y= after_stat(count)), stat= "count", vjust = -.5,size=3) +
   theme_classic() + 
   theme(axis.title = element_text(size=11),
@@ -1825,7 +1826,7 @@ Overall, these results show that the background substitutions that occurred alon
 
 Now, let's investigate how these changes in the GP map affected phenotypic evolution. The main consequences we observed are threefold: 1) SRE is the most likely phenotypic outcome at equilibrium; 2) SRE is the most liekly phenotypic outcome at moderate timescales across the majority of genotypes and phenotypes; and 3) the probability of phenotypic diversication is higher.
 
-```{r, fig.width=7}
+```{r, fig.width=7,fig.height=5.5}
 ##################
 # Production spectrum and equilibrium outcome spectrum
 ##################
@@ -2019,7 +2020,7 @@ pt_sr2 <- t(apply(pt_sr2, 1, function(x) x/sum(x)))
 
 stopCluster(cl)
 ```
-```{r, fig.width=7}
+```{r, fig.width=6.5}
 # Admixture plot-like figure
 as_tibble(pt_sr2,rownames=NA) %>% rownames_to_column(var="Start_Pheno") %>%
   reshape2::melt() %>%
@@ -2042,8 +2043,8 @@ as_tibble(pt_sr2,rownames=NA) %>% rownames_to_column(var="Start_Pheno") %>%
 # Most likely phenotypic transition per phenotype
 knitr::kable(as.data.frame.table(pt_sr2) %>% filter(Var1 != Var2) %>% group_by(Var1) %>% filter(Freq == max(Freq)) %>% select(Var1,Var2) %>%
   dplyr::rename("Starting phenotype"=Var1,"Most likely transition"=Var2))
-
-
+```
+```{r}
 ###################################
 # Probability of conservation and transition per genotype
 ###################################
@@ -2280,7 +2281,7 @@ SPEC_BINDING <- TRUE
 # Run Markov chain for 25 substitutions and track the outcome spectra at every time point
 pdfv_mc_multistep_sr2 <- simulate_markov_chain_multistep(REF_GENOTYPE,P_drift_sr2_ntwrk,mc_iter,"AncSR1",specific = SPEC_BINDING)
 ```
-```{r}
+```{r, fig.height=5,fig.width=6.5}
 mc_iter <- 25 # number of substitutions to track
 SPEC_BINDING <- TRUE
 REMOVE_PROMISCUOUS <- TRUE
@@ -2499,7 +2500,7 @@ To understand what are the effects of coevolution, we will compare the outcome s
 
 Let's first compare the equilibrium probabilities of each phenotype to those in the protein-evolution networks. 
 
-```{r, fig.width=5}
+```{r, fig.width=6,fig.height=5}
 # equilibrium spectra coevolution vs. protein evolution for each DBD background
 df_long_term_sr1_2 <- inner_join(remove_promiscuous(stationary_PDFV_spec_sr1,norm = T),remove_promiscuous(stationary_PDFV_sr1_complex,norm = T),by="RE")
 df_long_term_sr2_2 <- inner_join(remove_promiscuous(stationary_PDFV_spec_sr2,norm = T),remove_promiscuous(stationary_PDFV_sr2_complex,norm = T),by="RE")
@@ -2574,8 +2575,8 @@ stopCluster(cl)
 # plot number of prot-DNA steps vs average number of amino acid steps (dashed line is x=y line)
 rbind(aa_subs_mc_sr1_complex %>% mutate(bg="AncSR1"), aa_subs_mc_sr2_complex %>% mutate(bg="AncSR2")) %>%
   ggplot(aes(x=step,y=cum_aa_subs)) +
-  geom_line() + 
-  geom_abline(intercept = 0,slope=1,linetype=2) +
+  geom_line(color="red") + 
+  geom_abline(intercept = 0,slope=1,linetype=2,color="gray50") +
   labs(x="protein-DNA step",y="Average number of RH changes across genotypes") +
   theme_classic() +
   theme(axis.text = element_text(size = 10),axis.title = element_text(size=11)) +
@@ -2656,7 +2657,7 @@ for(s in c(1,seq(5,MAX_STEP_C,5))){
 
 stopCluster(cl)
 ```
-```{r, fig.height=5}
+```{r, fig.height=5,fig.width=6}
 # Number of substitutions for mean bias in outcomes to be within 0.05 units of equilibrium value
 forget_lbias_sr1_complex <- change_bias_df_sr1_complex %>% group_by(g) %>% filter(bias <= StatB_sr1_complex+0.05) %>% 
   distinct(.,g,.keep_all = TRUE) %>% with(mean(step))
@@ -2872,7 +2873,7 @@ pt_sr2_complex <- t(apply(pt_sr2_complex, 1, function(x) x/sum(x)))
 
 stopCluster(cl)
 ```
-```{r}
+```{r, fig.height=5,fig.width=6}
 # Compute probabilities of conservation per phenotype
 extract_prob_conservation <- function(df,RE_i){
   x <- df[rownames(df) == RE_i, colnames(df) == RE_i]
@@ -3069,7 +3070,7 @@ Protein-DNA coevolution bias eolutionary outcomes more strongly towards conserva
 
 We will compare 4 characteristics of the GP maps: 1) the number of RH neighbors per genotype, 2) the distance between phenotypes, 3) the fraction of neutral neighbors per genotype and 4) the local bias of the one-mutant neighborhood. 
 
-```{r, fig.height=3}
+```{r}
 ##########################
 # Number of RH neighbors per genotype
 ##########################
@@ -3155,7 +3156,7 @@ pairwise_dists_sr2_complex <- pairwise_dists_sr2_complex[, colSums(is.na(pairwis
 pairwise_dists_sr2_complex <- pairwise_dists_sr2_complex[order(match(rownames(pairwise_dists_sr2_complex),REs[[1]])),order(match(colnames(pairwise_dists_sr2_complex),REs[[1]]))] # order rows and columns
 
 ```
-```{r}
+```{r, fig.width=5.5}
 # correct prot-DNA steps to AA subs
 pairwise_dists_sr1_complex <- pairwise_dists_sr1_complex * AVG_AA_SUBS_PER_STEP_SR1
 pairwise_dists_sr2_complex <- pairwise_dists_sr2_complex * AVG_AA_SUBS_PER_STEP_SR2 

@@ -275,11 +275,11 @@ summary_sr2 <- foreach(i = 1:length(REs[[1]]), .combine = 'rbind') %do% {
 func_vars_sr1 <- phenotypes_tbl_prot %>% filter(bg == "AncSR1") %>% pull(AA_var)
 func_vars_sr2 <- phenotypes_tbl_prot %>% filter(bg == "AncSR2") %>% pull(AA_var)
 
-# Nodes in networks
+# Nodes in main network component
 nodes_in_ntwrk_sr1 <- extract_main_ntwrk(net_sr1,nodes=T,tr_mat = NULL)
 nodes_in_ntwrk_sr2 <- extract_main_ntwrk(net_sr2,nodes=T,tr_mat = NULL)
 
-# Nodes in networks that are specific
+# Nodes in main network component that are specific
 nodes_in_ntwrk_sr1_spec <- data.frame(AA_var=nodes_in_ntwrk_sr1,bg="AncSR1") %>% inner_join(.,phenotypes_tbl_prot,by=c("bg","AA_var")) %>% filter(specific=="YES") %>% pull(AA_var)
 nodes_in_ntwrk_sr1_spec <- nodes_in_ntwrk_sr1_spec[nodes_in_ntwrk_sr1_spec %in% nodes_in_ntwrk_sr1]
 nodes_in_ntwrk_sr2_spec <- data.frame(AA_var=nodes_in_ntwrk_sr2,bg="AncSR2") %>% inner_join(.,phenotypes_tbl_prot,by=c("bg","AA_var")) %>% filter(specific=="YES") %>% pull(AA_var)
@@ -635,7 +635,7 @@ accessible_phenotypes_singleStep_sr1 <- one_mut_nei_sr1 %>% filter(specificity !
 p1 <- accessible_phenotypes_singleStep_sr1 %>%
   ggplot(aes(x=n_new_pheno)) + 
   geom_bar(aes(y = after_stat(count))) +
-  labs(x="Number of new phenotypes accessible",y="Number of specific RH genotypes") +
+  labs(x="Number of new\nphenotypes accessible",y="Number of specific RH genotypes") +
   geom_text(aes(label = scales::percent(after_stat(count)/sum(after_stat(count))),y= after_stat(count)), stat= "count", vjust = -.5,size=3) +
   theme_classic() + 
   theme(axis.title = element_text(size=11),
@@ -815,7 +815,7 @@ for(i in 1:nrow(pval_matrix)){
   }
 }
 
-fdr_pvals <- p.adjust(pval_matrix,method = "fdr")
+fdr_pvals <- p.adjust(pval_matrix,method = "bonferroni")
 fdr_pval_matrix <- matrix(fdr_pvals,byrow = T,nrow = 6,ncol = 6,
                       dimnames = list(rownames(pairwise_dists_sr1),colnames(pairwise_dists_sr1)))
 
@@ -830,7 +830,9 @@ pheatmap(pairwise_dists_sr1,cluster_rows = F,cluster_cols = F,angle_col = 45, na
 
 ``` r
 # phenotype pairs that are significantly closer/farther than expected
-knitr::kable(inner_join(as.data.frame.table(fdr_pval_matrix), as.data.frame.table(pairwise_dists_sr1),by=c("Var1","Var2")) %>% filter(Freq.x < 0.05) %>% select(Var1,Var2,Freq.y) %>% dplyr::rename(Phenotype_A=Var1,Phenotype_B=Var2,avg_mut_distance=Freq.y))
+knitr::kable(inner_join(as.data.frame.table(fdr_pval_matrix), as.data.frame.table(pairwise_dists_sr1),by=c("Var1","Var2")) %>% filter(Freq.x < 0.05) %>%
+               mutate_at(vars(Var1,Var2),list(as.character)) %>% rowwise() %>% mutate(pair=paste(min(Var1,Var2),max(Var1,Var2),sep="_")) %>% ungroup() %>%
+               distinct(.,pair,.keep_all = TRUE) %>% select(Var1,Var2,Freq.y) %>% dplyr::rename(Phenotype_A=Var1,Phenotype_B=Var2,avg_mut_distance=Freq.y))
 ```
 
 | Phenotype\_A | Phenotype\_B |  avg\_mut\_distance|
@@ -838,13 +840,8 @@ knitr::kable(inner_join(as.data.frame.table(fdr_pval_matrix), as.data.frame.tabl
 | GA           | SRE (AA)     |            3.523810|
 | ERE (GT)     | SRE (AA)     |            6.552288|
 | TA           | SRE (AA)     |            5.694444|
-| SRE (AA)     | GA           |            3.523810|
 | ERE (GT)     | GA           |            7.176471|
-| SRE (AA)     | ERE (GT)     |            6.552288|
-| GA           | ERE (GT)     |            7.176471|
 | TA           | ERE (GT)     |            7.474265|
-| SRE (AA)     | TA           |            5.694444|
-| ERE (GT)     | TA           |            7.474265|
 
 The figures above show that not all direct phenotypic transitions are possible, and that phenotypes are nonrandomly distributed in the network. In many cases, phenotypes are closer together or farther apart than expected due to the genetic determinants of specificity (*p* &lt; 0.05).
 
@@ -1043,13 +1040,12 @@ mean_new_pheno_3s <- new_pheno_3s_df %>% with(mean(n_new_pheno))
 
 # plot distribution
 new_pheno_3s_df %>%
-  ggplot(aes(x=n_new_pheno)) + geom_histogram(binwidth = 1,col="black",fill="gray50") + 
+  ggplot(aes(x=n_new_pheno)) + geom_histogram(binwidth = 1,col="black",fill="gray65") + 
   geom_vline(xintercept = mean_new_pheno_3s,linetype="dashed") +
   theme_classic() +
   labs(x = "Number of new phenotypes per genotype", y= "Frequency") +
   theme(axis.title = element_text(size=13),
-        axis.text = element_text(size=9)) +
-  ggtitle("Phenotypic evolution after 3 substitutions (AncSR1)")
+        axis.text = element_text(size=9))
 ```
 
 ![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-16-1.png)
@@ -1884,7 +1880,7 @@ accessible_phenotypes_singleStep_sr2 <- one_mut_nei_sr2 %>% filter(specificity !
 p1 <- accessible_phenotypes_singleStep_sr2 %>%
   ggplot(aes(x=n_new_pheno)) + 
   geom_bar(aes(y = after_stat(count))) +
-  labs(x="Number of new phenotypes accessible",y="Number of specific RH genotypes") +
+  labs(x="Number of new\nphenotypes accessible",y="Number of specific RH genotypes") +
   geom_text(aes(label = scales::percent(after_stat(count)/sum(after_stat(count))),y= after_stat(count)), stat= "count", vjust = -.5,size=3) +
   theme_classic() + 
   theme(axis.title = element_text(size=11),
@@ -2345,7 +2341,6 @@ highest_Lik_outcomes_sr2_df <- inner_join(geno_pheno_sr2,data.frame(AA_var=names
 ```
 
     ## Joining with `by = join_by(AA_var)`
-
     ## Joining with `by = join_by(AA_var)`
 
 ``` r
@@ -2414,7 +2409,7 @@ inner_join(pheno_outcomes_sr2_df,highest_Lik_outcomes_sr2_df,by="AA_var") %>%
 
     ## Warning: Removed 4 rows containing missing values (`geom_bar()`).
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-37-2.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-38-1.png)
 
 All these consequences occur because of the increased connectivity of the genotype network and the reorientation of the global bias. First, with greater connectivity of the network, genotypes should navigate more efficieintly the GP map and therefore gain access more rapidly to more genotypes and phenotypes. To show this effect, we can track the average change in the oucome bias across genotypes in the AncSR2 network.
 
@@ -2503,7 +2498,7 @@ change_bias_df_sr2 %>%  filter(step<=50) %>%
 
     ## Warning: Removed 2 rows containing missing values (`geom_point()`).
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-39-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-40-1.png)
 
 Consistent with our prediction, we see that the mean outcome bias acorss genotypes converges to the equilibrium bias more rapidly (from ~42 substitutions on AncSR1 to ~14 in AncSR2). This also explains why the probability of diversification at moderate timescales is higher: local bias favors conservations and since its effect is lost more rapidly, the probability of conservation also decreases at moderate timescales.
 
@@ -2556,7 +2551,7 @@ phen_sim_comparison %>% ggplot(aes(x=bg,y=r2)) +
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-40-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-41-1.png)
 
 ``` r
 wilcox.test(phen_sim_comparison$r2~phen_sim_comparison$bg)
@@ -2606,7 +2601,7 @@ as_tibble(markov_chain_sr2,rownames = NA) %>%
         axis.text.x = element_text(size=10,angle=45,hjust = 1,vjust = 1)) + guides(fill="none")
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-41-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-42-1.png)
 
 SRE also becomes the most likely phenotype to evolve from the ancestral RH genotype EGKA. Let's see the dymamics of the outcome spectrum over time from EGKA.
 
@@ -2677,7 +2672,7 @@ if(ERE_SRE_ONLY){
 }
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-42-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-43-1.png)
 
 ``` r
 knitr::kable(df_sims_sr2 %>% filter(model %in% c(3,6) & RE %in% c("ERE (GT)","SRE (AA)")) %>% dplyr::rename(Probability=Norm_F_prob,step=model))
@@ -2879,7 +2874,7 @@ df_long_term_comp %>%
   geom_text(data=cor_df,aes(label=label))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-44-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-45-1.png)
 
 We see that at infinitely long timescales, the equilibrium outcome spectra are almost identical. This makes sense because both the protein and protein-DNA networks have the same phenotypes in almost the same frequencies, thus, if evolutionary trajectories are unbounded they should eventually converge to almost the same stationary distribution.
 
@@ -2939,15 +2934,15 @@ stopCluster(cl)
 # plot number of prot-DNA steps vs average number of amino acid steps (dashed line is x=y line)
 rbind(aa_subs_mc_sr1_complex %>% mutate(bg="AncSR1"), aa_subs_mc_sr2_complex %>% mutate(bg="AncSR2")) %>%
   ggplot(aes(x=step,y=cum_aa_subs)) +
-  geom_line() + 
-  geom_abline(intercept = 0,slope=1,linetype=2) +
+  geom_line(color="red") + 
+  geom_abline(intercept = 0,slope=1,linetype=2,color="gray50") +
   labs(x="protein-DNA step",y="Average number of RH changes across genotypes") +
   theme_classic() +
   theme(axis.text = element_text(size = 10),axis.title = element_text(size=11)) +
   facet_grid(~ bg)
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-46-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-47-1.png)
 
 ``` r
 # Fit linear models to data
@@ -3086,7 +3081,7 @@ rbind(mean_bias_sr1 %>% mutate(ntwrk_type="protein",bg="AncSR1"),
   scale_y_continuous(limits = c(0,1))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-48-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-49-1.png)
 
 These results show that coevolution increases the time required for the average local bias to decay to equilibrium. This delay implies that the effect of local bias lasts for an extended period of time and as a consequence the probability of conservation should be higher over moderate timescales. To check this we will first run a markov chain on the coevolution networks.
 
@@ -3329,7 +3324,7 @@ rbind(inner_join(pt_sr1_df,pt_sr1_complex_df,by=c("RE","type")) %>% filter(type=
   guides(fill = guide_legend(override.aes = list(shape=21,size=3)))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-52-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-53-1.png)
 
 Virtually all phenotypes are more likely to remain conserved in the coevolution networks after 8 amino acid substitutions. Overall, we see that coevolution extends the influence of local bias on evolutionary outcomes and as a consequence it makes phenotypic diversification less likely to happen.
 
@@ -3446,7 +3441,7 @@ if(ERE_SRE_ONLY){
 p1 + p2
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-53-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-54-1.png)
 
 ``` r
 # compare probability of ERE conservation after 3 and 10 amino acid steps between networks
@@ -3528,7 +3523,7 @@ connect_df %>% filter(neighbor_type == "AA") %>%
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-54-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-55-1.png)
 
 ``` r
 knitr::kable(connect_df %>% filter(neighbor_type == "AA") %>% group_by(bg,ntwrk_type) %>%
@@ -3614,7 +3609,7 @@ pairwise_dists_df %>% ggplot(aes(x=value.x,y=value.y)) +
   guides(fill = guide_legend(override.aes = list(shape=21,size=3)))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-56-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-57-1.png)
 
 As expected, coevolution also pushes phenotypes farther away in the network. Let's now explore the one-mutant neighborhoods around specific genotypes.
 
@@ -3659,7 +3654,7 @@ neutral_neighbors_df %>%
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-58-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-59-1.png)
 
 ``` r
 knitr::kable(neutral_neighbors_df %>% group_by(bg,ntwrk_type) %>%
@@ -3748,7 +3743,7 @@ local_bias_df %>%
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-60-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-61-1.png)
 
 ``` r
 knitr::kable(local_bias_df %>% group_by(bg,ntwrk_type) %>%
