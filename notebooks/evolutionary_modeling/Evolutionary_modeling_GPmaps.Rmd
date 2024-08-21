@@ -17,7 +17,7 @@ packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble",
               "dplyr", "patchwork", "foreach", "doParallel", "matrixStats",
               "Biostrings", "readr","furrr","purrr","igraph","recommenderlab",
               "Matrix","ggradar","pheatmap","XNomial","reshape2","cluster","factoextra",
-              "ggrepel","ggridges","fitdistrplus","extraDistr")
+              "ggrepel","ggridges","fitdistrplus","extraDistr","ggalluvial")
 installed_packages <- packages %in% rownames(installed.packages())
 
 if(installed_packages[which(packages=="Biostrings")] == F){
@@ -1458,7 +1458,7 @@ obs_genetic_similarity_mat <- inner_product_corr(freq_matrix_sr1_func,freq_matri
 print(paste("Similarity of amino acid profiles for functional variants (r) = ", round(obs_genetic_similarity_mat,2)))
 ```
 
-Second, the connectivity between functional genotypes increased by 3X.
+Second, the connectivity between functional genotypes increased by 3X. Since the functional variants in AncSR2 are similar to those in AncSR1, the genotypes that remain functional along the AncSR1-AncSr2 branch gain an average of 11 neighbors.
 
 ```{r}
 # connectivity: number of neighbors per genoytpe
@@ -1475,6 +1475,29 @@ rbind(data.frame(bg="AncSR1",n_neighbors=degree(net_sr1)),
         axis.text.x = element_text(size=13,angle=45,hjust = 1,vjust = 1))
 
 wilcox.test(degree(net_sr2),degree(net_sr1))
+
+# Increase in connectivity
+# For genotypes that remain functional from AncSR1 to AncSR2, compute the number of *new* neighbors gained 
+# functional RH variants in both backgrounds
+func_vars_both <- func_vars_sr2[func_vars_sr2 %in% func_vars_sr1]
+
+neighbors_gained <- foreach(i = 1:length(func_vars_both), .combine = "rbind") %do% {
+  n_neigh_sr1 <- names(neighbors(graph = net_sr1,v = func_vars_both[i])) # neighbors in AncSR1 map
+  n_neigh_sr2 <- names(neighbors(graph = net_sr2,v = func_vars_both[i])) # neighbors in AncSR2 map
+  data.frame(AA_var = func_vars_both[i], new_neighbors = length(n_neigh_sr2[!(n_neigh_sr2 %in% n_neigh_sr1)])) # number of new neighbors
+}
+
+# plot
+neighbors_gained %>% ggplot(aes(x=new_neighbors)) +
+  geom_histogram(color="black",fill="gray60",binwidth = 2) + 
+  geom_vline(xintercept = mean(neighbors_gained$new_neighbors),linetype="dashed") +
+  labs(x="Number of neighbors\ngained in AncSR2", y="Number of RH genotypes in AncSR1") +
+  theme_classic() +
+  theme(axis.title = element_text(size=13),
+        axis.text = element_text(size=13))
+
+print(paste("Average new neighbors gained: ", round(mean(neighbors_gained$new_neighbors)),2))
+
 ```
 
 Third, we see that the AncSR2 GP map is also strongly anisotropic (with a bias of $B = 0.37$). However, 14 specificity phenotypes are now encoded on the map (twice as many as in AncSR1), and the direction of the bias of the production spectrum also changed from favoring ERE to SRE.
@@ -1519,6 +1542,77 @@ if(SPECIFIC){
 }
 
 global_spec_sr2_plot + annotate("text",x=3,y=450,label = paste("B =",round(GlobalB_sr2,2)))
+
+```
+
+The increase in the number of specificity phenotypes encoded in the AncSR2 map is due entirely to the gain of function of genotypes that were non-functional in the AncSR1 background - there are no instances of where an RH genotype swithces its specificity or where a former promiscuous genotype gains specificity that was not present in the AncSR1 map.
+
+```{r, fig.height=6,fig.width=6.5}
+# Functional effect of 31 background substitutions
+possible_AAvar <- do.call(paste,expand.grid(AA_STANDARD,AA_STANDARD,AA_STANDARD,AA_STANDARD)) %>% gsub(" ","",.)
+not_in_sr1 <- possible_AAvar[!(possible_AAvar %in% func_vars_sr1)] # non-functional genotypes in AncSR1
+not_in_sr2 <- possible_AAvar[!(possible_AAvar %in% func_vars_sr2)] # non-functional genotypes in AncSR2
+
+# Genotypes that remain functional from AncSR1 to AncSR2, and whether they change specificity
+functional_effect_df <- full_join(rbind(phenotypes_tbl_prot %>% filter(bg=="AncSR1") %>%
+                                          select(AA_var,bg,specificity) %>% mutate(category = ifelse(specificity == "Promiscuous","Promiscuous","Specific")),
+                                        data.frame(AA_var=not_in_sr1,bg="AncSR1",specificity="Non_functional",category = "Non_functional")),
+                                  rbind(phenotypes_tbl_prot %>% filter(bg=="AncSR2") %>%
+                                          select(AA_var,bg,specificity) %>% mutate(category = ifelse(specificity == "Promiscuous","Promiscuous","Specific")),
+                                        data.frame(AA_var=not_in_sr2,bg="AncSR2",specificity="Non_functional",category = "Non_functional")), by="AA_var") %>%
+  mutate(bg.x = ifelse(is.na(bg.x),"AncSR1",bg.x),
+         bg.y = ifelse(is.na(bg.y),"AncSR2",bg.y),
+         # assign funcitonal effect along the branch
+         functional_effect = case_when((specificity.x == specificity.y) & (specificity.x != "Non_functional" & specificity.y != "Non_functional") ~ "Same specificity",
+                                       (specificity.x != specificity.y) & (specificity.x != "Promiscuous" & specificity.y != "Promiscuous") &
+                                         (specificity.x != "Non_functional" & specificity.y != "Non_functional") ~ "Switch specificity",
+                                       specificity.x == "Promiscuous" & specificity.y != "Promiscuous" & specificity.y != "Non_functional" ~ "Gain specificity",
+                                       specificity.x != "Promiscuous" & specificity.x != "Non_functional" & specificity.y == "Promiscuous" ~ "Loss specificity",
+                                       specificity.x == "Non_functional" & specificity.y != "Non_functional" ~ "Gain function",
+                                       specificity.x != "Non_functional" & specificity.y == "Non_functional" ~ "Loss function")) %>% ungroup() %>%
+  filter(!is.na(functional_effect)) # Only keep variants that are functional in either background
+
+# Summary of functional effects along the branch
+knitr::kable(functional_effect_df %>% 
+  reframe(functional_category = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"),
+          count = table(factor(functional_effect,levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function")))) %>%
+    mutate(total = sum(count),
+           prop = count/total) %>% arrange(desc(prop)) %>% select(-c(count,total)))
+
+# Alluvial plot showing functional effects
+functional_effect_df %>% 
+  group_by(category.x,category.y,functional_effect) %>%
+  reframe(count = n()) %>%
+  mutate(total = sum(count),
+         prop = count/total,
+         functional_effect = factor(functional_effect, levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"))) %>%
+  arrange(factor(category.x, levels = c("Specific","Promiscuous","Non_functional"))) %>%
+ mutate(category.x = forcats::as_factor(category.x)) %>%
+# filter(category.x != "Non_functional") %>%
+ mutate(total_functional = sum(count),
+        norm_prop = count / total_functional) %>%
+  ggplot(aes(y=norm_prop, axis1 = category.x, axis2 = category.y)) +
+  ggalluvial::geom_alluvium(aes(fill = functional_effect),width=1/2,color="white") +
+  scale_fill_manual(values = c(hcl.colors(4,rev = T),"gray40")) +
+  ggalluvial::geom_stratum(width = 0.3, color = "white",fill="black") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum)),size=2.5) +
+  scale_x_discrete(limits = c("AncSR1", "AncSR2"), expand = c(.05, .05)) +
+  theme_classic() +
+  labs(x = "",y="Proportion of functional RH genotypes in either background",fill="Functional effect\nfrom AncSR1 to AncSR2") +
+  theme(axis.title = element_text(size=13),
+        axis.text = element_text(size=10))
+
+# Where do the new specificity phenotypes come from?
+REs_spec_sr1 <- data.frame(summary_sr1) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR1 map
+REs_spec_sr2 <- data.frame(summary_sr2) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR2 map
+new_REs_sr2 <- REs_spec_sr2[!(REs_spec_sr2 %in% REs_spec_sr1)] # new specificity phenotypes
+
+knitr::kable(functional_effect_df %>% filter(specificity.y %in% union(REs_spec_sr1,REs_spec_sr2)) %>%
+  group_by(specificity.y) %>% 
+  reframe(functional_category = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"),
+          count = table(factor(functional_effect,levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function")))) %>%
+  ungroup() %>% mutate(new_phenotype = ifelse(specificity.y %in% new_REs_sr2,T,F)) %>%
+  filter(count > 0) %>% dplyr::rename(phenotype_AncSR2 = specificity.y,n_RH_vars = count) %>% arrange(new_phenotype))
 
 ```
 
@@ -2492,7 +2586,6 @@ nodes_in_ntwrk_sr2_spec_complex <- nodes_in_ntwrk_sr2_spec_complex[nodes_in_ntwr
 # Color palette for plotting
 net_colors <- c("orange","#006ddb")
 ```
-
 
 ### Modeling phenotypic outcomes under coevolution
 

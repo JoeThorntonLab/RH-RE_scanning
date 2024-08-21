@@ -1596,7 +1596,7 @@ print(paste("Similarity of amino acid profiles for functional variants (r) = ", 
 
     ## [1] "Similarity of amino acid profiles for functional variants (r) =  0.89"
 
-Second, the connectivity between functional genotypes increased by 3X.
+Second, the connectivity between functional genotypes increased by 3X. Since the functional variants in AncSR2 are similar to those in AncSR1, the genotypes that remain functional along the AncSR1-AncSr2 branch gain an average of 11 neighbors.
 
 ``` r
 # connectivity: number of neighbors per genoytpe
@@ -1634,6 +1634,36 @@ wilcox.test(degree(net_sr2),degree(net_sr1))
     ## data:  degree(net_sr2) and degree(net_sr1)
     ## W = 240663, p-value < 2.2e-16
     ## alternative hypothesis: true location shift is not equal to 0
+
+``` r
+# Increase in connectivity
+# For genotypes that remain functional from AncSR1 to AncSR2, compute the number of *new* neighbors gained 
+# functional RH variants in both backgrounds
+func_vars_both <- func_vars_sr2[func_vars_sr2 %in% func_vars_sr1]
+
+neighbors_gained <- foreach(i = 1:length(func_vars_both), .combine = "rbind") %do% {
+  n_neigh_sr1 <- names(neighbors(graph = net_sr1,v = func_vars_both[i])) # neighbors in AncSR1 map
+  n_neigh_sr2 <- names(neighbors(graph = net_sr2,v = func_vars_both[i])) # neighbors in AncSR2 map
+  data.frame(AA_var = func_vars_both[i], new_neighbors = length(n_neigh_sr2[!(n_neigh_sr2 %in% n_neigh_sr1)])) # number of new neighbors
+}
+
+# plot
+neighbors_gained %>% ggplot(aes(x=new_neighbors)) +
+  geom_histogram(color="black",fill="gray60",binwidth = 2) + 
+  geom_vline(xintercept = mean(neighbors_gained$new_neighbors),linetype="dashed") +
+  labs(x="Number of neighbors\ngained in AncSR2", y="Number of RH genotypes in AncSR1") +
+  theme_classic() +
+  theme(axis.title = element_text(size=13),
+        axis.text = element_text(size=13))
+```
+
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-23-2.png)
+
+``` r
+print(paste("Average new neighbors gained: ", round(mean(neighbors_gained$new_neighbors)),2))
+```
+
+    ## [1] "Average new neighbors gained:  11 2"
 
 Third, we see that the AncSR2 GP map is also strongly anisotropic (with a bias of *B* = 0.37). However, 14 specificity phenotypes are now encoded on the map (twice as many as in AncSR1), and the direction of the bias of the production spectrum also changed from favoring ERE to SRE.
 
@@ -1684,6 +1714,123 @@ global_spec_sr2_plot + annotate("text",x=3,y=450,label = paste("B =",round(Globa
 
 ![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-24-1.png)
 
+The increase in the number of specificity phenotypes encoded in the AncSR2 map is due entirely to the gain of function of genotypes that were non-functional in the AncSR1 background - there are no instances of where an RH genotype swithces its specificity or where a former promiscuous genotype gains specificity that was not present in the AncSR1 map.
+
+``` r
+# Functional effect of 31 background substitutions
+possible_AAvar <- do.call(paste,expand.grid(AA_STANDARD,AA_STANDARD,AA_STANDARD,AA_STANDARD)) %>% gsub(" ","",.)
+not_in_sr1 <- possible_AAvar[!(possible_AAvar %in% func_vars_sr1)] # non-functional genotypes in AncSR1
+not_in_sr2 <- possible_AAvar[!(possible_AAvar %in% func_vars_sr2)] # non-functional genotypes in AncSR2
+
+# Genotypes that remain functional from AncSR1 to AncSR2, and whether they change specificity
+functional_effect_df <- full_join(rbind(phenotypes_tbl_prot %>% filter(bg=="AncSR1") %>%
+                                          select(AA_var,bg,specificity) %>% mutate(category = ifelse(specificity == "Promiscuous","Promiscuous","Specific")),
+                                        data.frame(AA_var=not_in_sr1,bg="AncSR1",specificity="Non_functional",category = "Non_functional")),
+                                  rbind(phenotypes_tbl_prot %>% filter(bg=="AncSR2") %>%
+                                          select(AA_var,bg,specificity) %>% mutate(category = ifelse(specificity == "Promiscuous","Promiscuous","Specific")),
+                                        data.frame(AA_var=not_in_sr2,bg="AncSR2",specificity="Non_functional",category = "Non_functional")), by="AA_var") %>%
+  mutate(bg.x = ifelse(is.na(bg.x),"AncSR1",bg.x),
+         bg.y = ifelse(is.na(bg.y),"AncSR2",bg.y),
+         # assign funcitonal effect along the branch
+         functional_effect = case_when((specificity.x == specificity.y) & (specificity.x != "Non_functional" & specificity.y != "Non_functional") ~ "Same specificity",
+                                       (specificity.x != specificity.y) & (specificity.x != "Promiscuous" & specificity.y != "Promiscuous") &
+                                         (specificity.x != "Non_functional" & specificity.y != "Non_functional") ~ "Switch specificity",
+                                       specificity.x == "Promiscuous" & specificity.y != "Promiscuous" & specificity.y != "Non_functional" ~ "Gain specificity",
+                                       specificity.x != "Promiscuous" & specificity.x != "Non_functional" & specificity.y == "Promiscuous" ~ "Loss specificity",
+                                       specificity.x == "Non_functional" & specificity.y != "Non_functional" ~ "Gain function",
+                                       specificity.x != "Non_functional" & specificity.y == "Non_functional" ~ "Loss function")) %>% ungroup() %>%
+  filter(!is.na(functional_effect)) # Only keep variants that are functional in either background
+
+# Summary of functional effects along the branch
+knitr::kable(functional_effect_df %>% 
+  reframe(functional_category = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"),
+          count = table(factor(functional_effect,levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function")))) %>%
+    mutate(total = sum(count),
+           prop = count/total) %>% arrange(desc(prop)) %>% select(-c(count,total)))
+```
+
+| functional\_category |          prop|
+|:---------------------|-------------:|
+| Gain function        |  0.9557668458|
+| Loss specificity     |  0.0248036379|
+| Same specificity     |  0.0136420008|
+| Loss function        |  0.0049607276|
+| Gain specificity     |  0.0008267879|
+| Switch specificity   |  0.0000000000|
+
+``` r
+# Alluvial plot showing functional effects
+functional_effect_df %>% 
+  group_by(category.x,category.y,functional_effect) %>%
+  reframe(count = n()) %>%
+  mutate(total = sum(count),
+         prop = count/total,
+         functional_effect = factor(functional_effect, levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"))) %>%
+  arrange(factor(category.x, levels = c("Specific","Promiscuous","Non_functional"))) %>%
+ mutate(category.x = forcats::as_factor(category.x)) %>%
+# filter(category.x != "Non_functional") %>%
+ mutate(total_functional = sum(count),
+        norm_prop = count / total_functional) %>%
+  ggplot(aes(y=norm_prop, axis1 = category.x, axis2 = category.y)) +
+  ggalluvial::geom_alluvium(aes(fill = functional_effect),width=1/2,color="white") +
+  scale_fill_manual(values = c(hcl.colors(4,rev = T),"gray40")) +
+  ggalluvial::geom_stratum(width = 0.3, color = "white",fill="black") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum)),size=2.5) +
+  scale_x_discrete(limits = c("AncSR1", "AncSR2"), expand = c(.05, .05)) +
+  theme_classic() +
+  labs(x = "",y="Proportion of functional RH genotypes in either background",fill="Functional effect\nfrom AncSR1 to AncSR2") +
+  theme(axis.title = element_text(size=13),
+        axis.text = element_text(size=10))
+```
+
+    ## Warning in to_lodes_form(data = data, axes = axis_ind, discern =
+    ## params$discern): Some strata appear at multiple axes.
+
+    ## Warning in to_lodes_form(data = data, axes = axis_ind, discern =
+    ## params$discern): Some strata appear at multiple axes.
+
+    ## Warning in to_lodes_form(data = data, axes = axis_ind, discern =
+    ## params$discern): Some strata appear at multiple axes.
+
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-25-1.png)
+
+``` r
+# Where do the new specificity phenotypes come from?
+REs_spec_sr1 <- data.frame(summary_sr1) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR1 map
+REs_spec_sr2 <- data.frame(summary_sr2) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR2 map
+new_REs_sr2 <- REs_spec_sr2[!(REs_spec_sr2 %in% REs_spec_sr1)] # new specificity phenotypes
+
+knitr::kable(functional_effect_df %>% filter(specificity.y %in% union(REs_spec_sr1,REs_spec_sr2)) %>%
+  group_by(specificity.y) %>% 
+  reframe(functional_category = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"),
+          count = table(factor(functional_effect,levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function")))) %>%
+  ungroup() %>% mutate(new_phenotype = ifelse(specificity.y %in% new_REs_sr2,T,F)) %>%
+  filter(count > 0) %>% dplyr::rename(phenotype_AncSR2 = specificity.y,n_RH_vars = count) %>% arrange(new_phenotype))
+```
+
+| phenotype\_AncSR2 | functional\_category |  n\_RH\_vars| new\_phenotype |
+|:------------------|:---------------------|------------:|:---------------|
+| AC                | Same specificity     |            1| FALSE          |
+| AC                | Gain function        |           68| FALSE          |
+| AT                | Gain function        |           57| FALSE          |
+| CA                | Same specificity     |            3| FALSE          |
+| CA                | Gain function        |          163| FALSE          |
+| ERE (GT)          | Same specificity     |           12| FALSE          |
+| ERE (GT)          | Gain function        |           26| FALSE          |
+| GA                | Same specificity     |            2| FALSE          |
+| GA                | Gain function        |          353| FALSE          |
+| SRE (AA)          | Gain specificity     |            2| FALSE          |
+| SRE (AA)          | Gain function        |          513| FALSE          |
+| TA                | Same specificity     |            1| FALSE          |
+| TA                | Gain function        |           26| FALSE          |
+| AG                | Gain function        |           54| TRUE           |
+| CG                | Gain function        |            9| TRUE           |
+| CT                | Gain function        |           11| TRUE           |
+| GC                | Gain function        |            9| TRUE           |
+| GG                | Gain function        |            1| TRUE           |
+| TG                | Gain function        |            2| TRUE           |
+| TT                | Gain function        |            8| TRUE           |
+
 Fourth, while genotype clusters are still present in the AncSR2 map, a lower proportion of clusters are enriched for single phenotypes. As a consequence, bias within clusters is on average weaker than in the AncSR1 map, &gt;50% of genotypes can access between 1-4 novel phenotypes in a single mutation, the local bias of the one-mutational neighborhoods are lower, and a higher fraction of direct phenotypic transitions are possible than in the AncSR1 map.
 
 ``` r
@@ -1706,7 +1853,7 @@ modules_sr2 %>% group_by(cluster) %>% reframe(count=n()) %>% arrange(desc(count)
   ggplot(aes(x=cluster,y=cum_frac)) + geom_point() + geom_hline(yintercept = 0.9) + labs(y="Cumulative fraction of variants in network") + theme_classic()
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-26-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-27-1.png)
 
 ``` r
 # # Associate individual genotypes to each cluster for clusters that capture 90% of variants in the network
@@ -1820,7 +1967,7 @@ b_cl <- data.frame(cl = rownames(pheno_freqs_modules_sr2),bias = c_bias_sr2) %>%
 (b_cl / bp_cl) + plot_layout(ncol=1,nrow=2,heights = c(1,4))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-26-2.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-27-2.png)
 
 ``` r
 # mean cluster Bias for each GP map
@@ -1905,7 +2052,7 @@ p1 + p2
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-28-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-29-1.png)
 
 ``` r
 # average local bias of one-mutant neighborhood is lower in AncSR2
@@ -2036,7 +2183,7 @@ neutral_neighbors_df %>%
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-32-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-33-1.png)
 
 ``` r
 wilcox.test(neutral_neighbors_df$prop~neutral_neighbors_df$bg)
@@ -2091,7 +2238,7 @@ p1 + p2
     ## Don't know how to automatically pick scale for object of type <table>.
     ## Defaulting to continuous.
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-33-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-34-1.png)
 
 ``` r
 ###################################
@@ -2234,7 +2381,7 @@ admx_avgs_sr2 <- rbind(data.frame(model = "All",pheno = names(outcome_spec_avg_a
 admx_plot_sr2 + admx_avgs_sr2 + plot_layout(widths = c(6,0.5))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-35-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-36-1.png)
 
 ``` r
 # Phenotypic outcome with highest likelood across genotypes in the map
@@ -2297,7 +2444,7 @@ as_tibble(pt_sr2,rownames=NA) %>% rownames_to_column(var="Start_Pheno") %>%
 
     ## Using Start_Pheno as id variables
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-37-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-38-1.png)
 
 ``` r
 # Most likely phenotypic transition per phenotype
@@ -2409,7 +2556,7 @@ inner_join(pheno_outcomes_sr2_df,highest_Lik_outcomes_sr2_df,by="AA_var") %>%
 
     ## Warning: Removed 4 rows containing missing values (`geom_bar()`).
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-38-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-39-1.png)
 
 All these consequences occur because of the increased connectivity of the genotype network and the reorientation of the global bias. First, with greater connectivity of the network, genotypes should navigate more efficieintly the GP map and therefore gain access more rapidly to more genotypes and phenotypes. To show this effect, we can track the average change in the oucome bias across genotypes in the AncSR2 network.
 
@@ -2498,7 +2645,7 @@ change_bias_df_sr2 %>%  filter(step<=50) %>%
 
     ## Warning: Removed 2 rows containing missing values (`geom_point()`).
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-40-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-41-1.png)
 
 Consistent with our prediction, we see that the mean outcome bias acorss genotypes converges to the equilibrium bias more rapidly (from ~42 substitutions on AncSR1 to ~14 in AncSR2). This also explains why the probability of diversification at moderate timescales is higher: local bias favors conservations and since its effect is lost more rapidly, the probability of conservation also decreases at moderate timescales.
 
@@ -2551,7 +2698,7 @@ phen_sim_comparison %>% ggplot(aes(x=bg,y=r2)) +
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-41-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-42-1.png)
 
 ``` r
 wilcox.test(phen_sim_comparison$r2~phen_sim_comparison$bg)
@@ -2601,7 +2748,7 @@ as_tibble(markov_chain_sr2,rownames = NA) %>%
         axis.text.x = element_text(size=10,angle=45,hjust = 1,vjust = 1)) + guides(fill="none")
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-42-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-43-1.png)
 
 SRE also becomes the most likely phenotype to evolve from the ancestral RH genotype EGKA. Let's see the dymamics of the outcome spectrum over time from EGKA.
 
@@ -2672,7 +2819,7 @@ if(ERE_SRE_ONLY){
 }
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-43-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-44-1.png)
 
 ``` r
 knitr::kable(df_sims_sr2 %>% filter(model %in% c(3,6) & RE %in% c("ERE (GT)","SRE (AA)")) %>% dplyr::rename(Probability=Norm_F_prob,step=model))
@@ -2874,7 +3021,7 @@ df_long_term_comp %>%
   geom_text(data=cor_df,aes(label=label))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-45-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-46-1.png)
 
 We see that at infinitely long timescales, the equilibrium outcome spectra are almost identical. This makes sense because both the protein and protein-DNA networks have the same phenotypes in almost the same frequencies, thus, if evolutionary trajectories are unbounded they should eventually converge to almost the same stationary distribution.
 
@@ -2942,7 +3089,7 @@ rbind(aa_subs_mc_sr1_complex %>% mutate(bg="AncSR1"), aa_subs_mc_sr2_complex %>%
   facet_grid(~ bg)
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-47-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-48-1.png)
 
 ``` r
 # Fit linear models to data
@@ -3081,7 +3228,7 @@ rbind(mean_bias_sr1 %>% mutate(ntwrk_type="protein",bg="AncSR1"),
   scale_y_continuous(limits = c(0,1))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-49-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-50-1.png)
 
 These results show that coevolution increases the time required for the average local bias to decay to equilibrium. This delay implies that the effect of local bias lasts for an extended period of time and as a consequence the probability of conservation should be higher over moderate timescales. To check this we will first run a markov chain on the coevolution networks.
 
@@ -3324,7 +3471,7 @@ rbind(inner_join(pt_sr1_df,pt_sr1_complex_df,by=c("RE","type")) %>% filter(type=
   guides(fill = guide_legend(override.aes = list(shape=21,size=3)))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-53-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-54-1.png)
 
 Virtually all phenotypes are more likely to remain conserved in the coevolution networks after 8 amino acid substitutions. Overall, we see that coevolution extends the influence of local bias on evolutionary outcomes and as a consequence it makes phenotypic diversification less likely to happen.
 
@@ -3441,7 +3588,7 @@ if(ERE_SRE_ONLY){
 p1 + p2
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-54-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-55-1.png)
 
 ``` r
 # compare probability of ERE conservation after 3 and 10 amino acid steps between networks
@@ -3523,7 +3670,7 @@ connect_df %>% filter(neighbor_type == "AA") %>%
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-55-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-56-1.png)
 
 ``` r
 knitr::kable(connect_df %>% filter(neighbor_type == "AA") %>% group_by(bg,ntwrk_type) %>%
@@ -3609,7 +3756,7 @@ pairwise_dists_df %>% ggplot(aes(x=value.x,y=value.y)) +
   guides(fill = guide_legend(override.aes = list(shape=21,size=3)))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-57-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-58-1.png)
 
 As expected, coevolution also pushes phenotypes farther away in the network. Let's now explore the one-mutant neighborhoods around specific genotypes.
 
@@ -3654,7 +3801,7 @@ neutral_neighbors_df %>%
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-59-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-60-1.png)
 
 ``` r
 knitr::kable(neutral_neighbors_df %>% group_by(bg,ntwrk_type) %>%
@@ -3743,7 +3890,7 @@ local_bias_df %>%
 
     ## No summary function supplied, defaulting to `mean_se()`
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-61-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-62-1.png)
 
 ``` r
 knitr::kable(local_bias_df %>% group_by(bg,ntwrk_type) %>%
