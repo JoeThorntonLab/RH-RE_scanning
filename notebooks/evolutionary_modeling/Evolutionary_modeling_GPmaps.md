@@ -151,9 +151,11 @@ if(!file.exists(file.path("..","..","results","evolutionary_modeling","MutSel_ma
               bound_REs = list(RE)) # assign DNA elements bound
   
   # BUILD GENOTYPE NETWORKS #
+  # select the set of funcitonal variants for each DBD background
   sr1_variants <- phenotypes_tbl %>% filter(bg == "AncSR1") %>% pull(AA_var)
   sr2_variants <- phenotypes_tbl %>% filter(bg == "AncSR2") %>% pull(AA_var)
   
+  # buld genotype netwotk under Maynard-Smith's model of sequence space
   net_sr1 <- build_genotype_network(nodes=sr1_variants, type=1, cores=N_CORES)
   net_sr2 <- build_genotype_network(nodes=sr2_variants, type=1, cores=N_CORES)
   
@@ -172,10 +174,10 @@ if(!file.exists(file.path("..","..","results","evolutionary_modeling","MutSel_ma
   
   # Build transition matrices
   adj_mat_count_sr1 <- build_mutation_matrix(sr1_variants,type=3,N_CORES) # adjacency matrix with mutational propensties
-  M_drift_sr1 <- build_transition_matrix_v2(sr1_variants,adj_mat_count_sr1,phenotypes_tbl,MODEL.PARAM_SR1_drift,N_CORES,complex = F)
+  M_drift_sr1 <- build_transition_matrix_v2(sr1_variants,adj_mat_count_sr1,phenotypes_tbl,MODEL.PARAM_SR1_drift,N_CORES,complex = F) # compute P(i,j) for each connected pair
   
   adj_mat_count_sr2 <- build_mutation_matrix(sr2_variants,type=3,N_CORES) # adjacency matrix with mutational propensties
-  M_drift_sr2 <- build_transition_matrix_v2(sr2_variants,adj_mat_count_sr2,phenotypes_tbl,MODEL.PARAM_SR2_drift,N_CORES,complex = F)
+  M_drift_sr2 <- build_transition_matrix_v2(sr2_variants,adj_mat_count_sr2,phenotypes_tbl,MODEL.PARAM_SR2_drift,N_CORES,complex = F) # compute P(i,j) for each connected pair
   
 } else {
   # load matrices if already created
@@ -1021,6 +1023,31 @@ if(SPEC_BINDING){
 
 stopCluster(cl)
 
+# Distribution of bias in outcomes after 3 steps
+lb_3s_df <- data.frame(AA_var = rownames(markov_chain_sr1_3s),b = apply(markov_chain_sr1_3s,1,get_bias,input_freqs=T))
+
+# compute mean outcome bias
+mean_lb_3s <- lb_3s_df %>% with(mean(b))
+
+# plot distribution
+lb_3s_df %>%
+  ggplot(aes(x=b)) + geom_histogram(binwidth = 0.01,col="black",fill="gray65") + 
+  geom_vline(xintercept = mean_lb_3s,linetype="dashed") +
+  theme_classic() +
+  labs(x = "Bias in outcomes after 3 steps", y= "Frequency") +
+  theme(axis.title = element_text(size=13),
+        axis.text = element_text(size=9))
+```
+
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-16-1.png)
+
+``` r
+print(paste("Mean bias in outcomes across genotypes after 3 steps = ",round(mean_lb_3s,2)))
+```
+
+    ## [1] "Mean bias in outcomes across genotypes after 3 steps =  0.79"
+
+``` r
 # Distribution of novel phenotypes that can evolve from each starting genotype after 3 substitutions
 new_pheno_3s_df <- phenotypes_tbl_prot %>% filter(bg=="AncSR1") %>% select(AA_var,specificity) %>% 
   inner_join(.,as_tibble(markov_chain_sr1_3s,rownames = NA) %>% rownames_to_column(var="AA_var"),by="AA_var") %>%
@@ -1048,7 +1075,7 @@ new_pheno_3s_df %>%
         axis.text = element_text(size=9))
 ```
 
-![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-16-1.png)
+![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-16-2.png)
 
 ``` r
 print(paste("Mean number of new phenotypes per genotype = ",round(mean_new_pheno_3s,2)))
@@ -1743,63 +1770,58 @@ functional_effect_df <- full_join(rbind(phenotypes_tbl_prot %>% filter(bg=="AncS
 
 # Summary of functional effects along the branch
 knitr::kable(functional_effect_df %>% 
-  reframe(functional_category = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"),
-          count = table(factor(functional_effect,levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function")))) %>%
-    mutate(total = sum(count),
-           prop = count/total) %>% arrange(desc(prop)) %>% select(-c(count,total)))
+  group_by(category.x,category.y,functional_effect) %>%
+  reframe(count = n()) %>%
+  mutate(total = sum(count),
+         prop = count/total) %>%
+  arrange(desc(prop)) %>% select(-c(count,total)) %>% dplyr::rename(category_AncSR1 = category.x,category_AncSR2 = category.y))
 ```
 
-| functional\_category |          prop|
-|:---------------------|-------------:|
-| Gain function        |  0.9557668458|
-| Loss specificity     |  0.0248036379|
-| Same specificity     |  0.0136420008|
-| Loss function        |  0.0049607276|
-| Gain specificity     |  0.0008267879|
-| Switch specificity   |  0.0000000000|
+| category\_AncSR1 | category\_AncSR2 | functional\_effect |       prop|
+|:-----------------|:-----------------|:-------------------|----------:|
+| Non\_functional  | Specific         | Gain function      |  0.5374122|
+| Non\_functional  | Promiscuous      | Gain function      |  0.4183547|
+| Specific         | Promiscuous      | Loss specificity   |  0.0248036|
+| Specific         | Specific         | Same specificity   |  0.0078545|
+| Promiscuous      | Promiscuous      | Same specificity   |  0.0057875|
+| Specific         | Non\_functional  | Loss function      |  0.0049607|
+| Promiscuous      | Specific         | Gain specificity   |  0.0008268|
 
 ``` r
-# Alluvial plot showing functional effects
-functional_effect_df %>% 
-  group_by(category.x,category.y,functional_effect) %>%
+## barplot for promiscuous + specific genotypes on AncSR2 separated by new/old phenotypes
+REs_spec_sr1 <- data.frame(summary_sr1) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR1 map
+REs_spec_sr2 <- data.frame(summary_sr2) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR2 map
+new_REs_sr2 <- REs_spec_sr2[!(REs_spec_sr2 %in% REs_spec_sr1)] # Phenotypes in AncSR2 and not in AncSR1 (new phenotypes)
+
+
+functional_effect_df %>% filter(category.y != "Non_functional") %>%
+  mutate(phenotype = case_when(specificity.y %in% new_REs_sr2 ~ "New phenotype",
+                                   !(specificity.y %in% new_REs_sr2) & specificity.y != "Promiscuous" ~ "Existing phenotype",
+                                   specificity.y == "Promiscuous" ~ "Promiscuous")) %>%
+  group_by(category.x,category.y,functional_effect,phenotype) %>%
   reframe(count = n()) %>%
   mutate(total = sum(count),
          prop = count/total,
          functional_effect = factor(functional_effect, levels = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"))) %>%
-  arrange(factor(category.x, levels = c("Specific","Promiscuous","Non_functional"))) %>%
- mutate(category.x = forcats::as_factor(category.x)) %>%
-# filter(category.x != "Non_functional") %>%
- mutate(total_functional = sum(count),
-        norm_prop = count / total_functional) %>%
-  ggplot(aes(y=norm_prop, axis1 = category.x, axis2 = category.y)) +
-  ggalluvial::geom_alluvium(aes(fill = functional_effect),width=1/2,color="white") +
-  scale_fill_manual(values = c(hcl.colors(4,rev = T),"gray40")) +
-  ggalluvial::geom_stratum(width = 0.3, color = "white",fill="black") +
-  geom_label(stat = "stratum", aes(label = after_stat(stratum)),size=2.5) +
-  scale_x_discrete(limits = c("AncSR1", "AncSR2"), expand = c(.05, .05)) +
+  arrange(factor(phenotype, levels = c("Existing phenotype","New phenotype","Promiscuous"))) %>%
+  mutate(category.x = forcats::as_factor(category.x)) %>% ungroup() %>%
+  group_by(phenotype) %>%
+  mutate(total_prop = sum(prop),
+         norm_prop = prop/total_prop) %>%
+  ggplot(aes(x=phenotype,y=norm_prop,fill=category.x)) +
+  scale_fill_manual(values=c("gray45","blue","red")) +
+  labs(x="Phenotype class in AncSR2",y="Fraction of RH\ngenotypes in AncSR1",fill="") +
+  geom_rect(xmin = 0.5, xmax = 2.5,   ymin = -0.02, ymax = 1.1, fill = NA,color="black",linetype=2,size=0.2) +
+  annotate("text", x = 1.5, y = 1.05, label = "Specific") +
+  geom_bar(stat="identity",color="black",size=0.3) +
   theme_classic() +
-  labs(x = "",y="Proportion of functional RH genotypes in either background",fill="Functional effect\nfrom AncSR1 to AncSR2") +
-  theme(axis.title = element_text(size=13),
-        axis.text = element_text(size=10))
+  theme(axis.text.x = element_text(size=10,angle = 45,vjust = 1,hjust = 1))
 ```
-
-    ## Warning in to_lodes_form(data = data, axes = axis_ind, discern =
-    ## params$discern): Some strata appear at multiple axes.
-
-    ## Warning in to_lodes_form(data = data, axes = axis_ind, discern =
-    ## params$discern): Some strata appear at multiple axes.
-
-    ## Warning in to_lodes_form(data = data, axes = axis_ind, discern =
-    ## params$discern): Some strata appear at multiple axes.
 
 ![](Evolutionary_modeling_GPmaps_files/figure-markdown_github/unnamed-chunk-25-1.png)
 
 ``` r
-# Where do the new specificity phenotypes come from?
-REs_spec_sr1 <- data.frame(summary_sr1) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR1 map
-REs_spec_sr2 <- data.frame(summary_sr2) %>% rownames_to_column(var="RE") %>% filter(Encoded == T & Specific == T) %>% pull(RE) # phenotypes encoded in AncSR2 map
-new_REs_sr2 <- REs_spec_sr2[!(REs_spec_sr2 %in% REs_spec_sr1)] # new specificity phenotypes
-
+# How are the encoded specificities in the AncSR2 map being generated?
 knitr::kable(functional_effect_df %>% filter(specificity.y %in% union(REs_spec_sr1,REs_spec_sr2)) %>%
   group_by(specificity.y) %>% 
   reframe(functional_category = c("Same specificity","Switch specificity","Gain specificity","Loss specificity","Gain function","Loss function"),
