@@ -5,7 +5,7 @@ Santiago Herrera
 
 This is the workflow for cleaning, assembling and demultiplexing DMS reads based on DBD background, REBC (the synonymous mutations identifying the RE strain), and BBC (FACS bin barcode: enrichment GFP- bin, and four GFP+ bins per experimental replicate).
 
-The Python and R scripts used during the workflow are found in the `scripts/library_processing` folder. The script `DMS_data_processing.sh` is a bash script to run everything on a cluster.
+The Python and R scripts used during the workflow are found in the `scripts/library_processing` folder. The script `DMS_data_processing.sh` is a bash script to run everything on a cluster. The same bash script is used to process sequencing data from NextSeq (Rep1) and NovaSeq (Reps 1-4).
 
     #!/bin/bash
     # Load modules in cluster
@@ -17,13 +17,13 @@ The Python and R scripts used during the workflow are found in the `scripts/libr
 
     # NovaSeq sequencing data
     SEQ_FOLDER=/project/joet1/RH-RE_scanning/data/sequencing/NovaSeq
-    R1_READS=$MAIN_FOLDER/NovaSeq/JT-JP-SHA-1s_S1_R1_001.fastq.gz
-    R2_READS=$MAIN_FOLDER/NovaSeq/JT-JP-SHA-1s_S1_R2_001.fastq.gz
+    R1_READS=$SEQ_FOLDER/NovaSeq/JT-JP-SHA-1s_S1_R1_001.fastq.gz
+    R2_READS=$SEQ_FOLDER/NovaSeq/JT-JP-SHA-1s_S1_R2_001.fastq.gz
 
     # NextSeq sequencing data
     #SEQ_FOLDER=/project/joet1/RH-RE_scanning/data/sequencing/NextSeq
-    #R1_READS=$MAIN_FOLDER/NextSeq/DMS_Rep1_S0_L001_4_R1_001.fastq.gz
-    #R2_READS=$MAIN_FOLDER/NextSeq/DMS_Rep1_S0_L001_4_R2_001.fastq.gz
+    #R1_READS=$SEQ_FOLDER/NextSeq/DMS_Rep1_S0_L001_4_R1_001.fastq.gz
+    #R2_READS=$SEQ_FOLDER/NextSeq/DMS_Rep1_S0_L001_4_R2_001.fastq.gz
 
     cd $SEQ_FOLDER
 
