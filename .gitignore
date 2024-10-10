@@ -16,3 +16,6 @@ results/phenotype_frequency_distributions_final/*
 figures/*
 notebooks/evolutionary_simulations/*
 results/evolutionary_modeling/*
+*/.DS_store
+*/*/.DS_store
+*/.Rhistory
