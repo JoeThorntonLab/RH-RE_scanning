@@ -15,8 +15,8 @@ basedir <- file.path("..", "..")
 
 # check for packages and install any that are missing
 packages <- c("tidyr", "MASS", "ggplot2", "Matrix", "stringr", "tibble", 
-              "patchwork", "foreach", "doParallel", "ggpubr", "viridis",
-              "splines2", "matrixStats", "forcats", "dplyr", "scales")
+              "foreach", "doParallel", "ggpubr", "viridis",
+              "splines2", "matrixStats", "forcats", "dplyr", "scales", "patchwork")
 installed_packages <- packages %in% rownames(installed.packages())
 
 invisible(lapply(paste0('package:', names(sessionInfo()$otherPkgs)), 
@@ -144,7 +144,7 @@ meanF_data %>% filter(!is.na(se_meanF)) %>% filter(type != "control") %>%
   ylab("SE(meanF)")
   
 
-# Gruop complexes by Avg. Min Read Depth (RC) and plot SE(meanF) by n_reps. 
+# Group complexes by Avg. Min Read Depth (RC) and plot SE(meanF) by n_reps. 
 # This shows that complexes with a minimum read count of ~15
 # have a SE(meanF) < 0.1, regardless of the number of replicates. 
 meanF_data %>% filter(!(n_reps==1)) %>% 
@@ -663,6 +663,37 @@ paste("Mean pairwise R^2:",
 paste("Mean pairwise R^2 no rep 4:",
       round(mean(aftersplinecormatactive[1:3, 1:3][upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
 
+# Pairwise Pearson correlation between all replicates after spline correction 
+# and filtering SE <= 0.1
+aftersplinefiltercormat <- meanF_data_corrected %>%
+  filter(se_meanF <= 0.1) %>%
+  filter(RE %in% REs[[1]]) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("After correction and filtering Pearson's R")
+print(aftersplinecormat)
+paste("Mean pairwise R^2:",
+      round(mean(aftersplinecormat[upper.tri(aftersplinecormat)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(aftersplinecormat[1:3, 1:3][
+        upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
+
+# Excluding inactive complexes
+aftersplinefiltercormatactive <- meanF_data_corrected %>%
+  filter(se_meanF <= 0.1) %>%
+  filter(RE %in% REs[[1]]) %>%
+  filter(avg_meanF >= -4) %>%
+  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
+  cor(use = "pairwise.complete.obs")
+paste("After correction and filtering Pearson's R (active variants)")
+print(aftersplinecormatactive)
+paste("Mean pairwise R^2:",
+      round(mean(aftersplinecormatactive[
+        upper.tri(aftersplinecormatactive)]^2), 2))
+paste("Mean pairwise R^2 no rep 4:",
+      round(mean(aftersplinecormatactive[1:3, 1:3][
+        upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
+
 # Plot uncorrected vs. corrected fluorescence between replicates with spline 
 # fits for all complexes (not just those used in fitting).
 r12_before_all <- meanF_data_filter %>%
@@ -707,6 +738,29 @@ r12_after_all <- meanF_data_corrected %>%
                aftersplinecormat[1,2]^2, 2), nsmall = 2))} * ", " * 
                {{italic(r)^2}["">-4]==.(format(round(
                  aftersplinecormatactive[1,2]^2, 2), nsmall = 2))}
+           )),
+           vjust = 1, hjust = 0) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize/1.5))
+
+r12_after_filtered <- meanF_data_corrected %>%
+  filter(se_meanF <= 0.1) %>%
+  ggplot(aes(x = meanF_REP1, y = meanF_REP2)) +
+  geom_bin2d(bins = 100) +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Number of\nvariants", limits = c(1, 45000)) +
+  geom_abline(intercept = 0, slope = 1,col="gray") +
+  geom_hline(yintercept = -4, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = -4, color = "gray", linetype = "dashed") +
+  labs(x = "Replicate 1 fluorescence", y = "Replicate 2 fluorescence",
+       title = "Corrected and filtered") +
+  annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
+           parse = T,
+           label = as.expression(bquote(
+             {italic(r)^2==.(format(round(
+               aftersplinefiltercormat[1,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(
+                 aftersplinefiltercormatactive[1,2]^2, 2), nsmall = 2))}
            )),
            vjust = 1, hjust = 0) +
   theme_classic() +
@@ -759,7 +813,31 @@ r23_after_all <- meanF_data_corrected %>%
   theme_classic() +
   theme(text = element_text(size = fontsize/1.5))
 
-(r12_before_all + r12_after_all) / (r23_before_all + r23_after_all) + 
+r23_after_filtered <- meanF_data_corrected %>%
+  filter(se_meanF <= 0.1) %>%
+  ggplot(aes(x = meanF_REP3, y = meanF_REP2)) +
+  geom_bin2d(bins = 100) +
+  scale_fill_viridis(trans = log10plus1, labels = label_comma(), 
+                     name = "Number of\nvariants", limits = c(1, 45000)) +
+  geom_abline(intercept = 0, slope = 1,col="gray") +
+  geom_hline(yintercept = -4, color = "gray", linetype = "dashed") +
+  geom_vline(xintercept = -4, color = "gray", linetype = "dashed") +
+  labs(x = "Replicate 3 fluorescence", y = "Replicate 2 fluorescence",
+       title = "Corrected and filtered") +
+  annotate(geom = "text", x = -4.6, y = -2.5, size = 6/1.5,
+           parse = T,
+           label = as.expression(bquote(
+             {italic(r)^2==.(format(round(
+               aftersplinefiltercormat[3,2]^2, 2), nsmall = 2))} * ", " * 
+               {{italic(r)^2}["">-4]==.(format(round(
+                 aftersplinefiltercormatactive[3,2]^2, 2), nsmall = 2))}
+           )),
+           vjust = 1, hjust = 0) +
+  theme_classic() +
+  theme(text = element_text(size = fontsize/1.5))
+
+(r12_before_all + r12_after_all + r12_after_filtered) / 
+  (r23_before_all + r23_after_all + r23_after_filtered) + 
   plot_layout(guides = "collect")
 
 # New corrected dataset
@@ -769,34 +847,6 @@ ctls <- meanF_data_corrected %>% filter(type=="control") %>%
 meanF_data_corrected <- meanF_data_corrected %>% filter(se_meanF <= 0.1) 
 # Manually add controls to new dataset
 meanF_data_corrected <- unique(rbind(meanF_data_corrected,ctls)) 
-
-# Pairwise Pearson correlation between all replicates after spline correction
-aftersplinecormat <- meanF_data_corrected %>%
-  filter(RE %in% REs[[1]]) %>%
-  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
-  cor(use = "pairwise.complete.obs")
-paste("After correction and filtering Pearson's R")
-print(aftersplinecormat)
-paste("Mean pairwise R^2:",
-      round(mean(aftersplinecormat[upper.tri(aftersplinecormat)]^2), 2))
-paste("Mean pairwise R^2 no rep 4:",
-      round(mean(aftersplinecormat[1:3, 1:3][
-        upper.tri(aftersplinecormat[1:3,1:3])]^2), 2))
-
-# Excluding inactive complexes
-aftersplinecormatactive <- meanF_data_corrected %>%
-  filter(RE %in% REs[[1]]) %>%
-  filter(avg_meanF >= -4) %>%
-  select(meanF_REP1, meanF_REP2, meanF_REP3, meanF_REP4) %>%
-  cor(use = "pairwise.complete.obs")
-paste("After correction and filtering Pearson's R (active variants)")
-print(aftersplinecormatactive)
-paste("Mean pairwise R^2:",
-      round(mean(aftersplinecormatactive[
-        upper.tri(aftersplinecormatactive)]^2), 2))
-paste("Mean pairwise R^2 no rep 4:",
-      round(mean(aftersplinecormatactive[1:3, 1:3][
-        upper.tri(aftersplinecormatactive[1:3,1:3])]^2), 2))
 ```
 
 
@@ -1024,17 +1074,16 @@ meanF_p %>%
 # same plot but split by protein background and mean read count bin
 meanF_p %>%
   left_join(meanF_cutoffs) %>%
-  mutate(stop = ifelse(stop, "Nonsense", "Not nonsense"),
-         stop = factor(stop, levels = c("Not nonsense", "Nonsense"))) %>%
-  ggplot(aes(x = avg_meanF, fill = stop)) +
-  geom_histogram(binwidth = 0.05, position = "stack", color = "black") +
+  ggplot(aes(x = avg_meanF, fill = sig)) +
+  geom_histogram(binwidth = 0.05, position = "stack") +
   facet_grid(bg ~ rcbin, labeller = label_bquote(cols = .(as.character(rcbin))~reads)) +
-  scale_fill_manual(values = c("white", "gray30")) +
+  scale_fill_manual(values = c("gray50", "turquoise", "red"), 
+                    labels = c("Inactive", "Active", "Nonsense")) +
   scale_y_continuous(trans = log10plus1, 
                      name = "Number of variants + 1", labels = label_log()) +
-  geom_vline(aes(xintercept = minF + 0.05), color = "red", linetype = "dashed") +
-  geom_vline(aes(xintercept = minF - 0.05), color = "red", linetype = "dashed") +
-  geom_vline(aes(xintercept = minF), color = "red") +
+  geom_vline(aes(xintercept = minF + 0.05), color = "black", linetype = "dashed") +
+  geom_vline(aes(xintercept = minF - 0.05), color = "black", linetype = "dashed") +
+  geom_vline(aes(xintercept = minF), color = "black") +
   theme_classic() +
   labs(x = "Fluorescence", fill = "") +
   theme(text = element_text(size = fontsize))

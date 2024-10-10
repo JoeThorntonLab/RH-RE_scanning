@@ -769,31 +769,3 @@ glmnet.large <- function(x, y, family = c("gaussian", "binomial", "poisson",
     fit
 }
 
-
-#######################
-### other functions ###
-#######################
-
-scaled_logistic <- function(x, a, k, L, U) {
-  return(L + (U - L) / (1 + exp(-k*(x-a))))
-}
-
-fit_rescaled_logistic <- function(gs, y, a, k, range) {
-  mse <- matrix(nrow = length(a), ncol = length(k))
-  for(i in 1:length(a)) {
-    for(j in 1:length(k)) {
-      pred_rs <- scaled_logistic(gs, a[i], k[j], range[1], range[2])
-      mse[i,j] <- sum((pred_rs - y)^2)
-    }
-  }
-  return(mse)
-}
-
-
-bc_trans <- function(x, range, lambda, offset) {
-  x <- c(range, x)
-  trans <- boxcox_trans(p = lambda, offset = offset)
-  x_trans <- trans$transform(x)
-  x_trans <- rescale(x_trans, range)[-c(1:2)]
-  return(x_trans)
-}

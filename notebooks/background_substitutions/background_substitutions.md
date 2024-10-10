@@ -34,7 +34,7 @@ to DNA. If the affinity of an RH-RE genotype in the AncSR1 background is
 $K_d$, then its fluorescence $F_1^*$ can be expressed as
 
 $$
-F_1^* = \frac{1}{1 + K_d}
+F_1^* = \frac{1}{1 + \frac{K_d}{[\text{RE}]}}
 $$
 
 where fluorescence is scaled between 0 and 1. If the background
@@ -42,7 +42,7 @@ substitutions modify the affinity of a complex by a factor $\alpha$,
 then fluorescence in the AncSR2 background can be expressed as
 
 $$
-F_2^* = \frac{1}{1 + \alpha K_d}.
+F_2^* = \frac{1}{1 + \alpha \frac{K_d}{[\text{RE}]}}.
 $$
 
 Rearranging to express $F_2^*$ in terms of $F_1^*$ gives
@@ -99,7 +99,8 @@ bgepistasismodeldata <-  meanF_data %>%
          UB_AncSR2 = p.adjust(pupper_AncSR2, method = "fdr") >= 0.1,
          ERE = RE == "ERE (GT)") %>% 
   select(AA_var, RE, F1_norm, F2_norm, se1_norm, se2_norm, ERE, 
-         active_AncSR1, active_AncSR2, UB_AncSR1, UB_AncSR2)
+         active_AncSR1, active_AncSR2, functional_AncSR1, functional_AncSR2,
+         UB_AncSR1, UB_AncSR2)
 ```
 
 Fitting the model. Confidence intervals will be obtained by
@@ -127,7 +128,7 @@ print(bgepistasismodel)
     ##    data: bgepistasismodeldata
     ##   alpha 
     ## 0.01428 
-    ##  vertical residual sum-of-squares: 1756594
+    ##  vertical residual sum-of-squares: 1756502
     ##  orthogonal residual sum-of-squares: 21.24
     ##  FAILED: Only 2618 out of 2627 fitted points are orthogonal.
     ## 
@@ -182,35 +183,29 @@ if(!file.exists(file.path(results_dir, "allREs_bootstrap.rda"))) {
 
 # get 95% confidence intervals
 allREs_95ci <- sort(allREs_bootstrap)[c(25, 976)]
+print(allREs_95ci)
+```
 
-# how many complexes in the dynamic range in AncSR1 are at the upper bound in
-# AncSR2, and how many at the lower bound in AncSR1 are in the dynamic range or
-# upper bound in AncSR2?
+    ## [1] 0.01011056 0.01427637
+
+``` r
+# Of the complexes that are functional in AncSR2, how many are nonfunctional 
+# in AncSR2?
 bgepistasismodeldata <- bgepistasismodeldata %>%
-  mutate(colors = as.numeric(1*(!active_AncSR1 & active_AncSR2) +
-                               2*(active_AncSR1 & !UB_AncSR1 & UB_AncSR2) +
-                               3*(UB_AncSR1 & UB_AncSR2)))
+  mutate(colors = as.numeric(0*(!functional_AncSR1 & !functional_AncSR2) +
+                               1*(functional_AncSR1 & !functional_AncSR2) +
+                               2*(functional_AncSR2 & !functional_AncSR1) +
+                               3*(functional_AncSR2 & functional_AncSR1)))
 bgepistasismodeldata %>%
-  filter(active_AncSR1 & !UB_AncSR1) %>%
+  filter(functional_AncSR2) %>%
   count(colors)
 ```
 
     ## # A tibble: 2 × 2
     ##   colors     n
     ##    <dbl> <int>
-    ## 1      0   277
-    ## 2      2    63
-
-``` r
-bgepistasismodeldata %>%
-  filter(!active_AncSR1) %>%
-  count(colors)
-```
-
-    ## # A tibble: 1 × 2
-    ##   colors     n
-    ##    <dbl> <int>
-    ## 1      1  2281
+    ## 1      2  1343
+    ## 2      3    65
 
 ``` r
 # plot inferred model
@@ -227,9 +222,8 @@ bgepistasismodeldata %>%
     fill = "black", alpha = 0.5) +
   scale_color_manual(values = c("3" = "orange", "2" = "magenta", 
                                 "1" = "blue", "0" = "gray"),
-                     labels = c("UB both", "DR AncSR1, UB AncSR2", 
-                                "LB AncSR1, DR/UB AncSR2", "other"),
-                     name = "") +
+                     labels = c("AncSR1 & AncSR2", "AncSR2", "AncSR1", "Neither"),
+                     name = "Functional") +
   # plot best fit from data
   geom_function(fun = bgepistasisfn,
                 args = list(alpha = coef(bgepistasismodel)),
@@ -241,8 +235,7 @@ bgepistasismodeldata %>%
   geom_hline(yintercept = (AncSR2WT_SRE_data$avg_meanF - AncSR2_UL[1]) / 
                (AncSR2_UL[2] - AncSR2_UL[1]),
              color = "gray40", linetype = "dashed", linewidth = 1)  +
-  labs(x = "Fluorescence in AncSR1 background",
-       y = "Fluorescence in AncSR2 background") +
+  labs(x = "F AncSR1", y = "F AncSR2") +
   xlim(-0.1, 1.1) + ylim(-0.1, 1.1) +
   theme(text = element_text(size = fontsize)) +
   theme_classic()
@@ -253,13 +246,13 @@ bgepistasismodeldata %>%
 ``` r
 # fluorescence histograms
 bgepistasismodeldata %>%
-  mutate(bounds = as.numeric(!active_AncSR1) + as.numeric(2*UB_AncSR1)) %>%
-  mutate(bounds = factor(bounds, levels = c(2, 0, 1))) %>%
-  ggplot(aes(x = F1_norm, fill = bounds)) +
+  arrange(colors) %>%
+  ggplot(aes(x = F1_norm, fill = factor(colors, levels = 3:0))) +
   geom_histogram(color = "black") +
-  scale_fill_manual(values = c("0" = "gray", "1" = "red", "2" = "cyan"),
-                    labels = c("DR", "LB", "UB"),
-                    name = "") +
+  scale_fill_manual(values = c("3" = "orange", "2" = "magenta", 
+                                "1" = "blue", "0" = "gray"),
+                     labels = c("AncSR1 & AncSR2", "AncSR2", "AncSR1", "Neither"),
+                     name = "Functional") +
   scale_y_continuous(breaks = c(0, 500, 1000)) +
   labs(x = "Fluorescence in AncSR1 background") +
   xlim(-0.1, 1.1) +
@@ -271,13 +264,13 @@ bgepistasismodeldata %>%
 
 ``` r
 bgepistasismodeldata %>%
-  mutate(bounds = as.numeric(!active_AncSR2) + as.numeric(2*UB_AncSR2)) %>%
-  mutate(bounds = factor(bounds, levels = c(2, 0, 1))) %>%
-  ggplot(aes(x = F2_norm, fill = bounds)) +
+  arrange(colors) %>%
+  ggplot(aes(x = F2_norm, fill = factor(colors, levels = 3:0))) +
   geom_histogram(color = "black") +
-  scale_fill_manual(values = c("0" = "gray", "1" = "red", "2" = "cyan"),
-                    labels = c("DR", "LB", "UB"),
-                    name = "") +
+  scale_fill_manual(values = c("3" = "orange", "2" = "magenta", 
+                                "1" = "blue", "0" = "gray"),
+                     labels = c("AncSR1 & AncSR2", "AncSR2", "AncSR1", "Neither"),
+                     name = "Functional") +
   scale_y_continuous(breaks = c(0, 100, 200)) +
   labs(x = "Fluorescence in AncSR2 background") +
   xlim(-0.1, 1.1) +
@@ -466,11 +459,11 @@ print(bgepistasismodelnonERE)
     ##    data: filter(bgepistasismodeldata, !ERE)
     ##   alpha 
     ## 0.01011 
-    ##  vertical residual sum-of-squares: 3200764
+    ##  vertical residual sum-of-squares: 3200919
     ##  orthogonal residual sum-of-squares: 8.625
     ##  FAILED: Only 2485 out of 2491 fitted points are orthogonal.
     ## 
-    ## Number of iterations to convergence: 22 
+    ## Number of iterations to convergence: 23 
     ## Achieved convergence tolerance: 1.49e-08
 
 ``` r
@@ -579,8 +572,19 @@ if(!file.exists(file.path(results_dir, "nonERE_ERE_bootstrap.rda"))) {
 
 # get 95% confidence intervals
 nonERE_95ci <- nonERE_ERE_bootstrap[order(nonERE_ERE_bootstrap[,1]),1][c(25, 976)]
-ERE_95ci <- nonERE_ERE_bootstrap[order(nonERE_ERE_bootstrap[,2]),2][c(25, 976)]
+print(nonERE_95ci)
+```
 
+    ## [1] 0.002767241 0.010110565
+
+``` r
+ERE_95ci <- nonERE_ERE_bootstrap[order(nonERE_ERE_bootstrap[,2]),2][c(25, 976)]
+print(ERE_95ci)
+```
+
+    ## [1] 0.1908562 0.7582569
+
+``` r
 # plot inferred models for ERE and non-ERE variants
 bgepistasismodeldata %>%
   arrange(ERE) %>%
@@ -618,70 +622,133 @@ bgepistasismodeldata %>%
 ![](background_substitutions_files/figure-gfm/modelfittingEREspecific-3.png)<!-- -->
 
 Which ERE variants are significantly different from the model prediction
-for both the non-ERE-specific and ERE-specific models? Look for variants
-for which 2\*SE of measurement is outside of the 95% confidence
+for both the non-RE-specific model? Look for variants for which the
+Bonferroni-corrected 95% confidence interval of both the AncSR1 and
+AncSR2 fluorescence measurements are outside of the 95% confidence
 intervals of the model.
 
 ``` r
-# Which ERE variants are significantly outside of the 95% confidence interval 
-# of the non-RE-specific model or ERE-specific model?
-# Look for variants for which 2*SE of fluorescence in both backgrounds is 
-# outside of the bounds of the confidence interval.
-bgepistasismodeldataERE <- bgepistasismodeldata %>%
-  filter(ERE) %>%
+qall <- qnorm(0.025/nrow(bgepistasismodeldata), lower.tail = F)
+
+bgepistasismodeldata <- bgepistasismodeldata %>%
   mutate(allREslower95ciF1 = bgepistasisfninv(F2_norm, allREs_95ci[2]),
          allREsupper95ciF1 = bgepistasisfninv(F2_norm, allREs_95ci[1]),
          allREslower95ciF2 = bgepistasisfn(F1_norm, allREs_95ci[2]),
          allREsupper95ciF2 = bgepistasisfn(F1_norm, allREs_95ci[1]),
-         allREssiglower = (F1_norm - 2*se1_norm > allREslower95ciF1) & 
-           (F2_norm + 2*se2_norm < allREslower95ciF2),
-         allREssighigher = (F1_norm + 2*se1_norm < allREsupper95ciF1) & 
-           (F2_norm - 2*se2_norm > allREslower95ciF2),
-         ERElower95ciF1 = bgepistasisfninv(F2_norm, ERE_95ci[2]),
+         allREssiglower = (F1_norm - qall*se1_norm > allREslower95ciF1) & 
+           (F2_norm + qall*se2_norm < allREslower95ciF2),
+         allREssighigher = (F1_norm + qall*se1_norm < allREsupper95ciF1) & 
+           (F2_norm - qall*se2_norm > allREslower95ciF2))
+
+
+# What fraction of complexes are significantly below the prediction from the
+# non-RE-specific model?
+fraclower <- bgepistasismodeldata %>% 
+  mutate(RE = factor(RE, levels = levels(REs[[6]]))) %>%
+  group_by(RE) %>%
+  count(allREssiglower, .drop = FALSE) %>%
+  mutate(frac = n / sum(n)) %>%
+  filter(allREssiglower) %>%
+  as.data.frame() %>%
+  complete(RE, allREssiglower, fill = list(n = 0, frac = 0))
+fraclower
+```
+
+    ## # A tibble: 16 × 4
+    ##    RE       allREssiglower     n   frac
+    ##    <fct>    <lgl>          <int>  <dbl>
+    ##  1 ERE (GT) TRUE              54 0.397 
+    ##  2 SRE (AA) TRUE              24 0.0484
+    ##  3 AC       TRUE              35 0.147 
+    ##  4 AG       TRUE               4 0.0303
+    ##  5 AT       TRUE              18 0.0536
+    ##  6 CA       TRUE              42 0.0738
+    ##  7 CC       TRUE               6 0.109 
+    ##  8 CG       TRUE              26 0.116 
+    ##  9 CT       TRUE               1 0.0141
+    ## 10 GA       TRUE              16 0.125 
+    ## 11 GC       TRUE               2 0.0606
+    ## 12 GG       TRUE               3 0.136 
+    ## 13 TA       TRUE               3 0.0405
+    ## 14 TC       TRUE               1 0.143 
+    ## 15 TG       TRUE               0 0     
+    ## 16 TT       TRUE               1 0.0127
+
+``` r
+# plot variants that are significantly lower than the non-RE-specific model prediction
+# by RE
+bgepistasismodeldata %>%
+  mutate(RE = factor(RE, levels = levels(REs[[6]]))) %>%
+  arrange(allREssiglower) %>%
+  ggplot(aes(x = F1_norm)) +
+  geom_point(aes(y = F2_norm, color = allREssiglower), size = 2) +
+  facet_wrap(vars(RE), ncol = 4) +
+  # 95% confidence intervals
+  geom_ribbon(data = data.frame(
+    x = seq(0, 1, 0.01),
+    lower = bgepistasisfn(seq(0, 1, 0.01), allREs_95ci[1]),
+    upper = bgepistasisfn(seq(0, 1, 0.01), allREs_95ci[2])),
+    aes(x = x, ymin = lower, ymax = upper),
+    fill = "black", alpha = 0.3) +
+  scale_color_discrete(labels = c("FALSE" = "N.s.", "TRUE" = "Sig. lower"), name = "") +
+  geom_function(fun = bgepistasisfn,
+                args = list(alpha = coef(bgepistasismodel)),
+                color = "black", xlim = c(0, 1), linewidth = 1) +
+  geom_text(aes(label = round(frac, 2)), data = fraclower, x = 1, y = 0,
+    vjust = 0, hjust = 1) +
+  labs(x = "Fluorescence in AncSR1 background",
+       y = "Fluorescence in AncSR2 background") +
+  xlim(-0.1, 1.1) + ylim(-0.1, 1.1) +
+  theme(text = element_text(size = fontsize)) +
+  theme_classic()
+```
+
+![](background_substitutions_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+
+Which variants are significantly different from the model prediction for
+both the ERE-specific models? Look for variants for which the
+Bonferroni-corrected 95% confidence interval of both the AncSR1 and
+AncSR2 fluorescence measurements are outside the 95% confidence
+intervals of the model.
+
+``` r
+qERE <- qnorm(0.025/sum(bgepistasismodeldata$ERE), lower.tail = F)
+qnonERE <- qnorm(0.025/sum(!bgepistasismodeldata$ERE), lower.tail = F)
+
+bgepistasismodeldataERE <- bgepistasismodeldata %>%
+  filter(ERE) %>%
+  mutate(ERElower95ciF1 = bgepistasisfninv(F2_norm, ERE_95ci[2]),
          EREupper95ciF1 = bgepistasisfninv(F2_norm, ERE_95ci[1]),
          ERElower95ciF2 = bgepistasisfn(F1_norm, ERE_95ci[2]),
          EREupper95ciF2 = bgepistasisfn(F1_norm, ERE_95ci[1]),
-         EREsiglower = (F1_norm - 2*se1_norm > ERElower95ciF1) & 
-           (F2_norm + 2*se2_norm < ERElower95ciF2),
-         EREsighigher = (F1_norm + 2*se1_norm < EREupper95ciF1) & 
-           (F2_norm - 2*se2_norm > EREupper95ciF2))
+         EREsiglower = (F1_norm - qERE*se1_norm > ERElower95ciF1) & 
+           (F2_norm + qERE*se2_norm < ERElower95ciF2),
+         EREsighigher = (F1_norm + qERE*se1_norm < EREupper95ciF1) & 
+           (F2_norm - qERE*se2_norm > EREupper95ciF2))
 
-# What fraction of ERE complexes are significantly below the prediction from the
-# non-ERE-specific model?
-bgepistasismodeldataERE %>% 
-  count(allREssiglower) %>%
-  mutate(frac = n / sum(n))
-```
+bgepistasismodeldatanonERE <- bgepistasismodeldata %>%
+  filter(!ERE) %>%
+  mutate(nonERElower95ciF1 = bgepistasisfninv(F2_norm, nonERE_95ci[2]),
+         nonEREupper95ciF1 = bgepistasisfninv(F2_norm, nonERE_95ci[1]),
+         nonERElower95ciF2 = bgepistasisfn(F1_norm, nonERE_95ci[2]),
+         nonEREupper95ciF2 = bgepistasisfn(F1_norm, nonERE_95ci[1]),
+         nonEREsiglower = (F1_norm - qnonERE*se1_norm > nonERElower95ciF1) & 
+           (F2_norm + qnonERE*se2_norm < nonERElower95ciF2),
+         nonEREsighigher = (F1_norm + qnonERE*se1_norm < nonEREupper95ciF1) & 
+           (F2_norm - qnonERE*se2_norm > nonEREupper95ciF2))
 
-    ## # A tibble: 2 × 3
-    ##   allREssiglower     n  frac
-    ##   <lgl>          <int> <dbl>
-    ## 1 FALSE             49 0.360
-    ## 2 TRUE              87 0.640
-
-``` r
-# What fraction of ERE complexes are significantly different from the ERE-
-# specific model prediction?
-bgepistasismodeldataERE %>%
-  mutate(sig = EREsiglower | EREsighigher) %>%
-  count(sig)
-```
-
-    ## # A tibble: 2 × 2
-    ##   sig       n
-    ##   <lgl> <int>
-    ## 1 FALSE    65
-    ## 2 TRUE     71
-
-``` r
-# plot inferred models for ERE and non-ERE variants
-bgepistasismodeldata %>%
-  left_join(select(bgepistasismodeldataERE, AA_var, RE, EREsiglower, EREsighigher)) %>% 
-  replace_na(list(EREsiglower = FALSE, EREsighigher = FALSE)) %>%
-  mutate(sig = EREsiglower | EREsighigher) %>%
+# plot inferred models for ERE and non-ERE variants, with non-ERE variants
+# that are significantly different from the non-ERE-specific prediction shown as
+# triangles
+bgepistasismodeldatanonERE %>%
+  mutate(sig = nonEREsiglower | nonEREsighigher) %>%
+  select(AA_var, RE, ERE, F1_norm, F2_norm, sig) %>%
+  bind_rows(bgepistasismodeldataERE %>%
+              mutate(sig = EREsiglower | EREsighigher) %>%
+              select(AA_var, RE, ERE, F1_norm, F2_norm, sig)) %>% 
   arrange(ERE) %>%
   ggplot(aes(x = F1_norm)) +
-  geom_point(aes(y = F2_norm, color = ERE, shape = sig), size = 2) +
+  geom_point(aes(y = F2_norm, color = ERE), size = 2) +
   # 95% confidence intervals
   geom_ribbon(data = data.frame(
     x = seq(0, 1, 0.01),
@@ -694,18 +761,15 @@ bgepistasismodeldata %>%
     lower = bgepistasisfn(seq(0, 1, 0.01), ERE_95ci[1]),
     upper = bgepistasisfn(seq(0, 1, 0.01), ERE_95ci[2])),
     aes(x = x, ymin = lower, ymax = upper),
-    fill = "purple2", alpha = 0.3) +
-  scale_color_manual(labels = c("FALSE" = "No", "TRUE" = "Yes"), 
-                     values = c("gray", "purple2"), name = "ERE") +
-  scale_shape_discrete(labels = c("FALSE" = "No",
-                                  "TRUE" = "Yes"),
-                       name = "Specific epistasis") +
+    fill = RE_color[1], alpha = 0.3) +
+  scale_color_manual(labels = c("FALSE" = "Non-ERE", "TRUE" = "ERE"), 
+                     values = as.character(c("gray", RE_color[1])), name = "") +
   geom_function(fun = bgepistasisfn,
                 args = list(alpha = coef(bgepistasismodelnonERE)),
                 color = "black", xlim = c(0, 1), linewidth = 1) +
   geom_function(fun = bgepistasisfn,
                 args = list(alpha = coef(bgepistasismodelERE)),
-                color = "purple2", xlim = c(0, 1), linewidth = 1) +
+                color = RE_color[1], xlim = c(0, 1), linewidth = 1) +
   labs(x = "Fluorescence in AncSR1 background",
        y = "Fluorescence in AncSR2 background") +
   xlim(-0.1, 1.1) + ylim(-0.1, 1.1) +
@@ -713,23 +777,29 @@ bgepistasismodeldata %>%
   theme_classic()
 ```
 
-![](background_substitutions_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
+![](background_substitutions_files/figure-gfm/unnamed-chunk-2-1.png)<!-- -->
+
+Which variants are significantly different from either the ERE-specific
+or non-ERE-specific model predictions? Look for variants for which the
+Bonferroni-corrected 95% confidence interval of both the AncSR1 and
+AncSR2 fluorescence measurements are outside the 95% confidence
+intervals of the model.
 
 ``` r
-# logo plots of ERE-binders with significantly different than predicted 
-# fluorescence in AncSR2 from the ERE-specific model
-EREepistasislogo <- list("ERE binders with specific\nnegative interactions\nwith background substitutions" = 
-                          bgepistasismodeldataERE %>%
-                          filter(EREsiglower) %>%
-                          pull(AA_var) %>% as.character(),
-                        "ERE binders with specific\npositive interactions\nwith background substitutions" = 
-                          bgepistasismodeldataERE %>%
-                          filter(EREsighigher) %>%
-                          pull(AA_var) %>% as.character()) %>%
+epistasislogo <- list("Specific negative interactions\nwith background substitutions" = 
+                          c(bgepistasismodeldatanonERE %>% filter(nonEREsiglower) %>%
+                              pull(AA_var) %>% as.character(),
+                            bgepistasismodeldataERE %>% filter(EREsiglower) %>% 
+                              pull(AA_var) %>% as.character()),
+                        "Specific positive interactions\nwith background substitutions" = 
+                          c(bgepistasismodeldatanonERE %>% filter(nonEREsighigher) %>%
+                              pull(AA_var) %>% as.character(),
+                            bgepistasismodeldataERE %>% filter(EREsighigher) %>% 
+                              pull(AA_var) %>% as.character())) %>%
   ggseqlogo(method = "probability") +
   xlab("RH site") +
   theme(legend.position = "none")
-EREepistasislogo
+epistasislogo
 ```
 
-![](background_substitutions_files/figure-gfm/unnamed-chunk-1-2.png)<!-- -->
+![](background_substitutions_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
