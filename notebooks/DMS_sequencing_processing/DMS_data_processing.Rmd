@@ -219,7 +219,18 @@ knitr::kable(bc_next %>% mutate(site=row_number()) %>% filter(site %in% c(55:60,
 
 This shows that the libraries seem to have a good quality based on the sample of reads analyzed.
 
-Finally, we will do the demultiplexing of the reads into libraries by background, REBC and BBC.
+Finally, we will do the demultiplexing of the reads into libraries by background, REBC and BRBC.
+
+There are a total of 992 files that we need to demultiplex for th NovaSeq dataset:
+- Binned sorting: 2 DBD backgrounds x 16 REBC x 16 BRBC = 512 files
+- Debulk sorting: 2 DBD backgrounds x 16 REBC + 8 're-do libs' = 40 files
+- Spike-in isogenics: 3 isogenic x 16 BRBC + 2 isogenic x 4 BRBC = 56 files
+- Spike-in minilibraries: 2 DBD backgrounds x 16 REBC x 12 BRBC = 384 files
+
+There are a total of 260 files that we need to demultiplex for th NextSeq dataset:
+- Binned sorting: 2 DBD backgrounds x 16 REBC x 4 BRBC = 128 files
+- Spike-in isogenics: 1 isogenic x 4 BRBC = 4 files
+- Spike-in minilibraries: 2 DBD backgrounds x 16 REBC x 4 BRBC = 128 files
 
 ```
 ## Step 5: Split main assembled file into smaller files for demultiplex
