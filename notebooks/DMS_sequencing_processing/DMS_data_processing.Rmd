@@ -41,18 +41,18 @@ module load R
 
 # NovaSeq sequencing data
 SEQ_FOLDER=/project/joet1/RH-RE_scanning/data/sequencing/NovaSeq
-R1_READS=$SEQ_FOLDER/NovaSeq/JT-JP-SHA-1s_S1_R1_001.fastq.gz
-R2_READS=$SEQ_FOLDER/NovaSeq/JT-JP-SHA-1s_S1_R2_001.fastq.gz
+R1_READS=JT-JP-SHA-1s_S1_R1_001.fastq.gz
+R2_READS=JT-JP-SHA-1s_S1_R2_001.fastq.gz
 
 # NextSeq sequencing data
 #SEQ_FOLDER=/project/joet1/RH-RE_scanning/data/sequencing/NextSeq
-#R1_READS=$SEQ_FOLDER/NextSeq/DMS_Rep1_S0_L001_4_R1_001.fastq.gz
-#R2_READS=$SEQ_FOLDER/NextSeq/DMS_Rep1_S0_L001_4_R2_001.fastq.gz
+#R1_READS=DMS_Rep1_S0_L001_4_R1_001.fastq.gz
+#R2_READS=DMS_Rep1_S0_L001_4_R2_001.fastq.gz
 
 cd $SEQ_FOLDER
 ```
 
-First, we will check how many sequencing reads we got. Replicate 1 binned sort libraries were sequenced on NextSeq High Output run. The remaining libraries were sequenced on a NovaSeq S1 2 x 100bp flow cell. We used standard read primers and 86 cycles for read 1 and 80 cycles for read 2. This enabled us to sequence through almost the entire scanning and RE barcode region (short one nucleotide for read 2) in both directions (forward: R1 and reverse: R2).
+First, we will check how many sequencing reads we got. Replicate 1 binned sort libraries were sequenced on NextSeq High Output run. The remaining libraries were sequenced on a NovaSeq S1 2 x 100bp flow cell. We used standard read primers and 86 cycles for read 1 and 80 cycles for read 2. This enabled us to sequence through almost the entire scanning and RE barcode region (short one nucleotide for read 2) in both directions (forward R1 and reverse R2).
 
 ```
 ## Step 1: Check quality statistics of the fastq files
