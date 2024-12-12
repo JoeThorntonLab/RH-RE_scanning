@@ -1,5 +1,5 @@
 # RH-RE_scanning
-Combinatorial deep mutational scanning of ancestral steroid receptor recognition helices and their associated DNA response elements
+Scripts for Herrera-Álvarez, Patton & Thornton, The genotype-phenotype map biased the functional evolution of a protein family. Large data files can be accessed at http://users.rcc.uchicago.edu/~joet1/RH-RE_scanning/
 
 The diagram below depicts the organization of the GitHub project:
 
