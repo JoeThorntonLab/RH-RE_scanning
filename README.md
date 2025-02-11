@@ -1,5 +1,5 @@
 # RH-RE_scanning
-Scripts for Herrera-Álvarez, Patton & Thornton, *The genotype-phenotype map biased the functional evolution of a protein family*.
+Scripts for Herrera-Álvarez, Patton & Thornton, *Ancient biases in phenotype production drove the functional evolution of a protein family*.
 
 The diagram below depicts the organization of the GitHub project:
 
